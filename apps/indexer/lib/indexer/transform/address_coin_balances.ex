@@ -6,6 +6,9 @@ defmodule Indexer.Transform.AddressCoinBalances do
 
   alias Explorer.Chain.TokenTransfer
 
+  @native_token_address System.get_env("NATIVE_TOKEN_ADDRESS")
+
+
   def params_set(%{} = import_options) do
     Enum.reduce(import_options, MapSet.new(), &reducer/2)
   end
@@ -29,11 +32,16 @@ defmodule Indexer.Transform.AddressCoinBalances do
   defp reducer({:logs_params, logs_params}, acc) when is_list(logs_params) do
     # a log MUST have address_hash and block_number
     logs_params
-    |> Enum.reject(
-      &(&1.first_topic == TokenTransfer.constant() or
-          &1.first_topic == TokenTransfer.erc1155_single_transfer_signature() or
-          &1.first_topic == TokenTransfer.erc1155_batch_transfer_signature())
-    )
+  |> Enum.reject(
+       &(
+         (
+           (&1.first_topic == TokenTransfer.constant() or
+            &1.first_topic == TokenTransfer.erc1155_single_transfer_signature() or
+            &1.first_topic == TokenTransfer.erc1155_batch_transfer_signature())
+           and &1.address_hash != @native_token_address
+         )
+       )
+     )
     |> Enum.into(acc, fn
       %{address_hash: address_hash, block_number: block_number}
       when is_binary(address_hash) and is_integer(block_number) ->
