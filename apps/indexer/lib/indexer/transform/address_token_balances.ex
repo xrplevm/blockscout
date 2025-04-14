@@ -44,7 +44,6 @@ defmodule Indexer.Transform.AddressTokenBalances do
                                  block_number: block_number,
                                  from_address_hash: from_address,
                                  to_address_hash: to_address,
-                                 value: amount
                                },
                                acc ->
       # For your native token, assume its token_contract_address is your known native ERC-20 token.
