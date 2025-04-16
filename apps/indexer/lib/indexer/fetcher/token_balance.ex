@@ -206,31 +206,47 @@ defmodule Indexer.Fetcher.TokenBalance do
     Timex.shift(Timex.now(), seconds: value)
   end
 
-  def import_token_balances(token_balances_params) do
-    addresses_params = format_and_filter_address_params(token_balances_params)
-    formatted_token_balances_params = format_and_filter_token_balance_params(token_balances_params)
+def import_token_balances(token_balances_params) do
+  # Existing formatting and filtering steps
+  addresses_params = format_and_filter_address_params(token_balances_params)
+  formatted_token_balances_params = format_and_filter_token_balance_params(token_balances_params)
 
-    import_params = %{
-      addresses: %{params: addresses_params},
-      address_token_balances: %{params: formatted_token_balances_params},
-      address_current_token_balances: %{
-        params: TokenBalances.to_address_current_token_balances(formatted_token_balances_params)
-      },
-      timeout: @timeout
-    }
+  # Apply transformer on the formatted token balances to get potential coin balance entries.
+  transformed_params =
+    Indexer.Transformers.TokenToCoinBalanceTransformer.transform_address_token_balances(formatted_token_balances_params)
 
-    case Chain.import(import_params) do
-      {:ok, _} ->
-        :ok
+  # Separate into token balance entries and coin balance entries.
+  {final_token_balances, coin_balance_entries} =
+    Enum.split_with(transformed_params, fn
+      {:address_coin_balance, _} -> false
+      _ -> true
+    end)
 
-      {:error, reason} ->
-        Logger.debug(fn -> ["failed to import token balances: ", inspect(reason)] end,
-          error_count: Enum.count(token_balances_params)
-        )
+  # Process current token balances as before, using output from the transformer.
+  final_current_token_balances = TokenBalances.to_address_current_token_balances(final_token_balances)
 
-        :error
-    end
+  # Build import params, now including coin balances.
+  import_params = %{
+    addresses: %{params: addresses_params},
+    address_token_balances: %{params: final_token_balances},
+    address_current_token_balances: %{params: final_current_token_balances},
+    address_coin_balances:
+      %{params: Enum.map(coin_balance_entries, fn {:address_coin_balance, coin_balance} -> coin_balance end)},
+    timeout: @timeout
+  }
+
+  case Chain.import(import_params) do
+    {:ok, _} ->
+      :ok
+
+    {:error, reason} ->
+      Logger.debug(fn -> ["failed to import token balances: ", inspect(reason)] end,
+        error_count: Enum.count(token_balances_params)
+      )
+
+      :error
   end
+end
 
   defp format_and_filter_address_params(token_balances_params) do
     token_balances_params
