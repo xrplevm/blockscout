@@ -6,8 +6,6 @@ defmodule Indexer.Transform.AddressCoinBalances do
 
   alias Explorer.Chain.TokenTransfer
 
-  @native_token_address System.get_env("NATIVE_TOKEN_ADDRESS")
-
 
   def params_set(%{} = import_options) do
     Enum.reduce(import_options, MapSet.new(), &reducer/2)
@@ -35,10 +33,9 @@ defmodule Indexer.Transform.AddressCoinBalances do
   |> Enum.reject(
        &(
          (
-           (&1.first_topic == TokenTransfer.constant() or
+           &1.first_topic == TokenTransfer.constant() or
             &1.first_topic == TokenTransfer.erc1155_single_transfer_signature() or
-            &1.first_topic == TokenTransfer.erc1155_batch_transfer_signature())
-           and &1.address_hash != @native_token_address
+            &1.first_topic == TokenTransfer.erc1155_batch_transfer_signature()
          )
        )
      )

@@ -203,7 +203,7 @@ initialize_db() {
 
 # Define the compile subroutine
 compile() {
-    mix compile
+    MIX_DEBUG=1 mix compile
 }
 
 # Define the recompile subroutine

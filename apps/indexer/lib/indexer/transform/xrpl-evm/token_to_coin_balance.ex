@@ -1,6 +1,4 @@
 defmodule Indexer.Transformers.TokenToCoinBalanceTransformer do
-  alias Explorer.Chain.AddressCoinBalance
-  alias Indexer.Constants
 
   @doc """
   Transforms changes to `address_token_balances` into changes for `address_coin_balances`
