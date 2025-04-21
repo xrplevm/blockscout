@@ -13,6 +13,8 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
   alias Explorer.Chain.Hash
   alias Indexer.BufferedTask
   alias Indexer.TokenBalances
+  alias Indexer.Transformers.CoinToTokenBalanceTransformer
+
 
   @doc false
   # credo:disable-for-next-line Credo.Check.Design.DuplicatedCode
@@ -103,34 +105,24 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
     json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
     importable_balances_daily_params = balances_daily_params(params_list, json_rpc_named_arguments)
     addresses_params = balances_params_to_address_params(importable_balances_params)
-    native_token_address = System.get_env("NATIVE_TOKEN_ADDRESS")
 
-    token_type =
-      case native_token_address do
-        nil -> "erc20"
-        _ ->
-          {:ok, address_struct} = Hash.Address.cast(native_token_address)
-          Chain.get_token_type(address_struct) || "erc20"
-      end
+    # Transform coin balances to also produce token balances for the native token
+    transformed_params = CoinToTokenBalanceTransformer.transform_address_coin_balances(importable_balances_params)
+
+    {final_coin_balances, token_balance_entries} =
+      Enum.split_with(transformed_params, fn
+        {:address_token_balance, _} -> false
+        _ -> true
+      end)
 
     token_balance_params =
-      Enum.map(importable_balances_params, fn %{address_hash: address_hash, value: value, block_number: block_number} ->
-        %{
-          token_contract_address_hash: native_token_address,
-          address_hash: address_hash,
-          block_number: block_number,
-          value: value,
-          token_type: token_type,
-          token_id: 0,
-          value_fetched_at: value_fetched_at
-        }
-      end)
+      Enum.map(token_balance_entries, fn {:address_token_balance, token_balance} -> token_balance end)
 
     current_token_balance_params = TokenBalances.to_address_current_token_balances(token_balance_params)
 
     Chain.import(%{
       addresses: %{params: addresses_params, with: :balance_changeset},
-      address_coin_balances: %{params: importable_balances_params},
+      address_coin_balances: %{params: final_coin_balances},
       address_coin_balances_daily: %{params: importable_balances_daily_params},
       address_token_balances: %{params: token_balance_params},
       address_current_token_balances: %{params: current_token_balance_params},
