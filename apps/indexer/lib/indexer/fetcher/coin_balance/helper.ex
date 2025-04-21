@@ -12,6 +12,7 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
   alias Explorer.Chain.Cache.{Accounts, BlockNumber}
   alias Explorer.Chain.Hash
   alias Indexer.BufferedTask
+  alias Indexer.TokenBalances
 
   @doc false
   # credo:disable-for-next-line Credo.Check.Design.DuplicatedCode
@@ -93,24 +94,51 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
     end)
   end
 
+
+
   def import_fetched_balances(params_list, broadcast_type \\ false) do
     value_fetched_at = DateTime.utc_now()
 
     importable_balances_params = Enum.map(params_list, &Map.put(&1, :value_fetched_at, value_fetched_at))
-
     json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
-
     importable_balances_daily_params = balances_daily_params(params_list, json_rpc_named_arguments)
-
     addresses_params = balances_params_to_address_params(importable_balances_params)
+    native_token_address = System.get_env("NATIVE_TOKEN_ADDRESS")
+
+    token_type =
+      case native_token_address do
+        nil -> "erc20"
+        _ ->
+          {:ok, address_struct} = Hash.Address.cast(native_token_address)
+          Chain.get_token_type(address_struct) || "erc20"
+      end
+
+    token_balance_params =
+      Enum.map(importable_balances_params, fn %{address_hash: address_hash, value: value, block_number: block_number} ->
+        %{
+          token_contract_address_hash: native_token_address,
+          address_hash: address_hash,
+          block_number: block_number,
+          value: value,
+          token_type: token_type,
+          token_id: 0,
+          value_fetched_at: value_fetched_at
+        }
+      end)
+
+    current_token_balance_params = TokenBalances.to_address_current_token_balances(token_balance_params)
 
     Chain.import(%{
       addresses: %{params: addresses_params, with: :balance_changeset},
       address_coin_balances: %{params: importable_balances_params},
       address_coin_balances_daily: %{params: importable_balances_daily_params},
+      address_token_balances: %{params: token_balance_params},
+      address_current_token_balances: %{params: current_token_balance_params},
       broadcast: broadcast_type
     })
   end
+
+
 
   def import_fetched_daily_balances(params_list, broadcast_type \\ false) do
     value_fetched_at = DateTime.utc_now()
