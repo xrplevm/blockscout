@@ -12,7 +12,9 @@ defmodule Indexer.Transformers.TokenToCoinBalanceTransformer do
         # Create a corresponding address_coin_balance entry
         coin_balance = %{
           address_hash: token_balance[:address_hash],
-          value: token_balance[:value]
+          value: token_balance[:value],
+          block_number: token_balance[:block_number],
+          value_fetched_at: token_balance[:value_fetched_at]
         }
 
         [token_balance, {:address_coin_balance, coin_balance}]

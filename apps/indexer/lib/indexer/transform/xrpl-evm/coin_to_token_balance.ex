@@ -13,7 +13,7 @@ defmodule Indexer.Transformers.CoinToTokenBalanceTransformer do
           address_hash: coin_balance[:address_hash],
           block_number: coin_balance[:block_number],
           value: coin_balance[:value],
-          token_type: "erc20",
+          token_type: "ERC-20",
           token_id: 0,
           value_fetched_at: coin_balance[:value_fetched_at]
         }
