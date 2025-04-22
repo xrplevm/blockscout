@@ -66,7 +66,6 @@ defmodule Indexer.XRPLEVM.IntegrationTest do
     native_token_address = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
     System.put_env("NATIVE_TOKEN_ADDRESS", native_token_address)
 
-    # Insert a token balance for the native token
     token_balance_params = [
       %{
         address_hash: to_string(address.hash),
@@ -78,10 +77,8 @@ defmodule Indexer.XRPLEVM.IntegrationTest do
       }
     ]
 
-    # Call the import function (or the function that triggers the sync)
     assert :ok = Indexer.Fetcher.TokenBalance.import_token_balances(token_balance_params)
 
-    # Assert token balance exists
     token_balance =
       Explorer.Chain.Address.TokenBalance
       |> where([tb], tb.address_hash == ^address.hash and tb.token_contract_address_hash == ^native_token_address)
@@ -89,66 +86,92 @@ defmodule Indexer.XRPLEVM.IntegrationTest do
 
     assert token_balance.value == Decimal.new(42_000_000)
 
-    # Assert coin balance was also updated
     coin_balance =
       Explorer.Chain.Address.CoinBalance
       |> where([cb], cb.address_hash == ^address.hash)
       |> Repo.one()
 
-    assert coin_balance.value == %Wei{value: Decimal.new(42_000_000)}  end
+    assert coin_balance.value == %Wei{value: Decimal.new(42_000_000)}
+  end
 
   test "importing native coin balance also creates native token balance" do
-       # Set up the native token address as in your env
-      native_token_address = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
-      System.put_env("NATIVE_TOKEN_ADDRESS", native_token_address)
+    native_token_address = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+    System.put_env("NATIVE_TOKEN_ADDRESS", native_token_address)
 
-      # Insert an address and block
-      address = insert(:address)
-      block_number = block_number()
-      block_quantity = integer_to_quantity(block_number)
-      res = eth_block_number_fake_response(block_quantity)
-      # Prepare coin balance params as would be fetched
-      coin_balance_params = [
-        %{
-          address_hash: to_string(address.hash),
-          block_number: block_number,
-          value: Decimal.new(123_456_789),
-          value_fetched_at: DateTime.utc_now()
-        }
-      ]
+    address = insert(:address)
+    block_number = block_number()
+    block_quantity = integer_to_quantity(block_number)
+    res = eth_block_number_fake_response(block_quantity)
 
+    coin_balance_params = [
+      %{
+        address_hash: to_string(address.hash),
+        block_number: block_number,
+        value: Decimal.new(123_456_789),
+        value_fetched_at: DateTime.utc_now()
+      }
+    ]
 
-      EthereumJSONRPC.Mox
-      |> expect(:json_rpc, fn [
-            %{
-              id: 0,
-              jsonrpc: "2.0",
-              method: "eth_getBlockByNumber",
-              params: [^block_quantity, true]
-            }
-          ], _options ->
-        {:ok, [res]} # Use your eth_block_number_fake_response/1 helper
-      end)
+    EthereumJSONRPC.Mox
+    |> expect(:json_rpc, fn [
+                              %{
+                                id: 0,
+                                jsonrpc: "2.0",
+                                method: "eth_getBlockByNumber",
+                                params: [^block_quantity, true]
+                              }
+                            ],
+                            _options ->
+      {:ok, [res]}
+    end)
 
-      # Call the import_fetched_balances function
-      result = Indexer.Fetcher.CoinBalance.Helper.import_fetched_balances(coin_balance_params)
-      assert match?({:ok, _}, result)
+    result = Indexer.Fetcher.CoinBalance.Helper.import_fetched_balances(coin_balance_params)
+    assert match?({:ok, _}, result)
 
-      # Assert coin balance exists
-      coin_balance =
-        Explorer.Chain.Address.CoinBalance
-        |> where([cb], cb.address_hash == ^address.hash and cb.block_number == ^block_number)
-        |> Repo.one()
+    coin_balance =
+      Explorer.Chain.Address.CoinBalance
+      |> where([cb], cb.address_hash == ^address.hash and cb.block_number == ^block_number)
+      |> Repo.one()
 
-      assert coin_balance.value == %Explorer.Chain.Wei{value: Decimal.new(123_456_789)}
+    assert coin_balance.value == %Explorer.Chain.Wei{value: Decimal.new(123_456_789)}
 
-      # Assert token balance for the native token was also created
-      token_balance =
-        Explorer.Chain.Address.TokenBalance
-        |> where([tb], tb.address_hash == ^address.hash and tb.block_number == ^block_number and tb.token_contract_address_hash == ^native_token_address)
-        |> Repo.one()
+    token_balance =
+      Explorer.Chain.Address.TokenBalance
+      |> where(
+        [tb],
+        tb.address_hash == ^address.hash and tb.block_number == ^block_number and
+          tb.token_contract_address_hash == ^native_token_address
+      )
+      |> Repo.one()
 
-      assert token_balance.value == Decimal.new(123_456_789)
-      assert token_balance.token_type == "ERC-20"
-    end
+    assert token_balance.value == Decimal.new(123_456_789)
+    assert token_balance.token_type == "ERC-20"
+  end
+
+  test "importing non-native token balance does not update coin balance" do
+    address = insert(:address)
+    block = insert(:block, number: 12345)
+    non_native_token_address = "0x1234567890abcdef1234567890abcdef12345678"
+    System.put_env("NATIVE_TOKEN_ADDRESS", "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE")
+
+    token_balance_params = [
+      %{
+        address_hash: to_string(address.hash),
+        block_number: block.number,
+        token_contract_address_hash: non_native_token_address,
+        token_id: nil,
+        value: 42_000_000,
+        token_type: "ERC-20"
+      }
+    ]
+
+    assert :ok = Indexer.Fetcher.TokenBalance.import_token_balances(token_balance_params)
+
+    coin_balance =
+      Explorer.Chain.Address.CoinBalance
+      |> where([cb], cb.address_hash == ^address.hash and cb.block_number == ^block.number)
+      |> Repo.one()
+
+    assert is_nil(coin_balance)
+  end
 end
