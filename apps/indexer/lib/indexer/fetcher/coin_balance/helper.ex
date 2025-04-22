@@ -219,7 +219,7 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
     end)
   end
 
-  defp balances_daily_params(params_list, json_rpc_named_arguments) do
+  def balances_daily_params(params_list, json_rpc_named_arguments) do
     block_timestamp_map = block_timestamp_map(params_list, json_rpc_named_arguments)
 
     params_list

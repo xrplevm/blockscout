@@ -25,6 +25,8 @@ defmodule Indexer.Fetcher.TokenBalance do
   alias Indexer.{BufferedTask, TokenBalances, Tracer}
   alias Indexer.Fetcher.TokenBalance.Supervisor, as: TokenBalanceSupervisor
 
+  import Indexer.Fetcher.CoinBalance.Helper, only: [balances_daily_params: 2]
+
   @behaviour BufferedTask
 
   @default_max_batch_size 100
@@ -227,14 +229,19 @@ defmodule Indexer.Fetcher.TokenBalance do
     # Process current token balances as before, using output from the transformer.
     final_current_token_balances = TokenBalances.to_address_current_token_balances(final_token_balances)
 
+    coin_balance_params =
+      Enum.map(coin_balance_entries, fn {:address_coin_balance, coin_balance} -> coin_balance end)
+
+    json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
+    importable_balances_daily_params = balances_daily_params(coin_balance_params, json_rpc_named_arguments)
+
     # Build import params, now including coin balances.
     import_params = %{
-      addresses: %{params: addresses_params},
+      addresses: %{params: addresses_params, with: :balance_changeset},
       address_token_balances: %{params: final_token_balances},
       address_current_token_balances: %{params: final_current_token_balances},
-      address_coin_balances: %{
-        params: Enum.map(coin_balance_entries, fn {:address_coin_balance, coin_balance} -> coin_balance end)
-      },
+      address_coin_balances: %{params: coin_balance_params},
+      address_coin_balances_daily: %{params: importable_balances_daily_params},
       timeout: @timeout
     }
 
@@ -253,8 +260,12 @@ defmodule Indexer.Fetcher.TokenBalance do
 
   defp format_and_filter_address_params(token_balances_params) do
     token_balances_params
-    |> Enum.map(&%{hash: &1.address_hash})
-    |> Enum.uniq()
+    |> Enum.group_by(& &1.address_hash)
+    |> Map.values()
+    |> Stream.map(&Enum.max_by(&1, fn %{block_number: block_number} -> block_number end))
+    |> Enum.map(fn %{address_hash: address_hash, block_number: block_number, value: value} ->
+      %{hash: address_hash, fetched_coin_balance_block_number: block_number, fetched_coin_balance: value}
+    end)
   end
 
   defp format_and_filter_token_balance_params(token_balances_params) do
