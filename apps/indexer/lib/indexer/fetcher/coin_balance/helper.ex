@@ -105,7 +105,7 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
 
     transformed_params = CoinToTokenBalanceTransformer.transform_address_coin_balances(importable_balances_params)
 
-    {final_coin_balances, token_balance_entries} =
+    {coin_balance_entries, token_balance_entries} =
       Enum.split_with(transformed_params, fn
         {:address_token_balance, _} -> false
         _ -> true
@@ -114,14 +114,14 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
     token_balance_params =
       Enum.map(token_balance_entries, fn {:address_token_balance, token_balance} -> token_balance end)
 
-    current_token_balance_params = TokenBalances.to_address_current_token_balances(token_balance_params)
+    current_token_balance_entries = TokenBalances.to_address_current_token_balances(token_balance_params)
 
     Chain.import(%{
       addresses: %{params: addresses_params, with: :balance_changeset},
-      address_coin_balances: %{params: final_coin_balances},
+      address_coin_balances: %{params: coin_balance_entries},
       address_coin_balances_daily: %{params: importable_balances_daily_params},
       address_token_balances: %{params: token_balance_params},
-      address_current_token_balances: %{params: current_token_balance_params},
+      address_current_token_balances: %{params: current_token_balance_entries},
       broadcast: broadcast_type
     })
   end

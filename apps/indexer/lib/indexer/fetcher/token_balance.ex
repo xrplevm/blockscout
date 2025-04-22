@@ -217,26 +217,26 @@ defmodule Indexer.Fetcher.TokenBalance do
         formatted_token_balances_params
       )
 
-    {final_token_balances, coin_balance_entries} =
+    {token_balance_entries, coin_balance_entries} =
       Enum.split_with(transformed_params, fn
         {:address_coin_balance, _} -> false
         _ -> true
       end)
 
-    final_current_token_balances = TokenBalances.to_address_current_token_balances(final_token_balances)
+    current_token_balances = TokenBalances.to_address_current_token_balances(token_balance_entries)
 
     coin_balance_params =
       Enum.map(coin_balance_entries, fn {:address_coin_balance, coin_balance} -> coin_balance end)
 
     json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
-    importable_balances_daily_params = balances_daily_params(coin_balance_params, json_rpc_named_arguments)
+    daily_coin_balance_entries = balances_daily_params(coin_balance_params, json_rpc_named_arguments)
 
     import_params = %{
       addresses: %{params: addresses_params, with: :balance_changeset},
-      address_token_balances: %{params: final_token_balances},
-      address_current_token_balances: %{params: final_current_token_balances},
+      address_token_balances: %{params: token_balance_entries},
+      address_current_token_balances: %{params: current_token_balances},
       address_coin_balances: %{params: coin_balance_params},
-      address_coin_balances_daily: %{params: importable_balances_daily_params},
+      address_coin_balances_daily: %{params: daily_coin_balance_entries},
       timeout: @timeout
     }
 
