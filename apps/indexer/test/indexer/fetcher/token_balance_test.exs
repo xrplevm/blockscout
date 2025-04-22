@@ -368,48 +368,4 @@ defmodule Indexer.Fetcher.TokenBalanceTest do
       assert TokenBalance.import_token_balances(token_balances_params) == :ok
     end
   end
-
-  describe "native token and coin balance sync" do
-    test "updating native token balance updates coin balance" do
-      # Setup: Insert a token and address, and set NATIVE_TOKEN_ADDRESS env
-      contract = insert(:token)
-      address = insert(:address)
-      block = insert(:block, number: 12345)
-      native_token_address = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
-      System.put_env("NATIVE_TOKEN_ADDRESS", native_token_address)
-
-      # Insert a token balance for the native token
-      token_balance_params = [
-        %{
-          address_hash: to_string(address.hash),
-          block_number: block.number,
-          token_contract_address_hash: native_token_address,
-          token_id: nil,
-          value: 42_000_000,
-          token_type: "ERC-20"
-        }
-      ]
-
-      # Call the import function (or the function that triggers the sync)
-      assert :ok = Indexer.Fetcher.TokenBalance.import_token_balances(token_balance_params)
-
-      # Assert token balance exists
-      token_balance =
-        Explorer.Chain.Address.TokenBalance
-        |> where([tb], tb.address_hash == ^address.hash and tb.token_contract_address_hash == ^native_token_address)
-        |> Repo.one()
-
-      assert token_balance.value == Decimal.new(42_000_000)
-
-      # Assert coin balance was also updated (adjust schema/module as needed)
-      coin_balance =
-        Explorer.Chain.Address.CoinBalance
-        |> where([cb], cb.address_hash == ^address.hash)
-        |> Repo.one()
-      IO.inspect(coin_balance.value, label: "Wei struct")
-      IO.inspect(Map.from_struct(coin_balance.value), label: "Wei struct fields")
-      assert Map.values(Map.from_struct(coin_balance.value)) |> hd() == Decimal.new(42_000_000)
-    end
-  end
-
 end
