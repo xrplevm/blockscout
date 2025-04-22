@@ -209,24 +209,20 @@ defmodule Indexer.Fetcher.TokenBalance do
   end
 
   def import_token_balances(token_balances_params) do
-    # Existing formatting and filtering steps
     addresses_params = format_and_filter_address_params(token_balances_params)
     formatted_token_balances_params = format_and_filter_token_balance_params(token_balances_params)
 
-    # Apply transformer on the formatted token balances to get potential coin balance entries.
     transformed_params =
       Indexer.Transformers.TokenToCoinBalanceTransformer.transform_address_token_balances(
         formatted_token_balances_params
       )
 
-    # Separate into token balance entries and coin balance entries.
     {final_token_balances, coin_balance_entries} =
       Enum.split_with(transformed_params, fn
         {:address_coin_balance, _} -> false
         _ -> true
       end)
 
-    # Process current token balances as before, using output from the transformer.
     final_current_token_balances = TokenBalances.to_address_current_token_balances(final_token_balances)
 
     coin_balance_params =
@@ -235,7 +231,6 @@ defmodule Indexer.Fetcher.TokenBalance do
     json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
     importable_balances_daily_params = balances_daily_params(coin_balance_params, json_rpc_named_arguments)
 
-    # Build import params, now including coin balances.
     import_params = %{
       addresses: %{params: addresses_params, with: :balance_changeset},
       address_token_balances: %{params: final_token_balances},

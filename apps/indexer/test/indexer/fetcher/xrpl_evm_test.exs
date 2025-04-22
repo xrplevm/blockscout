@@ -130,8 +130,6 @@ defmodule Indexer.XRPLEVM.IntegrationTest do
         |> Repo.one()
 
       assert daily.day == ~D[1970-01-01]
-
-
     end
 
     test "importing non-native token balance does not update coin balance", %{
@@ -232,10 +230,9 @@ defmodule Indexer.XRPLEVM.IntegrationTest do
 
       assert current.value == Decimal.new(123_456_789)
 
-
-  addr = Repo.get!(Address, address.hash)
-  assert addr.fetched_coin_balance == %Wei{value: Decimal.new(123_456_789)}
-  assert addr.fetched_coin_balance_block_number == block_number
+      addr = Repo.get!(Address, address.hash)
+      assert addr.fetched_coin_balance == %Wei{value: Decimal.new(123_456_789)}
+      assert addr.fetched_coin_balance_block_number == block_number
     end
 
     test "latest block snapshot wins", %{
