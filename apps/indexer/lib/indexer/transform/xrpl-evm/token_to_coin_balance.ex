@@ -1,5 +1,4 @@
 defmodule Indexer.Transformers.TokenToCoinBalanceTransformer do
-
   @doc """
   Transforms changes to `address_token_balances` into changes for `address_coin_balances`
   if the token contract address hash matches the hardcoded value.
@@ -9,7 +8,7 @@ defmodule Indexer.Transformers.TokenToCoinBalanceTransformer do
 
     Enum.flat_map(params, fn token_balance ->
       if token_balance[:token_contract_address_hash] == native_token_address do
-        # Create a corresponding address_coin_balance entry
+
         coin_balance = %{
           address_hash: token_balance[:address_hash],
           value: token_balance[:value],

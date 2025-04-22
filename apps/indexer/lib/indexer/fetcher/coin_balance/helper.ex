@@ -15,7 +15,6 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
   alias Indexer.TokenBalances
   alias Indexer.Transformers.CoinToTokenBalanceTransformer
 
-
   @doc false
   # credo:disable-for-next-line Credo.Check.Design.DuplicatedCode
   def child_spec([init_options, gen_server_options], defaults, module) do
@@ -96,8 +95,6 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
     end)
   end
 
-
-
   def import_fetched_balances(params_list, broadcast_type \\ false) do
     value_fetched_at = DateTime.utc_now()
 
@@ -106,7 +103,6 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
     importable_balances_daily_params = balances_daily_params(params_list, json_rpc_named_arguments)
     addresses_params = balances_params_to_address_params(importable_balances_params)
 
-    # Transform coin balances to also produce token balances for the native token
     transformed_params = CoinToTokenBalanceTransformer.transform_address_coin_balances(importable_balances_params)
 
     {final_coin_balances, token_balance_entries} =
@@ -129,8 +125,6 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
       broadcast: broadcast_type
     })
   end
-
-
 
   def import_fetched_daily_balances(params_list, broadcast_type \\ false) do
     value_fetched_at = DateTime.utc_now()

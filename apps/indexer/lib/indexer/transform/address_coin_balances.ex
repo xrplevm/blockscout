@@ -6,7 +6,6 @@ defmodule Indexer.Transform.AddressCoinBalances do
 
   alias Explorer.Chain.TokenTransfer
 
-
   def params_set(%{} = import_options) do
     Enum.reduce(import_options, MapSet.new(), &reducer/2)
   end
@@ -30,7 +29,6 @@ defmodule Indexer.Transform.AddressCoinBalances do
   defp reducer({:logs_params, logs_params}, acc) when is_list(logs_params) do
     # a log MUST have address_hash and block_number
     logs_params
-
     |> Enum.reject(
       &(&1.first_topic == TokenTransfer.constant() or
           &1.first_topic == TokenTransfer.erc1155_single_transfer_signature() or
