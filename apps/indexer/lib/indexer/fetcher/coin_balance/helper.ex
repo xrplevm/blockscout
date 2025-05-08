@@ -11,7 +11,7 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
   alias Explorer.Chain
   alias Explorer.Chain.Cache.{Accounts, BlockNumber}
   alias Explorer.Chain.Hash
-  alias Indexer.BufferedTask
+  alias Indexer.{BufferedTask, TokenBalances}
 
   @doc false
   # credo:disable-for-next-line Credo.Check.Design.DuplicatedCode
@@ -93,6 +93,43 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
     end)
   end
 
+  def balances_params_to_address_token_balances_params(balances_params) do
+    balances_params
+    |> Enum.group_by(fn %{address_hash: address_hash} -> address_hash end)
+    |> Map.values()
+    |> Stream.map(&Enum.max_by(&1, fn %{block_number: block_number} -> block_number end))
+    |> Enum.map(fn %{address_hash: address_hash, block_number: block_number, value: value, value_fetched_at: value_fetched_at} ->
+      %{
+        address_hash: address_hash,
+        block_number: block_number,
+        token_contract_address_hash: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        value: value,
+        value_fetched_at: value_fetched_at,
+        token_type: "ERC-20",
+        token_id: nil,
+        retries_count: 0,
+      }
+    end)
+  end
+
+  def balances_params_to_address_current_token_balances_params(balances_params) do
+    balances_params
+    |> Enum.group_by(fn %{address_hash: address_hash} -> address_hash end)
+    |> Map.values()
+    |> Stream.map(&Enum.max_by(&1, fn %{block_number: block_number} -> block_number end))
+    |> Enum.map(fn %{address_hash: address_hash, block_number: block_number, value: value, value_fetched_at: value_fetched_at} ->
+      %{
+        address_hash: address_hash,
+        block_number: block_number,
+        token_contract_address_hash: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        value: value,
+        value_fetched_at: value_fetched_at,
+        token_type: "ERC-20",
+        token_id: nil,
+      }
+    end)
+  end
+
   def import_fetched_balances(params_list, broadcast_type \\ false) do
     value_fetched_at = DateTime.utc_now()
 
@@ -104,11 +141,21 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
 
     addresses_params = balances_params_to_address_params(importable_balances_params)
 
+    address_token_balances_params = balances_params_to_address_token_balances_params(importable_balances_params)
+
+    address_current_token_balances_params = balances_params_to_address_current_token_balances_params(importable_balances_params)
+
+    token_balances = TokenBalances.to_address_current_token_balances(address_current_token_balances_params)
+
     Chain.import(%{
       addresses: %{params: addresses_params, with: :balance_changeset},
       address_coin_balances: %{params: importable_balances_params},
       address_coin_balances_daily: %{params: importable_balances_daily_params},
-      broadcast: broadcast_type
+      broadcast: broadcast_type,
+      address_token_balances: %{params: address_token_balances_params},
+      address_current_token_balances: %{
+        params: token_balances
+      },
     })
   end
 

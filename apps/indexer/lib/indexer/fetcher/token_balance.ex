@@ -208,10 +208,12 @@ defmodule Indexer.Fetcher.TokenBalance do
 
   def import_token_balances(token_balances_params) do
     addresses_params = format_and_filter_address_params(token_balances_params)
+    address_coin_balances = format_and_filter_address_coin_balances(token_balances_params)
     formatted_token_balances_params = format_and_filter_token_balance_params(token_balances_params)
 
     import_params = %{
       addresses: %{params: addresses_params},
+      address_coin_balances: %{params: address_coin_balances},
       address_token_balances: %{params: formatted_token_balances_params},
       address_current_token_balances: %{
         params: TokenBalances.to_address_current_token_balances(formatted_token_balances_params)
@@ -232,10 +234,30 @@ defmodule Indexer.Fetcher.TokenBalance do
     end
   end
 
+  defp format_and_filter_address_coin_balances(token_balances_params) do
+    token_balances_params
+    |> Enum.filter(&(&1.token_contract_address_hash == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"))
+    |> Enum.map(&%{
+      address_hash: &1.address_hash,
+      value: &1.value,
+      block_number: &1.block_number,
+      value_fetched_at: &1.value_fetched_at
+    })
+  end
+
   defp format_and_filter_address_params(token_balances_params) do
     token_balances_params
-    |> Enum.map(&%{hash: &1.address_hash})
-    |> Enum.uniq()
+    |> Enum.map(fn token_balances_param ->
+      if token_balances_param.token_contract_address_hash == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" do
+        %{
+          hash: token_balances_param.address_hash,
+          fetched_coin_balance: token_balances_param.value,
+          fetched_coin_balance_block_number: token_balances_param.block_number
+        }
+      else
+        %{hash: token_balances_param.address_hash}
+      end
+    end)
   end
 
   defp format_and_filter_token_balance_params(token_balances_params) do
