@@ -41,4 +41,4 @@ jobs:
           build-args: |
             BLOCKSCOUT_VERSION=v${{ github.event.inputs.version }}.+commit.${{ env.SHORT_SHA }}
             RELEASE_VERSION=${{ github.event.inputs.version }}
-            CHAIN_TYPE=xrplevm
+            CHAIN_TYPE=ethereum
