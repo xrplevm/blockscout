@@ -10,6 +10,9 @@ function getTokenIconUrl (chainID, addressHash) {
     case '100':
       chainName = 'xdai'
       break
+    case '1440000':
+      chainName = 'xrplevm/info'
+      break
     default:
       chainName = null
       break
