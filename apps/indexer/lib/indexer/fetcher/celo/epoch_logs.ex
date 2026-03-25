@@ -6,8 +6,11 @@ defmodule Indexer.Fetcher.Celo.EpochLogs do
   import Explorer.Chain.Celo.Helper,
     only: [
       epoch_block_number?: 1,
-      premigration_block_number?: 1
+      pre_migration_block_number?: 1
     ]
+
+  use Utils.RuntimeEnvHelper,
+    chain_identity: [:explorer, :chain_identity]
 
   alias EthereumJSONRPC.{Logs, Transport}
   alias Explorer.Chain.Cache.CeloCoreContracts
@@ -44,7 +47,7 @@ defmodule Indexer.Fetcher.Celo.EpochLogs do
   def fetch(blocks, json_rpc_named_arguments)
 
   def fetch(blocks, json_rpc_named_arguments) do
-    if Application.get_env(:explorer, :chain_type) == :celo do
+    if chain_identity() == {:optimism, :celo} do
       do_fetch(blocks, json_rpc_named_arguments)
     else
       []
@@ -58,7 +61,7 @@ defmodule Indexer.Fetcher.Celo.EpochLogs do
   defp do_fetch(blocks, json_rpc_named_arguments) do
     requests =
       blocks
-      |> Enum.filter(&premigration_block_number?(&1.number))
+      |> Enum.filter(&pre_migration_block_number?(&1.number))
       |> Enum.reduce({[], 0}, &blocks_reducer/2)
       |> elem(0)
       |> Enum.reverse()

@@ -1,15 +1,14 @@
 defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   use BlockScoutWeb, :controller
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
-  import BlockScoutWeb.Chain, only: [split_list_by_page: 1, next_page_params: 4, fetch_scam_token_toggle: 2]
+  import BlockScoutWeb.Chain, only: [split_list_by_page: 1, next_page_params: 5, fetch_scam_token_toggle: 2]
   import Explorer.PagingOptions, only: [default_paging_options: 0]
 
-  alias BlockScoutWeb.CaptchaHelper
   alias BlockScoutWeb.API.V2.{AdvancedFilterView, CsvExportController}
   alias Explorer.{Chain, PagingOptions}
-  alias Explorer.Chain.{AdvancedFilter, ContractMethod, Data, Token, Transaction}
+  alias Explorer.Chain.{Address.Reputation, AdvancedFilter, ContractMethod, Data, Token, Transaction}
   alias Explorer.Chain.CsvExport.Helper, as: CsvHelper
-  alias Explorer.Helper, as: ExplorerHelper
   alias Plug.Conn
 
   action_fallback(BlockScoutWeb.API.V2.FallbackController)
@@ -48,6 +47,8 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   @methods_filter_limit 20
   @tokens_filter_limit 20
 
+  @token_options [api?: true, necessity_by_association: %{Reputation.reputation_association() => :optional}]
+
   @doc """
   Function responsible for `api/v2/advanced-filters/` endpoint.
   """
@@ -70,7 +71,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
       |> Transaction.decode_transactions(true, @api_true)
 
     next_page_params =
-      next_page |> next_page_params(advanced_filters, Map.take(params, ["items_count"]), &paging_params/1)
+      next_page |> next_page_params(advanced_filters, Map.take(params, ["items_count"]), false, &paging_params/1)
 
     render(conn, :advanced_filters,
       advanced_filters: advanced_filters,
@@ -88,30 +89,29 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   """
   @spec list_csv(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def list_csv(conn, params) do
-    with {:recaptcha, true} <- {:recaptcha, CaptchaHelper.recaptcha_passed?(params)} do
-      full_options =
-        params
-        |> extract_filters()
-        |> Keyword.merge(paging_options(params))
-        |> Keyword.update(:paging_options, %PagingOptions{page_size: CsvHelper.limit()}, fn paging_options ->
-          %PagingOptions{paging_options | page_size: CsvHelper.limit()}
-        end)
-        |> Keyword.put(:timeout, :timer.minutes(5))
-
-      full_options
-      |> AdvancedFilter.list()
-      |> AdvancedFilterView.to_csv_format()
-      |> CsvHelper.dump_to_stream()
-      |> Enum.reduce_while(CsvExportController.put_resp_params(conn), fn chunk, conn ->
-        case Conn.chunk(conn, chunk) do
-          {:ok, conn} ->
-            {:cont, conn}
-
-          {:error, :closed} ->
-            {:halt, conn}
-        end
+    full_options =
+      params
+      |> extract_filters()
+      |> Keyword.merge(paging_options(params))
+      |> Keyword.update(:paging_options, %PagingOptions{page_size: CsvHelper.limit()}, fn %PagingOptions{} =
+                                                                                            paging_options ->
+        %PagingOptions{paging_options | page_size: CsvHelper.limit()}
       end)
-    end
+      |> Keyword.put(:timeout, :timer.minutes(5))
+
+    full_options
+    |> AdvancedFilter.list()
+    |> AdvancedFilterView.to_csv_format()
+    |> CsvHelper.dump_to_stream()
+    |> Enum.reduce_while(CsvExportController.put_resp_params(conn), fn chunk, conn ->
+      case Conn.chunk(conn, chunk) do
+        {:ok, conn} ->
+          {:cont, conn}
+
+        {:error, :closed} ->
+          {:halt, conn}
+      end
+    end)
   end
 
   @doc """
@@ -120,6 +120,8 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   """
   @spec list_methods(Plug.Conn.t(), map()) :: {:method, nil | Explorer.Chain.ContractMethod.t()} | Plug.Conn.t()
   def list_methods(conn, %{"q" => query}) do
+    query = String.downcase(query)
+
     case {@methods_id_to_name_map[query], @methods_name_to_id_map[query]} do
       {name, _} when is_binary(name) ->
         render(conn, :methods, methods: [%{method_id: query, name: name}])
@@ -128,18 +130,21 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
         render(conn, :methods, methods: [%{method_id: id, name: query}])
 
       _ ->
-        mb_contract_method =
+        contract_method_method_id_tuple =
           case Data.cast(query) do
-            {:ok, %Data{bytes: <<_::bytes-size(4)>> = binary_method_id}} ->
-              ContractMethod.find_contract_method_by_selector_id(binary_method_id, @api_true)
+            {:ok, %Data{bytes: <<_::bytes-size(4)>> = binary_method_id} = data_method_id} ->
+              {ContractMethod.find_contract_method_by_selector_id(binary_method_id, @api_true), data_method_id}
 
             _ ->
-              ContractMethod.find_contract_method_by_name(query, @api_true)
+              {ContractMethod.find_contract_method_by_name(query, @api_true), nil}
           end
 
-        case mb_contract_method do
-          %ContractMethod{abi: %{"name" => name}, identifier: identifier} ->
-            render(conn, :methods, methods: [%{method_id: ExplorerHelper.add_0x_prefix(identifier), name: name}])
+        case contract_method_method_id_tuple do
+          {%ContractMethod{abi: %{"name" => name}, identifier: identifier}, _} ->
+            render(conn, :methods, methods: [%{method_id: identifier, name: name}])
+
+          {_, identifier} when not is_nil(identifier) ->
+            render(conn, :methods, methods: [%{method_id: identifier, name: ""}])
 
           _ ->
             render(conn, :methods, methods: [])
@@ -175,7 +180,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
     |> Enum.reduce(%{}, fn contract_method, acc ->
       case contract_method do
         %ContractMethod{abi: %{"name" => name}, identifier: identifier} when is_binary(name) ->
-          Map.put(acc, ExplorerHelper.add_0x_prefix(identifier), name)
+          Map.put(acc, identifier, name)
 
         _ ->
           acc
@@ -194,7 +199,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
     |> Enum.reject(&(&1 == "native"))
     |> Enum.uniq()
     |> Enum.take(@tokens_filter_limit)
-    |> Token.get_by_contract_address_hashes(@api_true)
+    |> Token.get_by_contract_address_hashes(@token_options)
     |> Map.new(fn token -> {token.contract_address_hash, token} end)
   end
 
@@ -230,7 +235,15 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
     ]
   end
 
-  @allowed_transaction_types ~w(COIN_TRANSFER ERC-20 ERC-404 ERC-721 ERC-1155)
+  @default_allowed_transaction_types ~w(COIN_TRANSFER CONTRACT_INTERACTION CONTRACT_CREATION ERC-20 ERC-404 ERC-721 ERC-1155 ERC-7984)
+
+  if @chain_type == :zilliqa do
+    @chain_type_allowed_transaction_types ~w(ZRC-2)
+  else
+    @chain_type_allowed_transaction_types ~w()
+  end
+
+  @allowed_transaction_types @default_allowed_transaction_types ++ @chain_type_allowed_transaction_types
 
   defp prepare_transaction_types(transaction_types) when is_binary(transaction_types) do
     transaction_types

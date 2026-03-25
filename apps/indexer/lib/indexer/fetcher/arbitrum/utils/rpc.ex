@@ -5,7 +5,7 @@ defmodule Indexer.Fetcher.Arbitrum.Utils.Rpc do
 
   # TODO: Move the module under EthereumJSONRPC.Arbitrum.
 
-  alias ABI.TypeDecoder
+  alias ABI.{TypeDecoder, TypeEncoder}
 
   import EthereumJSONRPC,
     only: [json_rpc: 2, quantity_to_integer: 1, timestamp_to_datetime: 1]
@@ -322,6 +322,57 @@ defmodule Indexer.Fetcher.Arbitrum.Utils.Rpc do
       end
 
     {safe_block, latest_chain_block}
+  end
+
+  @doc """
+    Computes the safe start and end L1 blocks for discovery, respecting overlap safeguards.
+
+    The returned `safe_start_block` is constrained to avoid revisiting blocks already
+    covered by historical entities discovery (`historical_entities_end_block`) while
+    still overlapping the safe block window derived from the current chain state.
+    The `end_block` is bounded by both the configured block range and the latest block
+    number.
+
+    ## Parameters
+    - `new_entities_start_block`: Proposed start block for new-entity discovery.
+    - `historical_entities_end_block`: Last block already covered by historical discovery.
+    - `json_rpc_named_arguments`: RPC arguments used to query safe/latest blocks.
+    - `rpc_logs_block_range`: Max range to cover in a single discovery iteration.
+
+    ## Returns
+    - `{safe_start_block, end_block}` tuple delimiting the adjusted discovery range.
+  """
+  @spec safe_start_and_end_blocks(
+          non_neg_integer(),
+          non_neg_integer(),
+          EthereumJSONRPC.json_rpc_named_arguments(),
+          non_neg_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  def safe_start_and_end_blocks(
+        new_entities_start_block,
+        historical_entities_end_block,
+        json_rpc_named_arguments,
+        rpc_logs_block_range
+      )
+      when is_integer(new_entities_start_block) and new_entities_start_block >= 0 and
+             is_integer(historical_entities_end_block) and
+             historical_entities_end_block >= 0 and is_integer(rpc_logs_block_range) and rpc_logs_block_range > 0 do
+    # It is necessary to revisit some of the previous blocks to ensure that
+    # no information is missed due to reorgs or RPC node inconsistency behind
+    # a load balancer. The number of blocks to revisit depends on the current safe
+    # block or the block which is considered as safest in case of L3 (where the
+    # safe block could be too far behind the latest block) or if RPC does not
+    # support "safe" block.
+    {safe_block, latest_block} = get_safe_and_latest_l1_blocks(json_rpc_named_arguments, rpc_logs_block_range)
+
+    # At the same time it does not make sense to revisit blocks that will be
+    # revisited by the historical entities discovery process.
+    # If the new entities discovery process does not reach the chain head
+    # previously, there is no need to revisit the blocks.
+    safe_start_block = max(min(new_entities_start_block, safe_block), historical_entities_end_block + 1)
+    end_block = min(new_entities_start_block + rpc_logs_block_range - 1, latest_block)
+
+    {safe_start_block, end_block}
   end
 
   @doc """
@@ -647,6 +698,15 @@ defmodule Indexer.Fetcher.Arbitrum.Utils.Rpc do
     - addSequencerL2BatchFromBlobsDelayProof
     - addSequencerL2BatchFromOriginDelayProof
     - addSequencerL2BatchDelayProof
+    - addSequencerL2BatchFromEigenDA
+
+    Note: Although it is technically possible to implement a basic fallback to
+    avoid raising exceptions for unknown function selectors, this is
+    intentionally not implemented. Such a fallback would obscure issues where
+    batch data is not properly parsed and stored in the database. If this
+    occurred and was discovered later, a backfiller would need to be written to
+    re-process all discovered batches to assign them proper container types and
+    extract DA information correctly.
 
     ## Parameters
     - `calldata`: The raw calldata from the transaction as a binary string starting with "0x"
@@ -764,6 +824,43 @@ defmodule Indexer.Fetcher.Arbitrum.Utils.Rpc do
           )
 
         {sequence_number, prev_message_count, new_message_count, data}
+
+      "0x283d8225" <> encoded_params ->
+        # addSequencerL2BatchFromEigenDA(uint256 sequenceNumber, EigenDACert calldata cert, IGasRefunder gasRefunder, uint256 afterDelayedMessagesRead, uint256 prevMessageCount, uint256 newMessageCount)
+        # https://github.com/Layr-Labs/nitro-contracts/blob/278fdbc39089fa86330f0c23f0a05aee61972c84/src/bridge/SequencerInbox.sol#L505-L512
+        [
+          sequence_number,
+          cert,
+          _gas_refunder,
+          _after_delayed_messages_read,
+          prev_message_count,
+          new_message_count
+        ] =
+          TypeDecoder.decode(
+            Base.decode16!(encoded_params, case: :lower),
+            ArbitrumContracts.add_sequencer_l2_batch_from_eigen_da_selector_with_abi()
+          )
+
+        # Encode the complex EigenDACert structure to bytes for interface compatibility.
+        #
+        # Why this encoding step is necessary:
+        # 1. TypeDecoder.decode() automatically unpacks the complex EigenDACert tuple structure
+        #    into Elixir tuples when using the detailed ABI definition above.
+        # 2. However, the data availability parsing pipeline expects binary data that can be
+        #    prefixed with a header flag (237 for EigenDA) and passed through the common interface.
+        # 3. Alternative approaches don't work:
+        #    - Using :bytes in the function ABI gives ABI-encoded data with offset pointers,
+        #      not the clean tuple encoding needed for later decoding
+        #    - Changing the common interface to handle tuples would break compatibility with
+        #      other DA types (Celestia, AnyTrust) that expect binary data
+        # 4. This encode step converts the decoded Elixir tuples back into clean ABI-encoded
+        #    bytes that can be consistently decoded later in parse_batch_accompanying_data.
+        #
+        # This is not a performance issue as the encoding overhead is negligible compared to
+        # blockchain I/O operations, and it maintains clean separation of concerns.
+        cert_encoded = TypeEncoder.encode([cert], ArbitrumContracts.eigen_da_cert_abi())
+
+        {sequence_number, prev_message_count, new_message_count, <<237>> <> cert_encoded}
     end
   end
 

@@ -5,16 +5,18 @@ defmodule Explorer.Validator.MetadataRetriever do
 
   alias Explorer.SmartContract.Reader
 
+  @spec fetch_data() :: [%{address_hash: String.t(), primary: true, name: String.t(), metadata: map()}]
   def fetch_data do
     fetch_validators_list()
     |> Enum.map(fn validator ->
       validator
-      |> fetch_validator_metadata
-      |> translate_metadata
+      |> fetch_validator_metadata()
+      |> translate_metadata()
       |> Map.merge(%{address_hash: validator, primary: true})
     end)
   end
 
+  @spec fetch_validators_list() :: [String.t()]
   def fetch_validators_list do
     validators_contract_address = config(:validators_contract_address)
 

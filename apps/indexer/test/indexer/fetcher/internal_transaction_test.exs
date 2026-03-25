@@ -2,6 +2,9 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
   use EthereumJSONRPC.Case, async: false
   use Explorer.DataCase
 
+  use Utils.CompileTimeEnvHelper,
+    chain_identity: [:explorer, :chain_identity]
+
   import ExUnit.CaptureLog
   import Mox
 
@@ -10,7 +13,9 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
   alias Explorer.Chain.{Block, PendingBlockOperation, PendingTransactionOperation}
   alias Explorer.Chain.Import.Runner.Blocks
   alias Indexer.Fetcher.CoinBalance.Catchup, as: CoinBalanceCatchup
-  alias Indexer.Fetcher.{InternalTransaction, PendingTransaction, TokenBalance}
+  alias Indexer.Fetcher.{InternalTransaction, PendingTransaction}
+  alias Indexer.Fetcher.TokenBalance.Current, as: TokenBalanceCurrent
+  alias Indexer.Fetcher.TokenBalance.Historical, as: TokenBalanceHistorical
 
   # MUST use global mode because we aren't guaranteed to get PendingTransactionFetcher's pid back fast enough to `allow`
   # it to use expectations and stubs from test's pid.
@@ -199,7 +204,8 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
       block = insert(:block)
       transaction = insert(:transaction) |> with_block(block)
       block_hash = block.hash
-      insert(:pending_block_operation, block_hash: block_hash, block_number: block.number)
+      block_number = block.number
+      insert(:pending_block_operation, block_hash: block_hash, block_number: block_number)
 
       if json_rpc_named_arguments[:transport] == EthereumJSONRPC.Mox do
         case Keyword.fetch!(json_rpc_named_arguments, :variant) do
@@ -298,7 +304,7 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
 
       assert nil == Repo.get(PendingBlockOperation, block_hash)
 
-      assert Repo.exists?(from(i in Chain.InternalTransaction, where: i.block_hash == ^block_hash))
+      assert Repo.exists?(from(i in Chain.InternalTransaction, where: i.block_number == ^block_number))
     end
 
     test "handles failure by retrying only unique numbers", %{
@@ -479,7 +485,7 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
         end)
 
       assert %{consensus: true, refetch_needed: true} = Repo.reload(block)
-      assert logs =~ "foreign_key_violation on internal transactions import, foreign transactions hashes:"
+      assert logs =~ "foreign_key_violation on internal transactions import"
     end
   end
 
@@ -532,10 +538,9 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
         |> Enum.concat([{:transport_options, [http_options: []]}])
 
       block = insert(:block, number: 1)
-      _transaction = :transaction |> insert() |> with_block(block)
+      transaction = :transaction |> insert() |> with_block(block)
       block_number = block.number
-      block_hash = block.hash
-      insert(:pending_block_operation, block_hash: block_hash, block_number: block_number)
+      insert(:pending_transaction_operation, transaction_hash: transaction.hash)
 
       EthereumJSONRPC.Mox
       |> expect(:json_rpc, fn [%{id: id, method: "debug_traceTransaction"}], _options ->
@@ -608,29 +613,34 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
 
       CoinBalanceCatchup.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
 
-      assert %{block_hash: block_hash} = Repo.get(PendingBlockOperation, block_hash)
+      assert %{} = Repo.get(PendingTransactionOperation, transaction.hash)
 
-      assert :ok == InternalTransaction.run([block_number], json_rpc_named_arguments)
+      assert :ok ==
+               InternalTransaction.run(
+                 [%{block_number: transaction.block_number, hash: transaction.hash, index: transaction.index}],
+                 json_rpc_named_arguments
+               )
 
-      assert nil == Repo.get(PendingBlockOperation, block_hash)
+      assert nil == Repo.get(PendingTransactionOperation, transaction.hash)
 
-      internal_transactions = Repo.all(from(i in Chain.InternalTransaction, where: i.block_hash == ^block_hash))
+      internal_transactions = Repo.all(from(i in Chain.InternalTransaction, where: i.block_number == ^block_number))
 
       assert Enum.count(internal_transactions) > 0
 
       last_internal_transaction = List.last(internal_transactions)
 
       assert last_internal_transaction.type == :call
-      assert last_internal_transaction.call_type == :invalid
+      assert last_internal_transaction.call_type_enum == :invalid
     end
   end
 
   # Due to token-duality feature in Celo network (native coin transfers are
   # treated as token transfers), we need to fetch updated token balances after
   # parsing the internal transactions
-  if Application.compile_env(:explorer, :chain_type) == :celo do
+  if @chain_identity == {:optimism, :celo} do
     defp start_token_balance_fetcher(json_rpc_named_arguments) do
-      TokenBalance.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      TokenBalanceHistorical.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      TokenBalanceCurrent.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
     end
   else
     defp start_token_balance_fetcher(_json_rpc_named_arguments), do: :ok

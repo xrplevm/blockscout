@@ -9,14 +9,14 @@ defmodule BlockScoutWeb.API.RPC.BlockView do
   def render("block_reward.json", %{block: %Block{rewards: [_ | _]} = block}) do
     reward_as_string =
       block.rewards
-      |> Enum.find(%{reward: %Wei{value: Decimal.new(0)}}, &(&1.address_type == :validator))
+      |> Enum.find(%{reward: Wei.zero()}, &(&1.address_type == :validator))
       |> Map.get(:reward)
       |> Wei.to(:wei)
       |> Decimal.to_string(:normal)
 
     static_reward =
       block.rewards
-      |> Enum.find(%{reward: %Wei{value: Decimal.new(0)}}, &(&1.address_type == :emission_funds))
+      |> Enum.find(%{reward: Wei.zero()}, &(&1.address_type == :emission_funds))
       |> Map.get(:reward)
       |> Wei.to(:wei)
 
@@ -78,11 +78,14 @@ defmodule BlockScoutWeb.API.RPC.BlockView do
   end
 
   def render("getblocknobytime.json", %{block_number: block_number}) do
-    data = %{
-      "blockNumber" => to_string(block_number)
-    }
+    # TODO: migrate to the following format in the next release
+    # RPCView.render("show.json", data: to_string(block_number))
 
-    RPCView.render("show.json", data: data)
+    RPCView.render("show.json",
+      data: %{
+        "blockNumber" => to_string(block_number)
+      }
+    )
   end
 
   def render("eth_block_number.json", %{number: number, id: id}) do

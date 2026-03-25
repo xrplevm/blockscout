@@ -10,10 +10,10 @@ defmodule Indexer.Fetcher.Arbitrum.Workers.Batches.Tasks do
     The module processes logs from the `SequencerBatchDelivered` events emitted by
     the Arbitrum `SequencerInbox` contract to extract batch details. It maintains
     linkages between batches and their corresponding rollup blocks and transactions.
-    For batches stored in Data Availability solutions like AnyTrust or Celestia,
-    it retrieves DA information to locate the batch data. The module also tracks
-    cross-chain messages initiated in rollup blocks associated with new batches,
-    updating their status to committed (`:sent`).
+    For batches stored in Data Availability solutions like AnyTrust, Celestia, or
+    EigenDA, it retrieves DA information to locate the batch data. The module also
+    tracks cross-chain messages initiated in rollup blocks associated with new
+    batches, updating their status to committed (`:sent`).
 
     For any blocks or transactions missing in the database, data is requested in
     chunks from the rollup RPC endpoint by `eth_getBlockByNumber`. Additionally,
@@ -141,21 +141,16 @@ defmodule Indexer.Fetcher.Arbitrum.Workers.Batches.Tasks do
     # Requesting the "latest" block instead of "safe" allows to catch new batches
     # without latency.
 
-    # It is necessary to re-visit some amount of the previous blocks to ensure that
-    # no batches are missed due to reorgs. The amount of blocks to re-visit depends
-    # on the current safe block or the block which is considered as safest in case
-    # of L3 (where the safe block could be too far behind the latest block) or if
-    # RPC does not support "safe" block.
-    {safe_block, latest_block} =
-      Rpc.get_safe_and_latest_l1_blocks(l1_rpc_config.json_rpc_named_arguments, l1_rpc_config.logs_block_range)
-
-    # At the same time it does not make sense to re-visit blocks that will be
-    # re-visited by the historical batches discovery process.
-    # If the new batches discovery process does not reach the chain head previously
-    # no need to re-visit the blocks.
-    safe_start_block = max(min(start_block, safe_block), historical_batches_end_block + 1)
-
-    end_block = min(start_block + l1_rpc_config.logs_block_range - 1, latest_block)
+    # It is necessary to revisit some of the previous blocks to ensure that
+    # no information is missed due to reorgs or RPC node inconsistency behind
+    # a load balancer.
+    {safe_start_block, end_block} =
+      Rpc.safe_start_and_end_blocks(
+        start_block,
+        historical_batches_end_block,
+        l1_rpc_config.json_rpc_named_arguments,
+        l1_rpc_config.logs_block_range
+      )
 
     if safe_start_block <= end_block do
       log_info("Block range for new batches discovery: #{safe_start_block}..#{end_block}")
@@ -348,7 +343,7 @@ defmodule Indexer.Fetcher.Arbitrum.Workers.Batches.Tasks do
       l1_block_ranges_for_missing_batches =
         DbSettlement.get_l1_block_ranges_for_missing_batches(start_batch, end_batch, lowest_l1_block - 1)
 
-      unless l1_block_ranges_for_missing_batches == [] do
+      if l1_block_ranges_for_missing_batches != [] do
         discover_missing(
           sequencer_inbox_address,
           l1_block_ranges_for_missing_batches,

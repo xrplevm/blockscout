@@ -118,6 +118,14 @@ defmodule Explorer.Chain.OrderedCache do
   @callback atomic_take_enough(integer()) :: [element] | nil
 
   @doc """
+  Processes the elements before updating the cache.
+  This function is called before the `update/1` function and can be used to
+  modify the elements to be inserted. Can be used to optimize memory usage along
+  with fetching time.
+  """
+  @callback sanitize_before_update(element) :: element
+
+  @doc """
   Adds an element, or a list of elements, to the cache.
   When the cache is full, only the most prevailing elements will be stored, based
   on `c:prevails?/2`.
@@ -143,6 +151,7 @@ defmodule Explorer.Chain.OrderedCache do
 
     # credo:disable-for-next-line Credo.Check.Refactor.LongQuoteBlocks
     quote do
+      require Logger
       alias Explorer.Chain.OrderedCache
 
       @behaviour OrderedCache
@@ -168,6 +177,9 @@ defmodule Explorer.Chain.OrderedCache do
 
       @impl OrderedCache
       def element_to_id(element), do: element
+
+      @impl OrderedCache
+      def sanitize_before_update(element), do: element
 
       ### Straightforward fetching functions
 
@@ -244,21 +256,63 @@ defmodule Explorer.Chain.OrderedCache do
       def update(elements) when is_nil(elements), do: :ok
 
       def update(elements) when is_list(elements) do
-        ConCache.update(cache_name(), ids_list_key(), fn ids ->
-          updated_list =
-            elements
-            |> Enum.sort_by(&element_to_id(&1), &prevails?(&1, &2))
-            |> Enum.take(max_size())
-            |> do_preloads()
-            |> Enum.map(&{element_to_id(&1), &1})
-            |> merge_and_update(ids || [], max_size())
+        case Explorer.mode() do
+          mode when mode in [:all, :api, :indexer] ->
+            elements_for_preload =
+              elements
+              |> Enum.sort_by(&element_to_id(&1), &prevails?(&1, &2))
+              |> Enum.take(max_size())
 
-          # ids_list is set to never expire
-          {:ok, %ConCache.Item{value: updated_list, ttl: :infinity}}
-        end)
+            preloaded_elements =
+              try do
+                do_preloads(elements_for_preload)
+              rescue
+                postgrex_error in Postgrex.Error ->
+                  Logger.error(fn ->
+                    [
+                      "Error while preloading elements for ordered cache: ",
+                      Exception.format(:error, postgrex_error, __STACKTRACE__)
+                    ]
+                  end)
+
+                  elements_for_preload
+              end
+
+            preloaded_elements
+            |> Enum.map(&{element_to_id(&1), sanitize_before_update(&1)})
+            |> do_raw_update(true)
+
+          _ ->
+            :ok
+        end
       end
 
       def update(element), do: update([element])
+
+      def do_raw_update(prepared_elements, propagate) do
+        case Explorer.mode() do
+          mode when mode in [:all, :api] ->
+            ConCache.update(cache_name(), ids_list_key(), fn ids ->
+              updated_list =
+                prepared_elements
+                |> merge_and_update(ids || [], max_size())
+
+              # ids_list is set to never expire
+              {:ok, %ConCache.Item{value: updated_list, ttl: :infinity}}
+            end)
+
+          :indexer ->
+            if propagate do
+              Node.list() |> :erpc.multicast(__MODULE__, :do_raw_update, [prepared_elements, false])
+            else
+              Logger.error("Indexer got unexpected propagation call to do_raw_update/2")
+              :ok
+            end
+
+          _ ->
+            :ok
+        end
+      end
 
       defp do_preloads(elements) do
         if Enum.empty?(preloads()) do
@@ -372,7 +426,8 @@ defmodule Explorer.Chain.OrderedCache do
                      max_size: 0,
                      preloads: 0,
                      prevails?: 2,
-                     element_to_id: 1
+                     element_to_id: 1,
+                     sanitize_before_update: 1
     end
   end
 end

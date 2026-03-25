@@ -79,7 +79,7 @@ defmodule Indexer.Fetcher.ContractCode do
   def child_spec([init_options, gen_server_options]) do
     {state, mergeable_init_options} = Keyword.pop(init_options, :json_rpc_named_arguments)
 
-    unless state do
+    if !state do
       raise ArgumentError,
             ":json_rpc_named_arguments must be provided to `#{__MODULE__}.child_spec " <>
               "to allow for json_rpc calls when running."
@@ -273,7 +273,7 @@ defmodule Indexer.Fetcher.ContractCode do
   defp zilliqa_verify_scilla_contracts(entries, addresses) do
     zilliqa_contract_address_hashes =
       entries
-      |> Enum.filter(&ZilliqaHelper.scilla_transaction?(&1.type))
+      |> Enum.filter(&(ZilliqaHelper.scilla_transaction?(&1.type) and &1.status == :ok))
       |> MapSet.new(& &1.created_contract_address_hash)
 
     addresses

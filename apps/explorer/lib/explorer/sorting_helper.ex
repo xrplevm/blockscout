@@ -24,7 +24,7 @@ defmodule Explorer.SortingHelper do
   Applies sorting to query based on default sorting params and sorting params from the client,
   these params merged keeping provided one over default one.
   """
-  @spec apply_sorting(Ecto.Query.t(), sorting_params, sorting_params) :: Ecto.Query.t()
+  @spec apply_sorting(Ecto.Query.t() | module(), sorting_params, sorting_params) :: Ecto.Query.t()
   def apply_sorting(query, sorting, default_sorting) when is_list(sorting) and is_list(default_sorting) do
     sorting |> merge_sorting_params_with_defaults(default_sorting) |> sorting_params_to_order_by(query)
   end
@@ -61,8 +61,14 @@ defmodule Explorer.SortingHelper do
     |> merge_sorting_params_with_defaults(default_sorting)
     |> do_page_with_sorting()
     |> case do
-      nil -> query
-      dynamic_where -> query |> where(^dynamic_where.(key))
+      nil ->
+        query
+
+      dynamic_where ->
+        case query.group_bys do
+          [] -> query |> where(^dynamic_where.(key))
+          _ -> query |> having(^dynamic_where.(key))
+        end
     end
     |> limit_query(page_size)
   end

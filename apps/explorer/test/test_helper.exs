@@ -11,6 +11,8 @@ ExUnit.start()
 
 {:ok, _} = Application.ensure_all_started(:ex_machina)
 
+Explorer.TestHelper.run_necessary_background_migrations()
+
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo, :auto)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.Account, :auto)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.PolygonEdge, :auto)
@@ -24,11 +26,11 @@ Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.Filecoin, :auto)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.Stability, :auto)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.Mud, :auto)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.ShrunkInternalTransactions, :auto)
+Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.EventNotifications, :auto)
 
 Mox.defmock(Explorer.Market.Source.TestSource, for: Explorer.Market.Source)
 Mox.defmock(Explorer.History.TestHistorian, for: Explorer.History.Historian)
 
 Mox.defmock(EthereumJSONRPC.Mox, for: EthereumJSONRPC.Transport)
-Mox.defmock(Explorer.Mox.HTTPoison, for: HTTPoison.Base)
 
 Mox.defmock(Explorer.Mock.TeslaAdapter, for: Tesla.Adapter)

@@ -1,11 +1,11 @@
 defmodule BlockScoutWeb.GraphQL.Schema.Transaction do
   @moduledoc false
-  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
+  use Utils.CompileTimeEnvHelper, chain_identity: [:explorer, :chain_identity]
 
   alias BlockScoutWeb.GraphQL.Resolvers.{Block, InternalTransaction}
 
-  case @chain_type do
-    :celo ->
+  case @chain_identity do
+    {:optimism, :celo} ->
       @chain_type_fields quote(
                            do: [
                              field(:gas_token_contract_address_hash, :address_hash)
@@ -226,8 +226,6 @@ defmodule BlockScoutWeb.GraphQL.Schema.Types do
     field(:transaction_hash, :full_hash)
     field(:block_number, :integer)
     field(:transaction_index, :integer)
-    field(:block_hash, :full_hash)
-    field(:block_index, :integer)
   end
 
   @desc """

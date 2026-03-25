@@ -7,6 +7,14 @@ defmodule BlockScoutWeb.AddressContractControllerTest do
   alias Explorer.Market.Token
   alias Explorer.{Factory, TestHelper}
 
+  setup do
+    Application.put_env(:tesla, :adapter, Tesla.Adapter.Mint)
+
+    on_exit(fn ->
+      Application.put_env(:tesla, :adapter, Explorer.Mock.TeslaAdapter)
+    end)
+  end
+
   describe "GET index/3" do
     test "returns not found for nonexistent address", %{conn: conn} do
       nonexistent_address_hash = Hash.to_string(Factory.address_hash())
@@ -42,12 +50,14 @@ defmodule BlockScoutWeb.AddressContractControllerTest do
         :internal_transaction_create,
         index: 0,
         transaction: transaction,
+        transaction_index: transaction.index,
         created_contract_address: address,
         block_hash: transaction.block_hash,
-        block_index: 0
+        block_number: transaction.block_number
       )
 
-      TestHelper.get_all_proxies_implementation_zero_addresses()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       conn = get(conn, address_contract_path(BlockScoutWeb.Endpoint, :index, Address.checksum(address)))
 

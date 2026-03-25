@@ -72,7 +72,7 @@ defmodule Indexer.Fetcher.TransactionAction do
     logger_metadata = Logger.metadata()
     Logger.metadata(fetcher: :transaction_action)
 
-    max_block_number = Chain.fetch_max_block_number()
+    max_block_number = Block.fetch_max_block_number()
 
     if last_block > max_block_number do
       Logger.warning(
@@ -138,7 +138,7 @@ defmodule Indexer.Fetcher.TransactionAction do
     end
   end
 
-  defp run_fetch(state) do
+  defp run_fetch(%__MODULE__{} = state) do
     pid = self()
     Process.send_after(pid, :fetch, 3000, [])
     %__MODULE__{state | task: nil, pid: pid}

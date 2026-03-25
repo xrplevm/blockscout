@@ -11,10 +11,10 @@ defmodule Explorer.Etherscan.Contracts do
       where: 3
     ]
 
-  alias Explorer.Repo
   alias Explorer.Chain.{Address, Hash, SmartContract}
   alias Explorer.Chain.SmartContract.Proxy
   alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
+  alias Explorer.Repo
 
   @doc """
     Returns address with preloaded SmartContract and proxy info if it exists
@@ -51,9 +51,7 @@ defmodule Explorer.Etherscan.Contracts do
                   implementation_address_fetched?: false,
                   refetch_necessity_checked?: false
                 },
-                [
-                  {:proxy_without_abi?, true}
-                ]
+                []
               )
 
             address_verified_bytecode_twin_contract =

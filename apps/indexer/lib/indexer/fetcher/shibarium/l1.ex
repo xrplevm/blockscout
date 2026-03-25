@@ -23,9 +23,9 @@ defmodule Indexer.Fetcher.Shibarium.L1 do
   import Indexer.Fetcher.Shibarium.Helper,
     only: [calc_operation_hash: 5, prepare_insert_items: 2, recalculate_cached_count: 0]
 
+  alias Explorer.{Chain, Repo}
   alias Explorer.Chain.RollupReorgMonitorQueue
   alias Explorer.Chain.Shibarium.Bridge
-  alias Explorer.{Chain, Repo}
   alias Indexer.Fetcher.RollupL1ReorgMonitor
   alias Indexer.Helper
   alias Indexer.Transform.Addresses
@@ -563,12 +563,12 @@ defmodule Indexer.Fetcher.Shibarium.L1 do
     [
       transport: EthereumJSONRPC.HTTP,
       transport_options: [
-        http: EthereumJSONRPC.HTTP.HTTPoison,
+        http: EthereumJSONRPC.HTTP.Tesla,
         urls: [rpc_url],
         http_options: [
           recv_timeout: :timer.minutes(10),
           timeout: :timer.minutes(10),
-          hackney: [pool: :ethereum_jsonrpc]
+          pool: :ethereum_jsonrpc
         ]
       ]
     ]

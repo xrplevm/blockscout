@@ -26,11 +26,12 @@ defmodule Explorer.Chain.Fetcher.LookUpSmartContractSourcesOnDemand do
   alias Explorer.Chain.{Address, Data, SmartContract}
   alias Explorer.Chain.Events.Publisher
   alias Explorer.SmartContract.EthBytecodeDBInterface
+  alias Explorer.SmartContract.Geas.Publisher, as: GeasPublisher
   alias Explorer.SmartContract.Solidity.Publisher, as: SolidityPublisher
   alias Explorer.SmartContract.Vyper.Publisher, as: VyperPublisher
   alias Explorer.Utility.RateLimiter
 
-  import Explorer.SmartContract.Helper, only: [prepare_bytecode_for_microservice: 3, contract_creation_input: 1]
+  import Explorer.SmartContract.Helper, only: [prepare_bytecode_for_microservice: 3, fetch_data_for_verification: 2]
 
   @cache_name :smart_contracts_sources_fetching
 
@@ -92,12 +93,13 @@ defmodule Explorer.Chain.Fetcher.LookUpSmartContractSourcesOnDemand do
   defp fetch_sources(address_hash_string, address_contract_code, only_full?) do
     Publisher.broadcast(%{eth_bytecode_db_lookup_started: [address_hash_string]}, :on_demand)
 
-    creation_transaction_input = contract_creation_input(address_hash_string)
+    {creation_transaction_input, deployed_bytecode, verifier_metadata} =
+      fetch_data_for_verification(address_hash_string, Data.to_string(address_contract_code))
 
     with {:ok, %{"sourceType" => type, "matchType" => match_type} = source} <-
            %{}
-           |> prepare_bytecode_for_microservice(creation_transaction_input, Data.to_string(address_contract_code))
-           |> EthBytecodeDBInterface.search_contract(address_hash_string),
+           |> prepare_bytecode_for_microservice(creation_transaction_input, deployed_bytecode)
+           |> EthBytecodeDBInterface.search_contract(address_hash_string, verifier_metadata),
          :ok <- check_match_type(match_type, only_full?),
          {:ok, _} <- process_contract_source(type, source, address_hash_string) do
       Publisher.broadcast(%{smart_contract_was_verified: [address_hash_string]}, :on_demand)
@@ -194,6 +196,10 @@ defmodule Explorer.Chain.Fetcher.LookUpSmartContractSourcesOnDemand do
 
   def process_contract_source("YUL", source, address_hash_string) do
     SolidityPublisher.process_rust_verifier_response(source, address_hash_string, %{}, true, true, true)
+  end
+
+  def process_contract_source("GEAS", source, address_hash_string) do
+    GeasPublisher.process_rust_verifier_response(source, address_hash_string, %{}, true, true, true)
   end
 
   def process_contract_source(_, _source, _address_hash), do: false

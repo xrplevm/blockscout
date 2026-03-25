@@ -4,27 +4,12 @@ on:
   push:
     branches:
       - master
-      - production-arbitrum
-      - production-core
-      - production-eth-sepolia
-      - production-filecoin
-      - production-fuse
-      - production-optimism
-      - production-immutable
-      - production-iota
-      - production-lukso
-      - production-rsk
-      - production-sokol
-      - production-suave
-      - production-xdai
-      - production-zkevm
-      - production-zksync
-      - staging-l2
     paths-ignore:
       - "CHANGELOG.md"
       - "**/README.md"
       - "docker/*"
       - "docker-compose/*"
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     branches:
@@ -32,8 +17,8 @@ on:
 
 env:
   MIX_ENV: test
-  OTP_VERSION: ${{ github.ref_name == '10284/merge' && '27.1' || vars.OTP_VERSION }}
-  ELIXIR_VERSION: ${{ github.ref_name == '10284/merge' && '1.17.3' || vars.ELIXIR_VERSION }}
+  OTP_VERSION: '27.3.4.6'
+  ELIXIR_VERSION: '1.19.4'
   ACCOUNT_AUTH0_DOMAIN: "blockscoutcom.us.auth0.com"
 
 jobs:
@@ -47,17 +32,18 @@ jobs:
         run: |
           echo "matrix=$(node -e '
 
-            // Add/remove CI matrix chain types here
             const defaultChainTypes = ["default"];
 
+            // Add/remove CI matrix chain types here
             const chainTypes = [
+              "default",
               "arbitrum",
-              "berachain",
+              "arc",
               "blackfort",
-              "celo",
               "ethereum",
               "filecoin",
               "optimism",
+              "optimism-celo",
               "polygon_zkevm",
               "rsk",
               "scroll",
@@ -69,23 +55,43 @@ jobs:
               "neon"
             ];
 
-            const extraChainTypes = ["suave", "polygon_edge"];
-
-            // Chain type matrix we use in master branch
-            const allChainTypes = [].concat(defaultChainTypes, chainTypes, extraChainTypes);
+            // Add/remove CI matrix chain types for "ci:core" label here
+            const coreChainTypes = [
+              "default",
+              "ethereum",
+              "optimism",
+              "optimism-celo"
+            ];
 
             const labels = ${{ github.event_name == 'pull_request' && toJson(github.event.pull_request.labels.*.name) || '[]' }};
             const ciLabels = labels.filter(label => label.startsWith("ci:"));
-            const labeledChainTypes = [].concat(
-              defaultChainTypes.filter(chainType => ciLabels.includes("ci:" + chainType)),
-              chainTypes.filter(chainType => ciLabels.includes("ci:all") || ciLabels.includes("ci:" + chainType)),
-              extraChainTypes.filter(chainType => ciLabels.includes("ci:" + chainType))
+            const labeledChainTypes = chainTypes.filter(chainType =>
+              ciLabels.includes("ci:all") ||
+              ciLabels.includes("ci:core") && coreChainTypes.includes(chainType) ||
+              ciLabels.includes("ci:" + chainType)
             );
 
             // Chain type matrix we use in PRs to master branch
             const ciChainTypes = labeledChainTypes.length > 0 ? labeledChainTypes : defaultChainTypes;
 
-            const matrix = { "chain-type": ${{ github.event_name == 'pull_request' && 'ciChainTypes' || 'allChainTypes' }} };
+            // Check for bridged tokens label
+            const hasBridgedTokensLabel = ciLabels.includes("ci:bridged-tokens");
+
+            // Create matrix combinations
+            const targetChainTypes = ${{ github.event_name == 'pull_request' && 'ciChainTypes' || 'chainTypes' }};
+            const bridgedTokensConfigs = hasBridgedTokensLabel ? [false, true] : [false];
+            
+            const matrixIncludes = [];
+            for (const chainType of targetChainTypes) {
+              for (const bridgedTokens of bridgedTokensConfigs) {
+                matrixIncludes.push({
+                  "chain-type": chainType,
+                  "bridged-tokens": bridgedTokens
+                });
+              }
+            }
+
+            const matrix = { "include": matrixIncludes };
             console.log(JSON.stringify(matrix));
           ')" >> $GITHUB_OUTPUT
 
@@ -93,7 +99,7 @@ jobs:
     name: Build and Cache deps
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -124,6 +130,7 @@ jobs:
         run: |
           mix local.hex --force
           mix local.rebar --force
+          mix deps.clean --all
           mix deps.get
           mix deps.compile --skip-umbrella-children
 
@@ -160,7 +167,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -187,7 +194,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -219,7 +226,7 @@ jobs:
       - build-and-cache
       - matrix-builder
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -244,9 +251,9 @@ jobs:
         id: dialyzer-cache
         with:
           path: priv/plts
-          key: ${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ env.MIX_ENV }}-${{ matrix.chain-type }}-dialyzer-mixlockhash-${{ hashFiles('mix.lock') }}
+          key: ${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ env.MIX_ENV }}-${{ matrix.chain-type }}-${{ matrix.bridged-tokens }}-dialyzer-mixlockhash-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ env.MIX_ENV }}-${{ matrix.chain-type }}-dialyzer-mixlockhash-
+            ${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ env.MIX_ENV }}-${{ matrix.chain-type }}-${{ matrix.bridged-tokens }}-dialyzer-mixlockhash-
 
       - name: Conditionally build Dialyzer Cache
         if: steps.dialyzer-cache.output.cache-hit != 'true'
@@ -255,18 +262,20 @@ jobs:
           mix dialyzer --plt
         env:
           CHAIN_TYPE: ${{ matrix.chain-type != 'default' && matrix.chain-type || '' }}
+          BRIDGED_TOKENS_ENABLED: ${{ matrix.bridged-tokens }}
 
       - name: Run Dialyzer
         run: mix dialyzer --halt-exit-status
         env:
           CHAIN_TYPE: ${{ matrix.chain-type != 'default' && matrix.chain-type || '' }}
+          BRIDGED_TOKENS_ENABLED: ${{ matrix.bridged-tokens }}
 
   gettext:
     name: Missing translation keys check
     runs-on: ubuntu-latest
     needs: build-and-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -290,12 +299,13 @@ jobs:
           mix gettext.extract --merge | tee stdout.txt
           grep "Wrote priv/gettext/en/LC_MESSAGES/default.po (0 new messages, 0 removed, " stdout.txt
         working-directory: "apps/block_scout_web"
+
   sobelow:
     name: Sobelow security analysis
     runs-on: ubuntu-latest
     needs: build-and-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -327,7 +337,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -376,7 +386,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -420,12 +430,13 @@ jobs:
 
       - run: ./node_modules/.bin/eslint --format=junit --output-file="test/eslint/junit.xml" js/**
         working-directory: apps/block_scout_web/assets
+
   jest:
     name: JS Tests
     runs-on: ubuntu-latest
     needs: build-and-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -466,7 +477,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -518,7 +529,7 @@ jobs:
           # Maps tcp port 5432 on service container to the host
           - 5432:5432
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -552,6 +563,8 @@ jobs:
           ETHEREUM_JSONRPC_CASE: "EthereumJSONRPC.Case.Nethermind.Mox"
           ETHEREUM_JSONRPC_WEB_SOCKET_CASE: "EthereumJSONRPC.WebSocket.Case.Mox"
           CHAIN_TYPE: ${{ matrix.chain-type != 'default' && matrix.chain-type || '' }}
+          BRIDGED_TOKENS_ENABLED: ${{ matrix.bridged-tokens }}
+
   test_nethermind_mox_explorer:
     strategy:
       fail-fast: false
@@ -581,7 +594,7 @@ jobs:
           # Maps tcp port 5432 on service container to the host
           - 5432:5432
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -627,6 +640,8 @@ jobs:
           ETHEREUM_JSONRPC_WEB_SOCKET_CASE: "EthereumJSONRPC.WebSocket.Case.Mox"
           CHAIN_TYPE: ${{ matrix.chain-type != 'default' && matrix.chain-type || '' }}
           WETH_TOKEN_TRANSFERS_FILTERING_ENABLED: "true"
+          BRIDGED_TOKENS_ENABLED: ${{ matrix.bridged-tokens }}
+
   test_nethermind_mox_indexer:
     strategy:
       fail-fast: false
@@ -656,7 +671,7 @@ jobs:
           # Maps tcp port 5432 on service container to the host
           - 5432:5432
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -694,6 +709,8 @@ jobs:
           ETHEREUM_JSONRPC_WEB_SOCKET_CASE: "EthereumJSONRPC.WebSocket.Case.Mox"
           CHAIN_TYPE: ${{ matrix.chain-type != 'default' && matrix.chain-type || '' }}
           WETH_TOKEN_TRANSFERS_FILTERING_ENABLED: "true"
+          BRIDGED_TOKENS_ENABLED: ${{ matrix.bridged-tokens }}
+
   test_nethermind_mox_block_scout_web:
     strategy:
       fail-fast: false
@@ -728,7 +745,7 @@ jobs:
           # Maps tcp port 5432 on service container to the host
           - 5432:5432
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
@@ -795,3 +812,5 @@ jobs:
           SOURCIFY_INTEGRATION_ENABLED: "true"
           CHAIN_TYPE: ${{ matrix.chain-type != 'default' && matrix.chain-type || '' }}
           WETH_TOKEN_TRANSFERS_FILTERING_ENABLED: "true"
+          BRIDGED_TOKENS_ENABLED: ${{ matrix.bridged-tokens }}
+          DISABLE_WEBAPP: "false"

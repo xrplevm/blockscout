@@ -44,7 +44,7 @@ defmodule Explorer.GraphQL do
   """
   @spec get_internal_transaction(map()) :: {:ok, InternalTransaction.t()} | {:error, String.t()}
   def get_internal_transaction(%{transaction_hash: _, index: _} = clauses) do
-    if internal_transaction = Repo.replica().get_by(InternalTransaction.where_nonpending_block(), clauses) do
+    if internal_transaction = Repo.replica().get_by(InternalTransaction.where_nonpending_operation(), clauses) do
       {:ok, internal_transaction}
     else
       {:error, "Internal transaction not found."}
@@ -69,8 +69,8 @@ defmodule Explorer.GraphQL do
       )
 
     query
-    |> InternalTransaction.where_nonpending_block()
-    |> InternalTransaction.where_transaction_has_multiple_internal_transactions()
+    |> InternalTransaction.where_nonpending_operation()
+    |> InternalTransaction.where_is_different_from_parent_transaction()
   end
 
   @doc """

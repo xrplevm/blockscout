@@ -10,11 +10,13 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
   alias BlockScoutWeb.API.V2.ApiView
   alias Explorer.Chain
   alias Explorer.Chain.SmartContract
+  alias Explorer.SmartContract.{CompilerVersion, RustVerifierInterface, Solidity.CodeCompiler, StylusVerifierInterface}
+  alias Explorer.SmartContract.Helper
   alias Explorer.SmartContract.Solidity.PublisherWorker, as: SolidityPublisherWorker
   alias Explorer.SmartContract.Solidity.PublishHelper
   alias Explorer.SmartContract.Stylus.PublisherWorker, as: StylusPublisherWorker
   alias Explorer.SmartContract.Vyper.PublisherWorker, as: VyperPublisherWorker
-  alias Explorer.SmartContract.{CompilerVersion, RustVerifierInterface, Solidity.CodeCompiler, StylusVerifierInterface}
+  alias Indexer.Fetcher.OnDemand.ContractCode
 
   action_fallback(BlockScoutWeb.API.V2.FallbackController)
 
@@ -103,7 +105,7 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
       ) do
     Logger.info("API v2 smart-contract #{address_hash_string} verification via flattened file")
 
-    with :validated <- validate_address(params) do
+    with :validated <- validate_address(conn, params) do
       verification_params =
         %{
           "address_hash" => String.downcase(address_hash_string),
@@ -120,7 +122,7 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
         |> Map.put("constructor_arguments", Map.get(params, "constructor_args", ""))
         |> Map.put("name", Map.get(params, "contract_name", ""))
         |> Map.put("external_libraries", Map.get(params, "libraries", %{}))
-        |> Map.put("is_yul", Map.get(params, "is_yul_contract", false))
+        |> Map.put("language", verification_language(params))
         |> Map.put("license_type", Map.get(params, "license_type"))
 
       log_sc_verification_started(address_hash_string)
@@ -138,7 +140,7 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
       ) do
     Logger.info("API v2 smart-contract #{address_hash_string} verification via standard json input")
 
-    with {:json_input, json_input} <- validate_params_standard_json_input(params) do
+    with {:json_input, json_input} <- validate_params_standard_json_input(conn, params) do
       verification_params =
         %{
           "address_hash" => String.downcase(address_hash_string),
@@ -167,7 +169,7 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
 
     with {:not_found, true} <-
            {:not_found, Application.get_env(:explorer, Explorer.ThirdPartyIntegrations.Sourcify)[:enabled]},
-         :validated <- validate_address(params),
+         :validated <- validate_address(conn, params),
          files_array <- PublishHelper.prepare_files_array(files),
          {:no_json_file, %Plug.Upload{path: _path}} <-
            {:no_json_file, PublishHelper.get_one_json(files_array)},
@@ -194,7 +196,7 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
     Logger.info("API v2 smart-contract #{address_hash_string} verification via multipart")
 
     with :verifier_enabled <- check_microservice(),
-         :validated <- validate_address(params),
+         :validated <- validate_address(conn, params),
          libraries <- Map.get(params, "libraries", "{}"),
          {:libs_format, {:ok, json}} <- {:libs_format, Jason.decode(libraries)} do
       verification_params =
@@ -230,7 +232,7 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
         %{"address_hash" => address_hash_string, "compiler_version" => compiler_version, "source_code" => source_code} =
           params
       ) do
-    with :validated <- validate_address(params) do
+    with :validated <- validate_address(conn, params) do
       verification_params =
         %{
           "address_hash" => String.downcase(address_hash_string),
@@ -258,7 +260,7 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
     Logger.info("API v2 vyper smart-contract #{address_hash_string} verification")
 
     with :verifier_enabled <- check_microservice(),
-         :validated <- validate_address(params) do
+         :validated <- validate_address(conn, params) do
       interfaces = parse_interfaces(params["interfaces"])
 
       verification_params =
@@ -291,7 +293,7 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
     Logger.info("API v2 vyper smart-contract #{address_hash_string} verification via standard json input")
 
     with :verifier_enabled <- check_microservice(),
-         {:json_input, json_input} <- validate_params_standard_json_input(params) do
+         {:json_input, json_input} <- validate_params_standard_json_input(conn, params) do
       verification_params = %{
         "address_hash" => String.downcase(address_hash_string),
         "compiler_version" => compiler_version,
@@ -351,7 +353,7 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
     Logger.info("API v2 stylus smart-contract #{address_hash_string} verification via github repository")
 
     with {:not_found, true} <- {:not_found, StylusVerifierInterface.enabled?()},
-         :validated <- validate_address(params) do
+         :validated <- validate_address(conn, params) do
       log_sc_verification_started(address_hash_string)
       Que.add(StylusPublisherWorker, {"github_repository", params})
 
@@ -383,8 +385,8 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
   end
 
   # sobelow_skip ["Traversal.FileModule"]
-  defp validate_params_standard_json_input(%{"files" => files} = params) do
-    with :validated <- validate_address(params),
+  defp validate_params_standard_json_input(conn, %{"files" => files} = params) do
+    with :validated <- validate_address(conn, params),
          files_array <- PublishHelper.prepare_files_array(files),
          {:no_json_file, %Plug.Upload{path: path}} <-
            {:no_json_file, PublishHelper.get_one_json(files_array)},
@@ -393,10 +395,13 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
     end
   end
 
-  defp validate_address(%{"address_hash" => address_hash_string} = params) do
+  defp validate_address(conn, %{"address_hash" => address_hash_string} = params) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
-         {:not_a_smart_contract, bytecode} when bytecode != "0x" <-
-           {:not_a_smart_contract, Chain.smart_contract_bytecode(address_hash, @api_true)},
+         {:not_a_smart_contract, {:ok, _bytecode}} <-
+           {:not_a_smart_contract,
+            conn
+            |> AccessHelper.conn_to_ip_string()
+            |> ContractCode.get_or_fetch_bytecode(address_hash)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:already_verified, false} <-
            {:already_verified, SmartContract.verified_with_full_match?(address_hash, @api_true)} do
@@ -408,6 +413,12 @@ defmodule BlockScoutWeb.API.V2.VerificationController do
     with {:not_found, true} <- {:not_found, RustVerifierInterface.enabled?()} do
       :verifier_enabled
     end
+  end
+
+  defp verification_language(params) do
+    params
+    |> Helper.parse_solidity_verification_language()
+    |> Atom.to_string()
   end
 
   defp log_sc_verification_started(address_hash_string) do

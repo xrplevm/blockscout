@@ -2,8 +2,8 @@ defmodule BlockScoutWeb.API.V2.ScrollView do
   use BlockScoutWeb, :view
 
   alias BlockScoutWeb.API.V2.TransactionView
-  alias Explorer.Chain.Scroll.{Batch, L1FeeParam, Reader}
   alias Explorer.Chain.{Data, Transaction}
+  alias Explorer.Chain.Scroll.{Batch, L1FeeParam, Reader}
 
   @api_true [api?: true]
 
@@ -126,18 +126,13 @@ defmodule BlockScoutWeb.API.V2.ScrollView do
       },
       "start_block_number" => start_block_number,
       "end_block_number" => end_block_number,
-      # todo: It should be removed in favour `start_block_number` property with the next release after 8.0.0
-      "start_block" => start_block_number,
-      # todo: It should be removed in favour `end_block_number` property with the next release after 8.0.0
-      "end_block" => end_block_number,
-      "transactions_count" => transactions_count,
-      # todo: It should be removed in favour `transactions_count` property with the next release after 8.0.0
-      "transaction_count" => transactions_count
+      "transactions_count" => transactions_count
     }
   end
 
   @doc """
     Extends the json output with a sub-map containing information related Scroll.
+    For pending transactions the output is not extended.
 
     ## Parameters
     - `out_json`: A map defining output json which will be extended.
@@ -148,11 +143,16 @@ defmodule BlockScoutWeb.API.V2.ScrollView do
   """
   @spec extend_transaction_json_response(map(), %{
           :__struct__ => Transaction,
-          :block_number => non_neg_integer(),
+          :block_number => non_neg_integer() | nil,
           :index => non_neg_integer(),
           :input => Data.t(),
           optional(any()) => any()
         }) :: map()
+  def extend_transaction_json_response(out_json, %Transaction{block_number: nil}) do
+    # this is a pending transaction
+    out_json
+  end
+
   def extend_transaction_json_response(out_json, %Transaction{} = transaction) do
     config = Application.get_all_env(:explorer)[L1FeeParam]
 

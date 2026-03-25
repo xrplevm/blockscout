@@ -29,6 +29,8 @@ defmodule Indexer.Fetcher.TokenInstance.RealtimeTest do
     test "retry once after timeout" do
       bypass = Bypass.open()
 
+      Application.put_env(:tesla, :adapter, Tesla.Adapter.Mint)
+
       []
       |> TokenInstanceRealtime.Supervisor.child_spec()
       |> ExUnit.Callbacks.start_supervised!()
@@ -111,12 +113,13 @@ defmodule Indexer.Fetcher.TokenInstance.RealtimeTest do
         %{token_contract_address_hash: token.contract_address_hash, token_ids: [Decimal.new(777)]}
       ])
 
-      :timer.sleep(150)
+      :timer.sleep(250)
 
       [instance] = Repo.all(Instance)
 
       assert is_nil(instance.error)
       assert instance.metadata == %{"name" => "name"}
+      Application.put_env(:tesla, :adapter, Explorer.Mock.TeslaAdapter)
       Bypass.down(bypass)
     end
   end

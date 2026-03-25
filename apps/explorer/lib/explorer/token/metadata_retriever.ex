@@ -5,16 +5,16 @@ defmodule Explorer.Token.MetadataRetriever do
 
   require Logger
 
-  alias Explorer.{MetadataURIValidator, Repo}
   alias Explorer.Chain.{Hash, Token}
   alias Explorer.Helper, as: ExplorerHelper
+  alias Explorer.{HttpClient, MetadataURIValidator}
   alias Explorer.SmartContract.Reader
-  alias HTTPoison.{Error, Response}
 
   @no_uri_error "no uri"
   @vm_execution_error "VM execution error"
   @invalid_base64_data "invalid data:application/json;base64"
-  @default_headers [{"User-Agent", "blockscout-8.0.2"}]
+  @invalid_ipfs_path "invalid ipfs path"
+  @default_headers [{"User-Agent", "blockscout-10.0.6"}]
 
   # https://eips.ethereum.org/EIPS/eip-1155#metadata
   @erc1155_token_id_placeholder "{id}"
@@ -171,8 +171,10 @@ defmodule Explorer.Token.MetadataRetriever do
   It will retry to fetch each function in the Smart Contract according to :token_functions_reader_max_retries
   configured in the application env case one of them raised error.
   """
-  @spec get_functions_of([Token.t()] | Token.t()) :: map() | {:ok, [map()]}
-  def get_functions_of(tokens) when is_list(tokens) do
+  @spec get_functions_of([Token.t()] | Token.t(), Keyword.t()) :: map() | {:ok, [map()]}
+  def get_functions_of(tokens, opts \\ [])
+
+  def get_functions_of(tokens, _opts) when is_list(tokens) do
     requests =
       tokens
       |> Enum.flat_map(fn token ->
@@ -226,23 +228,28 @@ defmodule Explorer.Token.MetadataRetriever do
     {:ok, processed_result}
   end
 
-  def get_functions_of(%Token{contract_address_hash: contract_address_hash, type: type}) do
-    base_metadata =
+  def get_functions_of(%Token{contract_address_hash: contract_address_hash, type: type}, opts) do
+    set_skip_metadata = Keyword.get(opts, :set_skip_metadata, false)
+
+    raw_metadata =
       contract_address_hash
       |> fetch_functions_from_contract(@contract_functions)
+
+    base_metadata =
+      raw_metadata
       |> format_contract_functions_result(contract_address_hash)
 
     metadata = try_to_fetch_erc_1155_name(base_metadata, contract_address_hash, type)
 
-    if metadata == %{} do
-      token_to_update =
-        Token
-        |> Repo.get_by(contract_address_hash: contract_address_hash)
-
-      set_skip_metadata(token_to_update)
+    if Enum.empty?(metadata) && set_skip_metadata do
+      Map.put(
+        metadata,
+        :skip_metadata,
+        Enum.all?(raw_metadata, fn {_key, value} -> EthereumJSONRPC.contract_failure?(value) end)
+      )
+    else
+      metadata
     end
-
-    metadata
   end
 
   defp try_to_fetch_erc_1155_name(base_metadata, contract_address_hash, token_type) do
@@ -254,24 +261,27 @@ defmodule Explorer.Token.MetadataRetriever do
 
       case erc_1155_name_uri do
         %{:name => name} when is_binary(name) ->
-          sanitized_name = String.trim(name)
-          uri = {:ok, [sanitized_name]}
-
-          with {:ok, %{metadata: metadata}} <- uri |> fetch_json(nil, nil, false) |> parse_fetch_json_response(),
-               true <- Map.has_key?(metadata, "name"),
-               false <- is_nil(metadata["name"]) do
-            name_metadata = %{:name => metadata["name"]}
-
-            Map.merge(base_metadata, name_metadata)
-          else
-            _ -> base_metadata
-          end
+          fetch_erc1155_name_metadata(name, base_metadata)
 
         _ ->
           base_metadata
       end
     else
       base_metadata
+    end
+  end
+
+  defp fetch_erc1155_name_metadata(name, base_metadata) do
+    sanitized_name = String.trim(name)
+    uri = {:ok, [sanitized_name]}
+
+    with {:ok, %{metadata: metadata}} <- uri |> fetch_json(nil, nil, false) |> parse_fetch_json_response(),
+         true <- Map.has_key?(metadata, "name"),
+         false <- is_nil(metadata["name"]) do
+      name_metadata = %{:name => metadata["name"]}
+      Map.merge(base_metadata, name_metadata)
+    else
+      _ -> base_metadata
     end
   end
 
@@ -306,10 +316,6 @@ defmodule Explorer.Token.MetadataRetriever do
 
   def parse_fetch_json_response(other) do
     other
-  end
-
-  defp set_skip_metadata(token_to_update) do
-    Token.update(token_to_update, %{skip_metadata: true})
   end
 
   def get_total_supply_of(contract_address_hash) when is_binary(contract_address_hash) do
@@ -387,8 +393,8 @@ defmodule Explorer.Token.MetadataRetriever do
 
     contract_functions
     |> handle_invalid_strings(contract_address_hash)
-    |> handle_large_strings
-    |> limit_decimals
+    |> handle_large_strings()
+    |> limit_decimals()
   end
 
   defp atomized_key(@name_signature), do: :name
@@ -708,41 +714,41 @@ defmodule Explorer.Token.MetadataRetriever do
     case URI.parse(token_uri_string) do
       %URI{scheme: "ipfs", host: host, path: path} ->
         resource_id =
-          if host == "ipfs" do
-            "/" <> resource_id = path
-            resource_id
-          else
-            # credo:disable-for-next-line
-            if is_nil(path), do: host, else: host <> path
+          cond do
+            host == "ipfs" and is_binary(path) and String.starts_with?(path, "/") ->
+              String.replace_leading(path, "/", "")
+
+            is_binary(host) and is_binary(path) ->
+              host <> path
+
+            is_binary(host) and is_nil(path) ->
+              host
+
+            true ->
+              nil
           end
 
-        fetch_from_ipfs(resource_id, hex_token_id)
+        fetch_from_ipfs_if_valid_path(resource_id, hex_token_id)
 
       %URI{scheme: "ar", host: _host, path: resource_id} ->
         fetch_from_arweave(resource_id, hex_token_id)
 
       %URI{scheme: _, path: "/ipfs/" <> resource_id} ->
-        fetch_from_ipfs(resource_id, hex_token_id)
+        fetch_from_ipfs_if_valid_path(resource_id, hex_token_id)
 
       %URI{scheme: _, path: "ipfs/" <> resource_id} ->
-        fetch_from_ipfs(resource_id, hex_token_id)
+        fetch_from_ipfs_if_valid_path(resource_id, hex_token_id)
 
       %URI{scheme: scheme} when not is_nil(scheme) ->
         fetch_metadata_inner(token_uri_string, ipfs_params, token_id, hex_token_id, from_base_uri?)
 
       %URI{path: path} ->
-        case path do
-          "Qm" <> <<_::binary-size(44)>> = resource_id ->
-            fetch_from_ipfs(resource_id, hex_token_id)
+        if is_binary(path) and valid_ipfs_path?(public_ipfs_link(path)) do
+          fetch_from_ipfs(path, hex_token_id)
+        else
+          json = ExplorerHelper.decode_json(token_uri_string, true)
 
-          # todo: rewrite for strict CID v1 support
-          "bafybe" <> _ = resource_id ->
-            fetch_from_ipfs(resource_id, hex_token_id)
-
-          _ ->
-            json = ExplorerHelper.decode_json(token_uri_string, true)
-
-            check_type(json, hex_token_id)
+          check_type(json, hex_token_id)
         end
     end
   rescue
@@ -848,12 +854,12 @@ defmodule Explorer.Token.MetadataRetriever do
   defp fetch_metadata_from_uri_request(uri, hex_token_id, ipfs_params) do
     headers = if ipfs?(ipfs_params), do: ipfs_headers(), else: @default_headers
 
-    case Application.get_env(:explorer, :http_adapter).get(uri, headers,
+    case HttpClient.get(uri, headers,
            recv_timeout: 30_000,
            follow_redirect: true,
-           hackney: [pool: :token_instance_fetcher]
+           pool: :token_instance_fetcher
          ) do
-      {:ok, %Response{body: body, status_code: 200, headers: response_headers}} ->
+      {:ok, %{body: body, status_code: 200, headers: response_headers}} ->
         content_type = get_content_type_from_headers(response_headers)
 
         case check_content_type(content_type, uri, hex_token_id, body, ipfs_params) do
@@ -864,7 +870,7 @@ defmodule Explorer.Token.MetadataRetriever do
             {:error, reason}
         end
 
-      {:ok, %Response{body: body, status_code: code}} ->
+      {:ok, %{body: body, status_code: code}} ->
         Logger.debug(
           ["Request to token uri: #{inspect(uri)} failed with code #{code}. Body:", inspect(body)],
           fetcher: :token_instances
@@ -872,7 +878,7 @@ defmodule Explorer.Token.MetadataRetriever do
 
         {:error_code, code}
 
-      {:error, %Error{reason: reason}} ->
+      {:error, reason} ->
         Logger.warning(
           ["Request to token uri failed: #{inspect(uri)}.", inspect(reason)],
           fetcher: :token_instances
@@ -981,6 +987,24 @@ defmodule Explorer.Token.MetadataRetriever do
 
   defp substitute_token_id_to_token_uri(token_uri, _token_id, hex_token_id, _from_base_uri?) do
     String.replace(token_uri, @erc1155_token_id_placeholder, hex_token_id)
+  end
+
+  def valid_ipfs_path?(path) when is_binary(path) do
+    # CIDv0: ipfs://Qm[1-9A-HJ-NP-Za-km-z]{44}
+    # CIDv1: ipfs://b[a-z2-7]{7,}
+    # Path format: ipfs://[CID]/optional/path
+    ipfs_path_regular_expression = ~r/^ipfs:\/\/(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{7,})(\/.*)?$/
+    String.match?(path, ipfs_path_regular_expression)
+  end
+
+  def valid_ipfs_path?(_), do: false
+
+  defp fetch_from_ipfs_if_valid_path(resource_id, hex_token_id) do
+    if is_binary(resource_id) and valid_ipfs_path?(public_ipfs_link(resource_id)) do
+      fetch_from_ipfs(resource_id, hex_token_id)
+    else
+      {:error, @invalid_ipfs_path}
+    end
   end
 
   @doc """

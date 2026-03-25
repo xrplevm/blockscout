@@ -17,6 +17,7 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
   alias Explorer.SmartContract.Solidity.PublisherWorker, as: SolidityPublisherWorker
   alias Explorer.SmartContract.Vyper.Publisher, as: VyperPublisher
   alias Explorer.ThirdPartyIntegrations.Sourcify
+  alias Indexer.Fetcher.OnDemand.ContractCode
 
   if @chain_type == :zksync do
     @optimization_runs "0"
@@ -32,7 +33,7 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
   @addresses_required "Query parameter contractaddresses is required"
   @contract_not_found "Smart-contract not found or is not verified"
   @restricted_access "Access to this address is restricted"
-  @not_a_smart_contract "The address is not a smart contract"
+  @not_a_smart_contract "Address is not a smart-contract"
 
   @addresses_limit 10
   @api_true [api?: true]
@@ -49,9 +50,19 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
       |> Enum.map(fn address_hash_string ->
         case validate_address(address_hash_string, params) do
           {:ok, _address_hash, address} ->
+            contract_creation_internal_transaction_with_transaction_association = [
+              contract_creation_internal_transaction: {
+                Address.contract_creation_internal_transaction_preload_query(),
+                :transaction
+              }
+            ]
+
             Address.maybe_preload_smart_contract_associations(
               address,
-              Address.contract_creation_transaction_associations(),
+              [
+                Address.contract_creation_transaction_association(),
+                contract_creation_internal_transaction_with_transaction_association
+              ],
               @api_true
             )
 
@@ -72,8 +83,11 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
          {:format, {:ok, casted_address_hash}} <- to_address_hash(address_hash),
          {:params, external_libraries} <-
            {:params, fetch_external_libraries(params)},
-         {:not_a_smart_contract, bytecode} when bytecode != "0x" <-
-           {:not_a_smart_contract, Chain.smart_contract_bytecode(casted_address_hash, @api_true)},
+         {:not_a_smart_contract, {:ok, _bytecode}} <-
+           {:not_a_smart_contract,
+            conn
+            |> AccessHelper.conn_to_ip_string()
+            |> ContractCode.get_or_fetch_bytecode(casted_address_hash)},
          {:publish, {:ok, _}} <-
            {:publish, Publisher.publish(address_hash, fetched_params, external_libraries)} do
       address = Contracts.address_hash_to_address_with_source_code(casted_address_hash)
@@ -117,29 +131,32 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
   end
 
   def verify_via_sourcify(conn, %{"addressHash" => address_hash} = input) do
-    files =
-      if Map.has_key?(input, "files") do
-        input["files"]
-      else
-        []
-      end
+    files = sourcify_files(input)
 
-    if SmartContract.verified_with_full_match?(address_hash) do
-      render(conn, :error, error: @verified)
+    with false <- SmartContract.verified_with_full_match?(address_hash),
+         {:ok, _verified_status} <- Sourcify.check_by_address(address_hash) do
+      get_metadata_and_publish(address_hash, conn)
     else
-      case Sourcify.check_by_address(address_hash) do
-        {:ok, _verified_status} ->
-          get_metadata_and_publish(address_hash, conn)
+      true -> render(conn, :error, error: @verified)
+      _ -> verify_via_sourcify_with_files(conn, address_hash, files)
+    end
+  end
 
-        _ ->
-          with {:ok, files_array} <- prepare_params(files),
-               {:ok, validated_files} <- validate_files(files_array) do
-            verify_and_publish(address_hash, validated_files, conn)
-          else
-            {:error, error} ->
-              render(conn, :error, error: error)
-          end
-      end
+  defp verify_via_sourcify_with_files(conn, address_hash, files) do
+    with {:ok, files_array} <- prepare_params(files),
+         {:ok, validated_files} <- validate_files(files_array) do
+      verify_and_publish(address_hash, validated_files, conn)
+    else
+      {:error, error} ->
+        render(conn, :error, error: error)
+    end
+  end
+
+  defp sourcify_files(input) do
+    if Map.has_key?(input, "files") do
+      input["files"]
+    else
+      []
     end
   end
 
@@ -155,8 +172,11 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
            {:check_verified_status, SmartContract.verified_with_full_match?(address_hash)},
          {:format, {:ok, casted_address_hash}} <- to_address_hash(address_hash),
          {:params, {:ok, fetched_params}} <- {:params, fetch_verifysourcecode_params(params)},
-         {:not_a_smart_contract, bytecode} when bytecode != "0x" <-
-           {:not_a_smart_contract, Chain.smart_contract_bytecode(casted_address_hash, @api_true)},
+         {:not_a_smart_contract, {:ok, _bytecode}} <-
+           {:not_a_smart_contract,
+            conn
+            |> AccessHelper.conn_to_ip_string()
+            |> ContractCode.get_or_fetch_bytecode(casted_address_hash)},
          uid <- VerificationStatus.generate_uid(address_hash) do
       Que.add(SolidityPublisherWorker, {"json_api", fetched_params, json_input, uid})
 
@@ -191,8 +211,11 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
            {:check_verified_status, SmartContract.verified_with_full_match?(address_hash)},
          {:format, {:ok, casted_address_hash}} <- to_address_hash(address_hash),
          {:params, {:ok, fetched_params}} <- {:params, fetch_verifysourcecode_solidity_single_file_params(params)},
-         {:not_a_smart_contract, bytecode} when bytecode != "0x" <-
-           {:not_a_smart_contract, Chain.smart_contract_bytecode(casted_address_hash, @api_true)},
+         {:not_a_smart_contract, {:ok, _bytecode}} <-
+           {:not_a_smart_contract,
+            conn
+            |> AccessHelper.conn_to_ip_string()
+            |> ContractCode.get_or_fetch_bytecode(casted_address_hash)},
          external_libraries <- fetch_external_libraries_for_verifysourcecode(params),
          uid <- VerificationStatus.generate_uid(address_hash) do
       Que.add(SolidityPublisherWorker, {"flattened_api", fetched_params, external_libraries, uid})
@@ -335,7 +358,7 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
         files_array
         |> Enum.filter(fn file -> SmartContractHelper.sol_file?(file.filename) end)
 
-      if length(jsons) > 0 and length(sols) > 0 do
+      if not Enum.empty?(jsons) and not Enum.empty?(sols) do
         {:ok, files_array}
       else
         {:error, "You should attach at least one *.json and one *.sol files"}
@@ -429,8 +452,11 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
   def verify_vyper_contract(conn, %{"addressHash" => address_hash} = params) do
     with {:params, {:ok, fetched_params}} <- {:params, fetch_vyper_verify_params(params)},
          {:format, {:ok, casted_address_hash}} <- to_address_hash(address_hash),
-         {:not_a_smart_contract, bytecode} when bytecode != "0x" <-
-           {:not_a_smart_contract, Chain.smart_contract_bytecode(casted_address_hash, @api_true)},
+         {:not_a_smart_contract, {:ok, _bytecode}} <-
+           {:not_a_smart_contract,
+            conn
+            |> AccessHelper.conn_to_ip_string()
+            |> ContractCode.get_or_fetch_bytecode(casted_address_hash)},
          {:publish, {:ok, _}} <-
            {:publish, VyperPublisher.publish(address_hash, fetched_params)} do
       address = Contracts.address_hash_to_address_with_source_code(casted_address_hash)

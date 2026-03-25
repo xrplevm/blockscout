@@ -36,14 +36,16 @@ defmodule BlockScoutWeb.AddressReadProxyControllerTest do
         :internal_transaction_create,
         index: 0,
         transaction: transaction,
+        transaction_index: transaction.index,
         created_contract_address: contract_address,
         block_hash: transaction.block_hash,
-        block_index: 0
+        block_number: transaction.block_number
       )
 
       insert(:smart_contract, address_hash: contract_address.hash, contract_code_md5: "123")
 
-      TestHelper.get_all_proxies_implementation_zero_addresses()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       conn = get(conn, address_read_proxy_path(BlockScoutWeb.Endpoint, :index, Address.checksum(contract_address.hash)))
 
@@ -61,9 +63,10 @@ defmodule BlockScoutWeb.AddressReadProxyControllerTest do
         :internal_transaction_create,
         index: 0,
         transaction: transaction,
+        transaction_index: transaction.index,
         created_contract_address: contract_address,
         block_hash: transaction.block_hash,
-        block_index: 0
+        block_number: transaction.block_number
       )
 
       conn = get(conn, address_read_proxy_path(BlockScoutWeb.Endpoint, :index, Address.checksum(contract_address.hash)))

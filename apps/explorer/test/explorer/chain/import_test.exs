@@ -510,7 +510,7 @@ defmodule Explorer.Chain.ImportTest do
         update_in(@import_data, [:internal_transactions, :params, Access.at(0)], &Map.delete(&1, :call_type))
 
       assert {:error, [changeset]} = Import.all(invalid_import_data)
-      assert changeset_errors(changeset)[:call_type] == ["can't be blank"]
+      assert changeset_errors(changeset)[:call_type_enum] == ["can't be blank"]
     end
 
     test "publishes addresses with updated fetched_coin_balance data to subscribers on insert" do
@@ -1637,7 +1637,12 @@ defmodule Explorer.Chain.ImportTest do
                  },
                  blocks: %{
                    params: [
-                     params_for(:block, hash: block_hash, consensus: true, miner_hash: miner_hash, number: block_number),
+                     params_for(:block,
+                       hash: block_hash,
+                       consensus: true,
+                       miner_hash: miner_hash,
+                       number: block_number
+                     ),
                      params_for(:block,
                        hash: uncle_hash,
                        consensus: false,

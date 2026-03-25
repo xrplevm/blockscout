@@ -3,14 +3,24 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
     Transaction state changes related functions
   """
 
+  import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
   import Explorer.PagingOptions, only: [default_paging_options: 0]
   import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
   import Explorer.Chain.SmartContract.Proxy.Models.Implementation, only: [proxy_implementations_association: 0]
 
-  alias Explorer.Chain.Transaction.StateChange
   alias Explorer.{Chain, PagingOptions, Repo}
-  alias Explorer.Chain.{BlockNumberHelper, InternalTransaction, Transaction, Wei}
+
+  alias Explorer.Chain.{
+    Address.CoinBalance,
+    BlockNumberHelper,
+    DenormalizationHelper,
+    InternalTransaction,
+    Transaction,
+    Wei
+  }
+
   alias Explorer.Chain.Cache.StateChanges
+  alias Explorer.Chain.Transaction.StateChange
   alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
   alias Indexer.Fetcher.OnDemand.TokenBalance, as: TokenBalanceOnDemand
 
@@ -70,6 +80,7 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
       |> Enum.find(&(&1.hash == transaction.hash))
       |> Repo.preload(
         token_transfers: [
+          token: reputation_association(),
           from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
           to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
         ],
@@ -116,10 +127,17 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
     )
   end
 
-  defp internal_transaction_to_coin_balances(%InternalTransaction{call_type: :delegatecall}, _, _, acc), do: acc
+  defp internal_transaction_to_coin_balances(
+         %InternalTransaction{call_type: call_type, call_type_enum: call_type_enum},
+         _,
+         _,
+         acc
+       )
+       when :delegatecall in [call_type, call_type_enum],
+       do: acc
 
   defp internal_transaction_to_coin_balances(internal_transaction, previous_block_number, options, acc) do
-    if internal_transaction.value |> Wei.to(:wei) |> Decimal.positive?() do
+    if not is_nil(internal_transaction.value) and Decimal.positive?(Wei.to(internal_transaction.value, :wei)) do
       acc
       |> Map.put_new_lazy(internal_transaction.from_address_hash, fn ->
         {internal_transaction.from_address,
@@ -135,17 +153,17 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
   end
 
   defp coin_balance(address_hash, _block_number, _options) when is_nil(address_hash) do
-    %Wei{value: Decimal.new(0)}
+    Wei.zero()
   end
 
   defp coin_balance(address_hash, block_number, options) do
-    case Chain.get_coin_balance(address_hash, block_number, options) do
+    case CoinBalance.get_coin_balance(address_hash, block_number, options) do
       %{value: val} when not is_nil(val) ->
         val
 
       _ ->
         CoinBalanceOnDemand.trigger_historic_fetch(options[:ip], address_hash, block_number)
-        %Wei{value: Decimal.new(0)}
+        Wei.zero()
     end
   end
 
@@ -186,36 +204,48 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
   end
 
   defp token_transfers_to_balances_reducer(transfer, balances, prev_block, options) do
-    from = transfer.from_address
-    to = transfer.to_address
-    token_hash = transfer.token_contract_address_hash
+    token_type =
+      if DenormalizationHelper.tt_denormalization_finished?() do
+        transfer.token_type
+      else
+        transfer.token && transfer.token.type
+      end
 
-    balances
-    |> case do
-      # from address already in the map
-      %{^from => %{^token_hash => _}} = balances ->
-        balances
+    # Skip ERC-7984 (confidential) transfers - we can't track encrypted balances
+    if token_type == "ERC-7984" do
+      balances
+    else
+      from = transfer.from_address
+      to = transfer.to_address
+      token_hash = transfer.token_contract_address_hash
 
-      # we need to add from address into the map
-      balances ->
-        put_in(
-          balances,
-          Enum.map([from, token_hash], &Access.key(&1, %{})),
-          token_balances(from.hash, transfer, prev_block, options)
-        )
-    end
-    |> case do
-      # to address already in the map
-      %{^to => %{^token_hash => _}} = balances ->
-        balances
+      balances
+      |> case do
+        # from address already in the map
+        %{^from => %{^token_hash => _}} = balances ->
+          balances
 
-      # we need to add to address into the map
-      balances ->
-        put_in(
-          balances,
-          Enum.map([to, token_hash], &Access.key(&1, %{})),
-          token_balances(to.hash, transfer, prev_block, options)
-        )
+        # we need to add from address into the map
+        balances ->
+          put_in(
+            balances,
+            Enum.map([from, token_hash], &Access.key(&1, %{})),
+            token_balances(from.hash, transfer, prev_block, options)
+          )
+      end
+      |> case do
+        # to address already in the map
+        %{^to => %{^token_hash => _}} = balances ->
+          balances
+
+        # we need to add to address into the map
+        balances ->
+          put_in(
+            balances,
+            Enum.map([to, token_hash], &Access.key(&1, %{})),
+            token_balances(to.hash, transfer, prev_block, options)
+          )
+      end
     end
   end
 end
