@@ -35,6 +35,10 @@ services:
         API_V1_WRITE_METHODS_DISABLED: "false"
         ADMIN_PANEL_ENABLED: ""
         RELEASE_VERSION: 9.0.2
+        # Must match runtime CHAIN_TYPE (common-blockscout.env). The Block schema's
+        # blob_gas_used/excess_blob_gas fields are compiled in only for ethereum;
+        # a mismatch breaks the blocks on_conflict upsert and halts block indexing.
+        CHAIN_TYPE: ${CHAIN_TYPE:-ethereum}
     links:
       - db:database
     environment:
