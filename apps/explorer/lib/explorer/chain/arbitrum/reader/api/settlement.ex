@@ -31,10 +31,10 @@ defmodule Explorer.Chain.Arbitrum.Reader.API.Settlement do
     L1Batch
   }
 
+  alias Explorer.{Chain, PagingOptions}
   alias Explorer.Chain.Arbitrum.Reader.Common
   alias Explorer.Chain.Block, as: FullBlock
   alias Explorer.Chain.Cache.BackgroundMigrations, as: MigrationStatuses
-  alias Explorer.{Chain, PagingOptions}
 
   @api_true [api?: true]
 
@@ -255,7 +255,7 @@ defmodule Explorer.Chain.Arbitrum.Reader.API.Settlement do
   """
   @spec get_da_record_by_data_key(binary()) :: {:ok, {non_neg_integer(), map()}} | {:error, :not_found}
   def get_da_record_by_data_key("0x" <> _ = data_key) do
-    data_key_bytes = data_key |> Chain.string_to_block_hash() |> Kernel.elem(1) |> Map.get(:bytes)
+    data_key_bytes = data_key |> Chain.string_to_full_hash() |> Kernel.elem(1) |> Map.get(:bytes)
     get_da_record_by_data_key(data_key_bytes)
   end
 

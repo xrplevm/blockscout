@@ -12,7 +12,6 @@ defmodule Indexer.Fetcher.OnDemand.TokenBalance do
   alias Explorer.Chain.Cache.Counters.AverageBlockTime
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Hash
-  alias Explorer.Helper, as: ExplorerHelper
   alias Explorer.Token.BalanceReader
   alias Explorer.Utility.RateLimiter
   alias Indexer.BufferedTask
@@ -127,9 +126,8 @@ defmodule Indexer.Fetcher.OnDemand.TokenBalance do
   defp prepare_ctb_params(current_token_balances, initial_acc, block_number) do
     Enum.reduce(current_token_balances, initial_acc, fn %{token_id: token_id} = stale_current_token_balance, acc ->
       prepared_ctb = %{
-        token_contract_address_hash:
-          ExplorerHelper.add_0x_prefix(stale_current_token_balance.token.contract_address_hash),
-        address_hash: ExplorerHelper.add_0x_prefix(stale_current_token_balance.address_hash),
+        token_contract_address_hash: to_string(stale_current_token_balance.token_contract_address_hash),
+        address_hash: to_string(stale_current_token_balance.address_hash),
         block_number: block_number,
         token_id: token_id && Decimal.to_integer(token_id),
         token_type: stale_current_token_balance.token_type
@@ -138,7 +136,7 @@ defmodule Indexer.Fetcher.OnDemand.TokenBalance do
       updated_tokens =
         Map.put_new(
           acc[:tokens],
-          stale_current_token_balance.token.contract_address_hash.bytes,
+          stale_current_token_balance.token_contract_address_hash.bytes,
           stale_current_token_balance.token
         )
 
@@ -211,7 +209,7 @@ defmodule Indexer.Fetcher.OnDemand.TokenBalance do
             address_current_token_balances: %{
               address_hash: to_string(address_hash),
               address_current_token_balances:
-                Enum.map(ctbs, fn ctb ->
+                Enum.map(ctbs, fn %CurrentTokenBalance{} = ctb ->
                   %CurrentTokenBalance{ctb | token: tokens[ctb.token_contract_address_hash.bytes]}
                 end)
             }
@@ -230,7 +228,7 @@ defmodule Indexer.Fetcher.OnDemand.TokenBalance do
         {{:ok, balance}, request}, acc ->
           params = %{
             address_hash: request.address_hash,
-            token_contract_address_hash: request.contract_address_hash,
+            token_contract_address_hash: request.token_contract_address_hash,
             token_type: request.token_type,
             token_id: request.token_id,
             block_number: request.block_number,

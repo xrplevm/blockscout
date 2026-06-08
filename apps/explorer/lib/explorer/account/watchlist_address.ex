@@ -1,9 +1,82 @@
+defmodule Explorer.Account.WatchlistAddress.Schema do
+  @moduledoc """
+    Models account's addresses watchlist.
+  """
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
+
+  alias Explorer.Account.Watchlist
+  alias Explorer.Chain.Wei
+
+  @chain_type_fields (case @chain_type do
+                        :zilliqa ->
+                          elem(
+                            quote do
+                              field(:watch_zrc_2_input, :boolean, default: true, null: false)
+                              field(:watch_zrc_2_output, :boolean, default: true, null: false)
+                            end,
+                            2
+                          )
+
+                        _ ->
+                          []
+                      end)
+
+  @doc """
+  Generates the typed schema for watchlist addresses.
+
+  This macro dynamically creates the schema definition including both common fields and chain-type-specific
+  fields (e.g., ZRC-2 fields for Zilliqa). Should be invoked in the module that requires the schema definition.
+
+  ## Returns
+  - The typed_schema block with all necessary fields.
+  """
+  defmacro generate do
+    quote do
+      typed_schema "account_watchlist_addresses" do
+        field(:address_hash_hash, Cloak.Ecto.SHA256) :: binary() | nil
+        field(:name, Explorer.Encrypted.Binary, null: false)
+        field(:address_hash, Explorer.Encrypted.AddressHash, null: false)
+        field(:user_created, :boolean, null: false, default: true)
+
+        belongs_to(:watchlist, Watchlist, null: false)
+
+        field(:watch_coin_input, :boolean, default: true, null: false)
+        field(:watch_coin_output, :boolean, default: true, null: false)
+        field(:watch_erc_20_input, :boolean, default: true, null: false)
+        field(:watch_erc_20_output, :boolean, default: true, null: false)
+        field(:watch_erc_721_input, :boolean, default: true, null: false)
+        field(:watch_erc_721_output, :boolean, default: true, null: false)
+        field(:watch_erc_1155_input, :boolean, default: true, null: false)
+        field(:watch_erc_1155_output, :boolean, default: true, null: false)
+        field(:watch_erc_404_input, :boolean, default: true, null: false)
+        field(:watch_erc_404_output, :boolean, default: true, null: false)
+        field(:notify_email, :boolean, default: true, null: false)
+        field(:notify_epns, :boolean)
+        field(:notify_feed, :boolean)
+        field(:notify_inapp, :boolean)
+
+        field(:fetched_coin_balance, Wei, virtual: true)
+        field(:tokens_fiat_value, :decimal, virtual: true)
+        field(:tokens_count, :integer, virtual: true)
+        field(:tokens_overflow, :boolean, virtual: true)
+
+        timestamps()
+
+        unquote_splicing(@chain_type_fields)
+      end
+    end
+  end
+end
+
 defmodule Explorer.Account.WatchlistAddress do
   @moduledoc """
     WatchlistAddress entity
   """
 
+  require Explorer.Account.WatchlistAddress.Schema
+
   use Explorer.Schema
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   import Ecto.Changeset
 
@@ -11,44 +84,25 @@ defmodule Explorer.Account.WatchlistAddress do
   alias Explorer.Account.Notifier.ForbiddenAddress
   alias Explorer.Account.Watchlist
   alias Explorer.{Chain, PagingOptions, Repo}
-  alias Explorer.Chain.{Address, Wei}
+  alias Explorer.Chain.{Address, Hash, Transaction}
 
   import Explorer.Chain, only: [hash_to_lower_case_string: 1]
 
+  @default_page_size 50
+  @default_paging_options %PagingOptions{page_size: @default_page_size}
+
   @watchlist_not_found "Watchlist not found"
 
-  typed_schema "account_watchlist_addresses" do
-    field(:address_hash_hash, Cloak.Ecto.SHA256) :: binary() | nil
-    field(:name, Explorer.Encrypted.Binary, null: false)
-    field(:address_hash, Explorer.Encrypted.AddressHash, null: false)
-    field(:user_created, :boolean, null: false, default: true)
-
-    belongs_to(:watchlist, Watchlist, null: false)
-
-    field(:watch_coin_input, :boolean, default: true, null: false)
-    field(:watch_coin_output, :boolean, default: true, null: false)
-    field(:watch_erc_20_input, :boolean, default: true, null: false)
-    field(:watch_erc_20_output, :boolean, default: true, null: false)
-    field(:watch_erc_721_input, :boolean, default: true, null: false)
-    field(:watch_erc_721_output, :boolean, default: true, null: false)
-    field(:watch_erc_1155_input, :boolean, default: true, null: false)
-    field(:watch_erc_1155_output, :boolean, default: true, null: false)
-    field(:watch_erc_404_input, :boolean, default: true, null: false)
-    field(:watch_erc_404_output, :boolean, default: true, null: false)
-    field(:notify_email, :boolean, default: true, null: false)
-    field(:notify_epns, :boolean)
-    field(:notify_feed, :boolean)
-    field(:notify_inapp, :boolean)
-
-    field(:fetched_coin_balance, Wei, virtual: true)
-    field(:tokens_fiat_value, :decimal, virtual: true)
-    field(:tokens_count, :integer, virtual: true)
-    field(:tokens_overflow, :boolean, virtual: true)
-
-    timestamps()
+  @attrs_base ~w(name address_hash watch_coin_input watch_coin_output watch_erc_20_input watch_erc_20_output watch_erc_721_input watch_erc_721_output watch_erc_1155_input watch_erc_1155_output watch_erc_404_input watch_erc_404_output notify_email notify_epns notify_feed notify_inapp watchlist_id)a
+  if @chain_type == :zilliqa do
+    @attrs_chain_type ~w(watch_zrc_2_input watch_zrc_2_output)a
+  else
+    @attrs_chain_type ~w()a
   end
 
-  @attrs ~w(name address_hash watch_coin_input watch_coin_output watch_erc_20_input watch_erc_20_output watch_erc_721_input watch_erc_721_output watch_erc_1155_input watch_erc_1155_output watch_erc_404_input watch_erc_404_output notify_email notify_epns notify_feed notify_inapp watchlist_id)a
+  @attrs @attrs_base ++ @attrs_chain_type
+
+  Explorer.Account.WatchlistAddress.Schema.generate()
 
   def changeset do
     %__MODULE__{}
@@ -164,12 +218,12 @@ defmodule Explorer.Account.WatchlistAddress do
     end
   end
 
-  def watchlist_addresses_by_watchlist_id_query(watchlist_id) when not is_nil(watchlist_id) do
+  defp watchlist_addresses_by_watchlist_id_query(watchlist_id) when not is_nil(watchlist_id) do
     __MODULE__
     |> where([wl_address], wl_address.watchlist_id == ^watchlist_id)
   end
 
-  def watchlist_addresses_by_watchlist_id_query(_), do: nil
+  defp watchlist_addresses_by_watchlist_id_query(_), do: nil
 
   @doc """
     Query paginated watchlist addresses by watchlist id
@@ -308,4 +362,86 @@ defmodule Explorer.Account.WatchlistAddress do
        )}
     end)
   end
+
+  @doc """
+  Fetches the watchlist transactions for the given watchlist ID and options.
+  """
+  @spec fetch_watchlist_transactions(integer(), keyword()) ::
+          {%{Hash.Address.t() => %{label: String.t(), display_name: String.t()}}, [Transaction.t()]}
+  def fetch_watchlist_transactions(watchlist_id, options) do
+    watchlist_addresses =
+      watchlist_id
+      |> watchlist_addresses_by_watchlist_id_query()
+      |> Repo.account_repo().all()
+
+    address_hashes = Enum.map(watchlist_addresses, fn wa -> wa.address_hash end)
+
+    watchlist_names =
+      Enum.reduce(watchlist_addresses, %{}, fn wa, acc ->
+        Map.put(acc, wa.address_hash, %{label: wa.name, display_name: wa.name})
+      end)
+
+    {watchlist_names, address_hashes_to_mined_transactions_without_rewards(address_hashes, options)}
+  end
+
+  defp address_hashes_to_mined_transactions_without_rewards(address_hashes, options) do
+    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+
+    address_hashes
+    |> address_hashes_to_mined_transactions_tasks(options)
+    |> Transaction.wait_for_address_transactions()
+    |> Enum.sort_by(&{&1.block_number, &1.index}, &>=/2)
+    |> Enum.dedup_by(& &1.hash)
+    |> Enum.take(paging_options.page_size)
+    |> Chain.select_repo(options).preload(Map.keys(necessity_by_association))
+  end
+
+  defp address_hashes_to_mined_transactions_tasks(address_hashes, options) do
+    direction = Keyword.get(options, :direction)
+
+    options
+    |> Transaction.address_to_transactions_tasks_query(true)
+    |> Transaction.not_pending_transactions()
+    |> Transaction.matching_address_queries_list(direction, address_hashes)
+    |> Enum.map(fn query ->
+      Task.async(fn ->
+        query
+        |> Transaction.put_has_token_transfers_to_transaction(false, aliased?: true)
+        |> Chain.select_repo(options).all()
+      end)
+    end)
+  end
+
+  @doc """
+  Retrieves the ID of a WatchlistAddress entry for a given watchlist and address.
+
+  This function queries the WatchlistAddress table to find an entry that matches
+  both the provided watchlist ID and address hash. It returns the ID of the first
+  matching entry, if found.
+
+  ## Parameters
+  - `watchlist_id`: The ID of the watchlist to search within.
+  - `address_hash`: The address hash to look for, as a `Hash.Address.t()` struct.
+
+  ## Returns
+  - An integer representing the ID of the matching WatchlistAddress entry, if found.
+  - `nil` if no matching entry is found or if either input is `nil`.
+  """
+  @spec select_watchlist_address_id(integer() | nil, Hash.Address.t() | nil) :: integer() | nil
+  def select_watchlist_address_id(watchlist_id, address_hash)
+      when not is_nil(watchlist_id) and not is_nil(address_hash) do
+    wa_ids =
+      __MODULE__
+      |> where([wa], wa.watchlist_id == ^watchlist_id and wa.address_hash_hash == ^address_hash)
+      |> select([wa], wa.id)
+      |> Repo.account_repo().all()
+
+    case wa_ids do
+      [wa_id | _] -> wa_id
+      _ -> nil
+    end
+  end
+
+  def select_watchlist_address_id(_watchlist_id, _address_hash), do: nil
 end

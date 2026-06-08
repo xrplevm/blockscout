@@ -9,7 +9,6 @@ defmodule Explorer.Tags.AddressToTag do
 
   alias Explorer.{Chain, Repo}
   alias Explorer.Chain.{Address, Hash}
-  alias Explorer.Helper, as: ExplorerHelper
   alias Explorer.Tags.AddressTag
 
   # Notation.import_types(BlockScoutWeb.GraphQL.Schema.Types)
@@ -71,7 +70,7 @@ defmodule Explorer.Tags.AddressToTag do
       current_address_hashes_strings =
         current_address_hashes
         |> Enum.map(fn address_hash ->
-          ExplorerHelper.add_0x_prefix(address_hash.bytes)
+          to_string(address_hash)
         end)
 
       current_address_hashes_strings_tuples = MapSet.new(current_address_hashes_strings)
@@ -92,22 +91,11 @@ defmodule Explorer.Tags.AddressToTag do
       changeset_to_add_list =
         addresses_to_add
         |> Enum.map(fn address_hash_string ->
-          with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
-               :ok <- Address.check_address_exists(address_hash) do
-            %{
-              tag_id: tag_id,
-              address_hash: address_hash,
-              inserted_at: DateTime.utc_now(),
-              updated_at: DateTime.utc_now()
-            }
-          else
-            _ ->
-              nil
-          end
+          build_address_to_tag_changeset(address_hash_string, tag_id)
         end)
         |> Enum.filter(&(!is_nil(&1)))
 
-      unless Enum.empty?(addresses_to_delete) do
+      if !Enum.empty?(addresses_to_delete) do
         delete_query_base =
           from(
             att in __MODULE__,
@@ -125,6 +113,21 @@ defmodule Explorer.Tags.AddressToTag do
         on_conflict: :nothing,
         conflict_target: [:address_hash, :tag_id]
       )
+    end
+  end
+
+  defp build_address_to_tag_changeset(address_hash_string, tag_id) do
+    with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
+         :ok <- Address.check_address_exists(address_hash) do
+      %{
+        tag_id: tag_id,
+        address_hash: address_hash,
+        inserted_at: DateTime.utc_now(),
+        updated_at: DateTime.utc_now()
+      }
+    else
+      _ ->
+        nil
     end
   end
 

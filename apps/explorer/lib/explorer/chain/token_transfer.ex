@@ -5,7 +5,8 @@ defmodule Explorer.Chain.TokenTransfer.Schema do
     Changes in the schema should be reflected in the bulk import module:
     - Explorer.Chain.Import.Runner.TokenTransfers
   """
-  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
+  use Utils.CompileTimeEnvHelper,
+    chain_identity: [:explorer, :chain_identity]
 
   alias Explorer.Chain.{
     Address,
@@ -16,10 +17,10 @@ defmodule Explorer.Chain.TokenTransfer.Schema do
 
   alias Explorer.Chain.Token.Instance
 
-  # Remove `transaction_hash` from primary key for `:celo` chain type. See
+  # Remove `transaction_hash` from primary key for `optimism-celo` chain type. See
   # `Explorer.Chain.Log.Schema` for more details.
-  @transaction_field (case @chain_type do
-                        :celo ->
+  @transaction_field (case @chain_identity do
+                        {:optimism, :celo} ->
                           quote do
                             [
                               belongs_to(:transaction, Transaction,
@@ -134,11 +135,14 @@ defmodule Explorer.Chain.TokenTransfer do
   """
 
   use Explorer.Schema
-  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
+
+  use Utils.CompileTimeEnvHelper, chain_identity: [:explorer, :chain_identity]
+  use Utils.RuntimeEnvHelper, chain_identity: [:explorer, :chain_identity]
 
   require Explorer.Chain.TokenTransfer.Schema
 
   import Ecto.Changeset
+  import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
 
   alias Explorer.Chain
   alias Explorer.Chain.{DenormalizationHelper, Hash, Log, TokenTransfer}
@@ -158,6 +162,16 @@ defmodule Explorer.Chain.TokenTransfer do
   @erc1155_batch_transfer_signature "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb"
   @erc404_erc20_transfer_event "0xe59fdd36d0d223c0c7d996db7ad796880f45e1936cb0bb7ac102e7082e031487"
   @erc404_erc721_transfer_event "0xe5f815dc84b8cecdfd4beedfc3f91ab5be7af100eca4e8fb11552b867995394f"
+
+  # event NativeCoinTransferred(address indexed from, address indexed to, uint256 amount)
+  @arc_native_coin_transferred_event "0x62f084c00a442dcf51cdbb51beed2839bf42a268da8474b0e98f38edb7db5a22"
+
+  # event NativeCoinMinted(address indexed recipient, uint256 amount)
+  @arc_native_coin_minted_event "0xb049859d09b3a7d0189a07db4d4becee1a2aa269023205478b1360ab6fc12114"
+
+  # event NativeCoinBurned(address indexed from, uint256 amount)
+  @arc_native_coin_burned_event "0xaaf1ef013644e67c5cea90217acdf0accd334f8437fc9a89a53cfc9b25fb5c25"
+  @erc7984_transfer_event "0x67500e8d0ed826d2194f514dd0d8124f35648ab6e3fb5e6ed867134cffe661e9"
 
   @transfer_function_signature "0xa9059cbb"
 
@@ -184,16 +198,16 @@ defmodule Explorer.Chain.TokenTransfer do
   Explorer.Chain.TokenTransfer.Schema.generate()
 
   @required_attrs ~w(block_number log_index from_address_hash to_address_hash token_contract_address_hash block_hash token_type)a
-                  |> (&(case @chain_type do
-                          :celo ->
+                  |> (&(case @chain_identity do
+                          {:optimism, :celo} ->
                             &1
 
                           _ ->
                             [:transaction_hash | &1]
                         end)).()
   @optional_attrs ~w(amount amounts token_ids block_consensus)a
-                  |> (&(case @chain_type do
-                          :celo ->
+                  |> (&(case @chain_identity do
+                          {:optimism, :celo} ->
                             [:transaction_hash | &1]
 
                           _ ->
@@ -226,6 +240,14 @@ defmodule Explorer.Chain.TokenTransfer do
 
   def erc404_erc721_transfer_event, do: @erc404_erc721_transfer_event
 
+  def arc_native_coin_transferred_event, do: @arc_native_coin_transferred_event
+
+  def arc_native_coin_minted_event, do: @arc_native_coin_minted_event
+
+  def arc_native_coin_burned_event, do: @arc_native_coin_burned_event
+
+  def erc7984_transfer_event, do: @erc7984_transfer_event
+
   @doc """
   ERC 20's transfer(address,uint256) function signature
   """
@@ -243,7 +265,7 @@ defmodule Explorer.Chain.TokenTransfer do
         preloads =
           DenormalizationHelper.extend_transaction_preload([
             :transaction,
-            :token,
+            [token: reputation_association()],
             [from_address: [:scam_badge, :names, :smart_contract, Implementation.proxy_implementations_association()]],
             [to_address: [:scam_badge, :names, :smart_contract, Implementation.proxy_implementations_association()]]
           ])
@@ -270,7 +292,7 @@ defmodule Explorer.Chain.TokenTransfer do
         preloads =
           DenormalizationHelper.extend_transaction_preload([
             :transaction,
-            :token,
+            [token: reputation_association()],
             [from_address: [:scam_badge, :names, :smart_contract, Implementation.proxy_implementations_association()]],
             [to_address: [:scam_badge, :names, :smart_contract, Implementation.proxy_implementations_association()]]
           ])
@@ -303,7 +325,7 @@ defmodule Explorer.Chain.TokenTransfer do
         preloads =
           DenormalizationHelper.extend_transaction_preload([
             :transaction,
-            :token,
+            [token: reputation_association()],
             [from_address: [:scam_badge, :names, :smart_contract, Implementation.proxy_implementations_association()]],
             [to_address: [:scam_badge, :names, :smart_contract, Implementation.proxy_implementations_association()]]
           ])
@@ -312,14 +334,45 @@ defmodule Explorer.Chain.TokenTransfer do
         |> preload(^preloads)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> maybe_filter_by_token_type(token_type)
-        |> ExplorerHelper.maybe_hide_scam_addresses(:token_contract_address_hash, options)
+        |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> page_token_transfer(paging_options)
         |> limit(^paging_options.page_size)
         |> Chain.select_repo(options).all()
     end
   end
 
-  defp maybe_filter_by_token_type(query, token_types) do
+  @doc """
+  Conditionally filters token transfers by token type based on denormalization status.
+
+  This function applies token type filtering to the query using either the
+  denormalized `token_type` field or by joining with the tokens table,
+  depending on whether the token transfer denormalization process has been
+  completed. When denormalization is finished, it filters directly on
+  `tt.token_type`. Otherwise, it joins with the associated token and filters
+  on `token.type`.
+
+  ## Parameters
+  - `query`: An Ecto query for token transfers
+  - `token_type`: Either a binary token type (e.g., "ERC-20") or a list of
+    token types to filter by
+
+  ## Returns
+  - The modified query with token type filtering applied
+  - For empty token type lists, returns the original query unchanged
+  """
+  @spec maybe_filter_by_token_type(Ecto.Query.t(), binary() | [binary()]) :: Ecto.Query.t()
+  def maybe_filter_by_token_type(query, token_type) when is_binary(token_type) do
+    if DenormalizationHelper.tt_denormalization_finished?() do
+      query
+      |> where([tt], tt.token_type == ^token_type)
+    else
+      query
+      |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
+      |> where([tt, block, token], token.type == ^token_type)
+    end
+  end
+
+  def maybe_filter_by_token_type(query, token_types) do
     if Enum.empty?(token_types) do
       query
     else
@@ -543,7 +596,7 @@ defmodule Explorer.Chain.TokenTransfer do
       |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
       |> preload([token: token], [{:token, token}])
       |> filter_by_type(token_types)
-      |> ExplorerHelper.maybe_hide_scam_addresses(:token_contract_address_hash, options)
+      |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
       |> handle_paging_options(paging_options)
     else
       to_address_hash_query =
@@ -553,7 +606,7 @@ defmodule Explorer.Chain.TokenTransfer do
         |> filter_by_token_address_hash(token_address_hash)
         |> filter_by_type(token_types)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
-        |> ExplorerHelper.maybe_hide_scam_addresses(:token_contract_address_hash, options)
+        |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> handle_paging_options(paging_options)
         |> Chain.wrapped_union_subquery()
 
@@ -564,7 +617,7 @@ defmodule Explorer.Chain.TokenTransfer do
         |> filter_by_token_address_hash(token_address_hash)
         |> filter_by_type(token_types)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
-        |> ExplorerHelper.maybe_hide_scam_addresses(:token_contract_address_hash, options)
+        |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> handle_paging_options(paging_options)
         |> Chain.wrapped_union_subquery()
 
@@ -633,13 +686,7 @@ defmodule Explorer.Chain.TokenTransfer do
           l.first_topic == ^@constant or
             l.first_topic == ^@erc1155_single_transfer_signature or
             l.first_topic == ^@erc1155_batch_transfer_signature,
-        where:
-          not exists(
-            from(tf in TokenTransfer,
-              where: tf.transaction_hash == parent_as(:log).transaction_hash,
-              where: tf.log_index == parent_as(:log).index
-            )
-          ),
+        where: not exists(token_transfer_exists_query()),
         select: l.block_number,
         distinct: l.block_number
       )
@@ -647,15 +694,37 @@ defmodule Explorer.Chain.TokenTransfer do
     Repo.stream_reduce(query, [], &[&1 | &2])
   end
 
-  @doc """
-    Returns ecto query to fetch consensus token transfers with ERC-721 token type
-  """
-  @spec erc_721_token_transfers_query() :: Ecto.Query.t()
-  def erc_721_token_transfers_query do
-    only_consensus_transfers_query()
-    |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
-    |> where([tt, token: token], token.type == "ERC-721")
-    |> preload([tt, token: token], [{:token, token}])
+  # Builds a query to check if a token transfer exists for a given log. Handles
+  # chain-specific logic for transaction_hash comparison.
+  #
+  # For Celo epoch blocks, `transaction_hash` can be `nil` in both `Log` and
+  # `TokenTransfer`. A direct SQL comparison `NULL = NULL` evaluates to
+  # `UNKNOWN` (effectively false in this context). Therefore, we need a
+  # NULL-safe comparison for `transaction_hash`. Additionally, `block_hash` is
+  # included in the join condition to uniquely identify the token transfer, as
+  # `transaction_hash` (when nil) and `log_index` alone are insufficient.
+  @spec token_transfer_exists_query() :: Ecto.Query.t()
+  defp token_transfer_exists_query do
+    query =
+      from(tt in TokenTransfer,
+        where: tt.block_hash == parent_as(:log).block_hash,
+        where: tt.log_index == parent_as(:log).index
+      )
+
+    chain_identity()
+    |> case do
+      {:optimism, :celo} ->
+        query
+        |> where(
+          [tt],
+          tt.transaction_hash == parent_as(:log).transaction_hash or
+            (is_nil(parent_as(:log).transaction_hash) and is_nil(tt.transaction_hash))
+        )
+
+      _ ->
+        query
+        |> where([tt], tt.transaction_hash == parent_as(:log).transaction_hash)
+    end
   end
 
   @doc """

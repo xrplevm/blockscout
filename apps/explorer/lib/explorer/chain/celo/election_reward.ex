@@ -30,11 +30,10 @@ defmodule Explorer.Chain.Celo.ElectionReward do
 
   import Explorer.PagingOptions, only: [default_paging_options: 0]
   import Ecto.Query, only: [from: 2, where: 3]
-  import Explorer.Helper, only: [safe_parse_non_negative_integer: 1]
 
+  alias Explorer.{Chain, SortingHelper}
+  alias Explorer.Chain.{Address, Address.Reputation, Celo.Epoch, Hash, Token, Wei}
   alias Explorer.Chain.Cache.CeloCoreContracts
-  alias Explorer.{Chain, PagingOptions}
-  alias Explorer.Chain.{Address, Block, Hash, Token, Wei}
 
   @type type :: :voter | :validator | :group | :delegated_payment
   @types_enum ~w(voter validator group delegated_payment)a
@@ -60,7 +59,7 @@ defmodule Explorer.Chain.Celo.ElectionReward do
     :delegated_payment => :usd_token
   }
 
-  @required_attrs ~w(amount type block_hash account_address_hash associated_account_address_hash)a
+  @required_attrs ~w(amount type epoch_number account_address_hash associated_account_address_hash)a
 
   @primary_key false
   typed_schema "celo_election_rewards" do
@@ -74,14 +73,11 @@ defmodule Explorer.Chain.Celo.ElectionReward do
       primary_key: true
     )
 
-    belongs_to(
-      :block,
-      Block,
+    belongs_to(:epoch, Epoch,
       primary_key: true,
-      foreign_key: :block_hash,
-      references: :hash,
-      type: Hash.Full,
-      null: false
+      foreign_key: :epoch_number,
+      references: :number,
+      type: :integer
     )
 
     belongs_to(
@@ -151,99 +147,142 @@ defmodule Explorer.Chain.Celo.ElectionReward do
   end
 
   @doc """
-  Returns a map of reward type atoms to their corresponding token atoms.
+  Converts a reward type string to its corresponding atom.
+
+  ## Parameters
+  - `type_string` (`String.t()`): The string representation of the reward type.
 
   ## Returns
-  - A map where the keys are reward type atoms and the values are token atoms.
+  - `{:ok, type}` if the string is valid, `:error` otherwise.
 
   ## Examples
 
-      iex> ElectionReward.reward_type_atom_to_token_atom()
-      %{voter: :celo_token, validator: :usd_token, group: :usd_token, delegated_payment: :usd_token}
+      iex> ElectionReward.type_from_string("voter")
+      {:ok, :voter}
+
+      iex> ElectionReward.type_from_string("invalid")
+      :error
   """
-  @spec reward_type_atom_to_token_atom() :: %{type => atom()}
-  def reward_type_atom_to_token_atom, do: @reward_type_atom_to_token_atom
-
-  @doc """
-  Builds a query to aggregate rewards by type for a given block hash.
-
-  ## Parameters
-  - `block_hash` (`Hash.Full.t()`): The block hash to filter rewards.
-
-  ## Returns
-  - An Ecto query.
-  """
-  @spec block_hash_to_aggregated_rewards_by_type_query(Hash.Full.t()) :: Ecto.Query.t()
-  def block_hash_to_aggregated_rewards_by_type_query(block_hash) do
-    from(
-      r in __MODULE__,
-      where: r.block_hash == ^block_hash,
-      select: {r.type, sum(r.amount), count(r)},
-      group_by: r.type
-    )
+  @spec type_from_string(String.t()) :: {:ok, type} | :error
+  def type_from_string(type_string) do
+    Map.fetch(@reward_type_string_to_atom, type_string)
   end
 
   @doc """
-  Builds a query to get rewards by type for a given block hash.
+  Retrieves election rewards by epoch number and reward type.
 
   ## Parameters
-  - `block_hash` (`Hash.Full.t()`): The block hash to filter rewards.
-  - `reward_type` (`type`): The type of reward to filter.
+  - `epoch_number` (`Hash.t()`): The epoch number to search for election rewards.
+  - `reward_type` (`ElectionReward.type()`): The type of reward to filter.
+  - `options` (`Keyword.t()`): Optional parameters for fetching data.
 
   ## Returns
-  - An Ecto query.
+  - `[ElectionReward.t()]`: A list of election rewards filtered by epoch number
+    and reward type.
+
   """
-  @spec block_hash_to_rewards_by_type_query(Hash.Full.t(), type) :: Ecto.Query.t()
-  def block_hash_to_rewards_by_type_query(block_hash, reward_type) do
-    from(
-      r in __MODULE__,
-      where: r.block_hash == ^block_hash and r.type == ^reward_type,
-      select: r,
-      order_by: [
-        desc: :amount,
-        asc: :account_address_hash,
-        asc: :associated_account_address_hash
-      ]
-    )
+  @spec epoch_number_and_type_to_rewards(integer(), type(), Keyword.t()) :: [__MODULE__.t()]
+  def epoch_number_and_type_to_rewards(epoch_number, reward_type, options \\ [])
+      when reward_type in @types_enum do
+    default_sorting = [
+      desc: :amount,
+      asc: :account_address_hash,
+      asc: :associated_account_address_hash
+    ]
+
+    paging_options = Keyword.get(options, :paging_options, default_paging_options())
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    sorting_options = Keyword.get(options, :sorting, [])
+
+    __MODULE__
+    |> where([r], r.epoch_number == ^epoch_number)
+    |> where([r], r.type == ^reward_type)
+    |> SortingHelper.apply_sorting(sorting_options, default_sorting)
+    |> SortingHelper.page_with_sorting(paging_options, sorting_options, default_sorting)
+    |> Chain.join_associations(necessity_by_association)
+    |> Chain.select_repo(options).all()
   end
 
-  @doc """
-  Builds a query to get rewards by account address hash.
-  """
-  @spec address_hash_to_rewards_query(Hash.Address.t()) :: Ecto.Query.t()
   def address_hash_to_rewards_query(address_hash) do
-    from(
-      r in __MODULE__,
-      where: r.account_address_hash == ^address_hash,
-      select: r
-    )
+    __MODULE__
+    |> where([r], r.account_address_hash == ^address_hash)
   end
 
   @doc """
-  Builds a query to get ordered rewards by account address hash.
+  Retrieves election rewards associated with a given address hash.
 
   ## Parameters
-  - `address_hash` (`Hash.Address.t()`): The account address hash to filter
+  - `address_hash` (`Hash.Address.t()`): The address hash to search for election
     rewards.
+  - `options` (`Keyword.t()`): Optional parameters for fetching data.
 
   ## Returns
-  - An Ecto query.
+  - `[ElectionReward.t()]`: A list of election rewards associated with the
+    address hash.
+
+  ## Examples
+
+      iex> address_hash = %Hash.Address{
+      ...>   byte_count: 20,
+      ...>   bytes: <<0x1d1f7f0e1441c37e28b89e0b5e1edbbd34d77649 :: size(160)>>
+      ...> }
+      iex> Explorer.Chain.Celo.ElectionReward.address_hash_to_rewards(address_hash)
+      [%ElectionReward{}, ...]
   """
-  @spec address_hash_to_ordered_rewards_query(Hash.Address.t()) :: Ecto.Query.t()
-  def address_hash_to_ordered_rewards_query(address_hash) do
-    from(
-      r in __MODULE__,
-      join: b in assoc(r, :block),
-      as: :block,
-      preload: [block: b],
-      where: r.account_address_hash == ^address_hash,
-      select: r,
-      order_by: [
-        desc: b.number,
-        desc: r.amount,
-        asc: r.associated_account_address_hash,
-        asc: r.type
-      ]
+  @spec address_hash_to_rewards(Hash.Address.t(), Keyword.t()) :: [__MODULE__.t()]
+  def address_hash_to_rewards(address_hash, options \\ []) do
+    default_sorting = [
+      desc: :epoch_number,
+      asc: :type,
+      desc: :amount,
+      asc: :associated_account_address_hash
+    ]
+
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    paging_options = Keyword.get(options, :paging_options, default_paging_options())
+    sorting_options = Keyword.get(options, :sorting, [])
+    from_epoch = Keyword.get(options, :from_epoch)
+    to_epoch = Keyword.get(options, :to_epoch)
+
+    address_hash
+    |> address_hash_to_rewards_query()
+    |> where_epoch_number_in_period(from_epoch, to_epoch)
+    |> join_token()
+    |> SortingHelper.apply_sorting(sorting_options, default_sorting)
+    |> SortingHelper.page_with_sorting(paging_options, sorting_options, default_sorting)
+    |> Chain.join_associations(necessity_by_association)
+    |> Chain.select_repo(options).all()
+    |> with_loaded_token_reputations()
+  end
+
+  @doc """
+  Retrieves a mapping of reward types to their corresponding token address
+  hashes.
+  ## Returns
+  - `%{type => Hash.Address.t()}`: A map of reward types to
+    token address hashes.
+  """
+  @spec reward_type_to_token_address_hash :: %{type => Hash.Address.t()}
+  def reward_type_to_token_address_hash do
+    Map.new(
+      @reward_type_atom_to_token_atom,
+      fn {type, token_atom} ->
+        addresses =
+          token_atom
+          |> CeloCoreContracts.get_address_updates()
+          |> case do
+            {:ok, addresses} -> addresses
+            _ -> []
+          end
+          |> Enum.map(fn %{"address" => address_hash_string} ->
+            {:ok, address_hash} = Hash.Address.cast(address_hash_string)
+            address_hash
+          end)
+
+        # This match should never fail
+        [address] = addresses
+        {type, address}
+      end
     )
   end
 
@@ -258,31 +297,7 @@ defmodule Explorer.Chain.Celo.ElectionReward do
   """
   @spec join_token(Ecto.Query.t()) :: Ecto.Query.t()
   def join_token(query) do
-    # This match should never fail
-    %{
-      voter: [voter_token_address_hash],
-      validator: [validator_token_address_hash],
-      group: [group_token_address_hash],
-      delegated_payment: [delegated_payment_token_address_hash]
-    } =
-      Map.new(
-        @reward_type_atom_to_token_atom,
-        fn {type, token_atom} ->
-          addresses =
-            token_atom
-            |> CeloCoreContracts.get_address_updates()
-            |> case do
-              {:ok, addresses} -> addresses
-              _ -> []
-            end
-            |> Enum.map(fn %{"address" => address_hash_string} ->
-              {:ok, address_hash} = Hash.Address.cast(address_hash_string)
-              address_hash
-            end)
-
-          {type, addresses}
-        end
-      )
+    reward_type_to_token_address_hash = reward_type_to_token_address_hash()
 
     from(
       r in query,
@@ -301,258 +316,69 @@ defmodule Explorer.Chain.Celo.ElectionReward do
             """,
             r.type,
             ^"voter",
-            ^voter_token_address_hash.bytes,
+            ^reward_type_to_token_address_hash.voter.bytes,
             ^"validator",
-            ^validator_token_address_hash.bytes,
+            ^reward_type_to_token_address_hash.validator.bytes,
             ^"group",
-            ^group_token_address_hash.bytes,
+            ^reward_type_to_token_address_hash.group.bytes,
             ^"delegated_payment",
-            ^delegated_payment_token_address_hash.bytes
+            ^reward_type_to_token_address_hash.delegated_payment.bytes
           ),
       select_merge: %{token: t}
     )
   end
 
-  @doc """
-  Makes Explorer.PagingOptions map for election rewards.
-  """
-  @spec block_paging_options(map()) :: [Chain.paging_options()]
-  def block_paging_options(params) do
-    with %{
-           "amount" => amount_string,
-           "account_address_hash" => account_address_hash_string,
-           "associated_account_address_hash" => associated_account_address_hash_string
-         }
-         when is_binary(amount_string) and
-                is_binary(account_address_hash_string) and
-                is_binary(associated_account_address_hash_string) <- params,
-         {amount, ""} <- Decimal.parse(amount_string),
-         {:ok, account_address_hash} <- Hash.Address.cast(account_address_hash_string),
-         {:ok, associated_account_address_hash} <-
-           Hash.Address.cast(associated_account_address_hash_string) do
-      [
-        paging_options: %{
-          default_paging_options()
-          | key: {amount, account_address_hash, associated_account_address_hash}
-        }
-      ]
-    else
-      _ ->
-        [paging_options: default_paging_options()]
-    end
-  end
+  # Ensures each reward token has its reputation association loaded to avoid JSON encoding errors.
+  @spec with_loaded_token_reputations([__MODULE__.t()]) :: [__MODULE__.t()]
+  defp with_loaded_token_reputations(rewards) when is_list(rewards) do
+    tokens =
+      rewards
+      |> Enum.map(& &1.token)
+      |> Enum.reject(&is_nil/1)
 
-  @doc """
-  Makes Explorer.PagingOptions map for election rewards.
-  """
-  @spec address_paging_options(map()) :: [Chain.paging_options()]
-  def address_paging_options(params) do
-    with %{
-           "block_number" => block_number_string,
-           "amount" => amount_string,
-           "associated_account_address_hash" => associated_account_address_hash_string,
-           "type" => type_string
-         }
-         when is_binary(block_number_string) and
-                is_binary(amount_string) and
-                is_binary(associated_account_address_hash_string) and
-                is_binary(type_string) <- params,
-         {:ok, block_number} <- safe_parse_non_negative_integer(block_number_string),
-         {amount, ""} <- Decimal.parse(amount_string),
-         {:ok, associated_account_address_hash} <-
-           Hash.Address.cast(associated_account_address_hash_string),
-         {:ok, type} <- Map.fetch(@reward_type_string_to_atom, type_string) do
-      [
-        paging_options: %{
-          default_paging_options()
-          | key: {block_number, amount, associated_account_address_hash, type}
-        }
-      ]
-    else
-      _ ->
-        [paging_options: default_paging_options()]
-    end
-  end
+    hash_to_reputation =
+      tokens
+      |> Enum.map(& &1.contract_address_hash)
+      |> Reputation.preload_reputation()
+      |> Map.new()
 
-  @doc """
-  Paginates the given query based on the provided `PagingOptions`.
+    address_hash_to_token =
+      Enum.reduce(tokens, %{}, fn token, acc ->
+        reputation = Map.get(hash_to_reputation, token.contract_address_hash)
+        Map.put(acc, token.contract_address_hash, Map.put(token, :reputation, reputation))
+      end)
 
-  ## Parameters
-  - `query` (`Ecto.Query.t()`): The query to paginate.
-  - `paging_options` (`PagingOptions.t()`): The pagination options.
-
-  ## Returns
-  - An Ecto query with pagination applied.
-  """
-  def paginate(query, %PagingOptions{key: nil}), do: query
-
-  def paginate(query, %PagingOptions{key: {0 = _amount, account_address_hash, associated_account_address_hash}}) do
-    where(
-      query,
-      [reward],
-      reward.amount == 0 and
-        (reward.account_address_hash > ^account_address_hash or
-           (reward.account_address_hash == ^account_address_hash and
-              reward.associated_account_address_hash > ^associated_account_address_hash))
-    )
-  end
-
-  def paginate(query, %PagingOptions{key: {amount, account_address_hash, associated_account_address_hash}}) do
-    where(
-      query,
-      [reward],
-      reward.amount < ^amount or
-        (reward.amount == ^amount and
-           reward.account_address_hash > ^account_address_hash) or
-        (reward.amount == ^amount and
-           reward.account_address_hash == ^account_address_hash and
-           reward.associated_account_address_hash > ^associated_account_address_hash)
-    )
-  end
-
-  def paginate(query, %PagingOptions{key: {0 = _block_number, 0 = _amount, associated_account_address_hash, type}}) do
-    where(
-      query,
-      [reward, block],
-      block.number == 0 and reward.amount == 0 and
-        (reward.associated_account_address_hash > ^associated_account_address_hash or
-           (reward.associated_account_address_hash == ^associated_account_address_hash and
-              reward.type > ^type))
-    )
-  end
-
-  def paginate(query, %PagingOptions{key: {0 = _block_number, amount, associated_account_address_hash, type}}) do
-    where(
-      query,
-      [reward, block],
-      block.number == 0 and
-        (reward.amount < ^amount or
-           (reward.amount == ^amount and
-              reward.associated_account_address_hash > ^associated_account_address_hash) or
-           (reward.amount == ^amount and
-              reward.associated_account_address_hash == ^associated_account_address_hash and
-              reward.type > ^type))
-    )
-  end
-
-  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
-  def paginate(query, %PagingOptions{key: {block_number, 0 = _amount, associated_account_address_hash, type}}) do
-    where(
-      query,
-      [reward, block],
-      block.number < ^block_number or
-        (block.number == ^block_number and
-           reward.amount == 0 and
-           reward.associated_account_address_hash > ^associated_account_address_hash) or
-        (block.number == ^block_number and
-           reward.amount == 0 and
-           reward.associated_account_address_hash == ^associated_account_address_hash and
-           reward.type > ^type)
-    )
-  end
-
-  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
-  def paginate(query, %PagingOptions{key: {block_number, amount, associated_account_address_hash, type}}) do
-    where(
-      query,
-      [reward, block],
-      block.number < ^block_number or
-        (block.number == ^block_number and
-           reward.amount < ^amount) or
-        (block.number == ^block_number and
-           reward.amount == ^amount and
-           reward.associated_account_address_hash > ^associated_account_address_hash) or
-        (block.number == ^block_number and
-           reward.amount == ^amount and
-           reward.associated_account_address_hash == ^associated_account_address_hash and
-           reward.type > ^type)
-    )
-  end
-
-  @doc """
-  Converts an `ElectionReward` struct to paging parameters on the block view.
-
-  ## Parameters
-  - `reward` (`%__MODULE__{}`): The election reward struct.
-
-  ## Returns
-  - A map representing the block paging parameters.
-
-  ## Examples
-
-      iex> ElectionReward.to_block_paging_params(%ElectionReward{amount: 1000, account_address_hash: "0x123", associated_account_address_hash: "0x456"})
-      %{"amount" => 1000, "account_address_hash" => "0x123", "associated_account_address_hash" => "0x456"}
-  """
-  def to_block_paging_params(%__MODULE__{
-        amount: amount,
-        account_address_hash: account_address_hash,
-        associated_account_address_hash: associated_account_address_hash
-      }) do
-    %{
-      "amount" => amount,
-      "account_address_hash" => account_address_hash,
-      "associated_account_address_hash" => associated_account_address_hash
-    }
-  end
-
-  @doc """
-  Converts an `ElectionReward` struct to paging parameters on the address view.
-
-  ## Parameters
-  - `reward` (`%__MODULE__{}`): The election reward struct.
-
-  ## Returns
-  - A map representing the address paging parameters.
-
-  ## Examples
-
-      iex> ElectionReward.to_address_paging_params(%ElectionReward{block_number: 1, amount: 1000, associated_account_address_hash: "0x456", type: :voter})
-      %{"block_number" => 1, "amount" => 1000, "associated_account_address_hash" => "0x456", "type" => :voter}
-  """
-  def to_address_paging_params(%__MODULE__{
-        block: %Block{number: block_number},
-        amount: amount,
-        associated_account_address_hash: associated_account_address_hash,
-        type: type
-      }) do
-    %{
-      "block_number" => block_number,
-      "amount" => amount,
-      "associated_account_address_hash" => associated_account_address_hash,
-      "type" => type
-    }
+    Enum.map(rewards, fn r ->
+      case r.token do
+        nil -> r
+        %{contract_address_hash: h} -> %{r | token: Map.get(address_hash_to_token, h)}
+      end
+    end)
   end
 
   @doc """
   Custom filter for `ElectionReward`, inspired by
-  `Chain.where_block_number_in_period/3`.
-
-  TODO: Consider reusing `Chain.where_block_number_in_period/3`. This would
-  require storing or making `merge_select` of `block_number`.
+  `Explorer.Chain.Block.Reader.General.where_block_number_in_period/3`
   """
-  @spec where_block_number_in_period(
+  @spec where_epoch_number_in_period(
           Ecto.Query.t(),
           String.t() | integer() | nil,
           String.t() | integer() | nil
         ) :: Ecto.Query.t()
-  def where_block_number_in_period(base_query, from_block, to_block)
-      when is_nil(from_block) and not is_nil(to_block),
-      do: where(base_query, [_, block], block.number <= ^to_block)
+  def where_epoch_number_in_period(base_query, nil, nil),
+    do: base_query
 
-  def where_block_number_in_period(base_query, from_block, to_block)
-      when not is_nil(from_block) and is_nil(to_block),
-      do: where(base_query, [_, block], block.number > ^from_block)
+  def where_epoch_number_in_period(base_query, nil, to_epoch),
+    do: where(base_query, [reward], reward.epoch_number < ^to_epoch)
 
-  def where_block_number_in_period(base_query, from_block, to_block)
-      when is_nil(from_block) and is_nil(to_block),
-      do: base_query
+  def where_epoch_number_in_period(base_query, from_epoch, nil),
+    do: where(base_query, [reward], reward.epoch_number >= ^from_epoch)
 
-  def where_block_number_in_period(base_query, from_block, to_block),
+  def where_epoch_number_in_period(base_query, from_epoch, to_epoch),
     do:
       where(
         base_query,
-        [_, block],
-        block.number > ^from_block and
-          block.number <= ^to_block
+        [reward],
+        reward.epoch_number >= ^from_epoch and reward.epoch_number < ^to_epoch
       )
 end

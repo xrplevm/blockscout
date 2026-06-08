@@ -5,10 +5,13 @@ defmodule BlockScoutWeb.API.V2.ZilliqaView do
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   if @chain_type == :zilliqa do
-    # TODO: remove when https://github.com/elixir-lang/elixir/issues/13975 comes to elixir release
-    import Explorer.Chain.Zilliqa.Helper, only: [scilla_transaction?: 1], warn: false
-    alias Explorer.Chain.{Address, Block, Transaction}, warn: false
-    alias Explorer.Chain.Zilliqa.{AggregateQuorumCertificate, QuorumCertificate}, warn: false
+    import Explorer.Chain.Zilliqa.Helper, only: [scilla_transaction?: 1]
+    alias Ecto.Association.NotLoaded
+    alias Explorer.Chain.{Address, Block, Transaction}
+    alias Explorer.Chain.Zilliqa.{AggregateQuorumCertificate, QuorumCertificate}
+    alias Explorer.Chain.Zilliqa.Zrc2.TokenAdapter
+
+    @api_true [api?: true]
 
     @doc """
     Extends the JSON output with a sub-map containing information related to Zilliqa,
@@ -54,6 +57,28 @@ defmodule BlockScoutWeb.API.V2.ZilliqaView do
     end
 
     @doc """
+    Extends the JSON output with a sub-map containing information related to Zilliqa,
+    such as ZRC-2 contract address.
+
+    ## Parameters
+    - `out_json`: A map defining the output JSON which will be extended.
+    - `adapter_address`: The adapter contract address bound with the ZRC-2 contract address.
+
+    ## Returns
+    - A map extended with data related to Zilliqa.
+    """
+    @spec extend_token_json_response(map(), Address.t()) :: map()
+    def extend_token_json_response(%{"type" => "ZRC-2"} = out_json, %Address{} = adapter_address) do
+      Map.put(out_json, :zilliqa, %{
+        zrc2_address_hash: TokenAdapter.adapter_address_hash_to_zrc2_address_hash(adapter_address.hash, @api_true)
+      })
+    end
+
+    def extend_token_json_response(out_json, _) do
+      out_json
+    end
+
+    @doc """
     Extends the JSON output with a sub-map containing information related to
     Zilliqa, such as if the address is a Scilla smart contract.
 
@@ -64,8 +89,8 @@ defmodule BlockScoutWeb.API.V2.ZilliqaView do
     ## Returns
     - A map extended with data related to Zilliqa.
     """
-    @spec extend_address_json_response(map(), Address.t()) :: map()
-    def extend_address_json_response(out_json, %Address{} = address) do
+    @spec extend_address_json_response(map(), Address.t() | nil | NotLoaded.t()) :: map()
+    def extend_address_json_response(out_json, address) do
       is_scilla_contract =
         case address do
           %Address{
@@ -81,8 +106,6 @@ defmodule BlockScoutWeb.API.V2.ZilliqaView do
         is_scilla_contract: is_scilla_contract
       })
     end
-
-    def extend_address_json_response(out_json, _address), do: out_json
 
     @spec add_quorum_certificate(map(), Block.t()) :: map()
     defp add_quorum_certificate(

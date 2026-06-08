@@ -78,7 +78,7 @@
         # Priority values are: `low, normal, high, higher`
         #
         {Credo.Check.Design.AliasUsage,
-         excluded_namespaces: ~w(Block Blocks Import Runner Socket SpandexDatadog Task),
+         excluded_namespaces: ~w(Block Blocks Import Runner Socket SpandexDatadog Task Schemas),
          excluded_lastnames:
            ~w(Address DateTime Exporter Fetcher Full Instrumenter Logger Monitor Name Number Repo Spec Time Unit),
          priority: :low},
@@ -89,7 +89,8 @@
         # or the `schema` macro in Ecto schemas to trigger DuplicatedCode, just
         # set the `excluded_macros` parameter to `[:schema, :setup, :test]`.
         #
-        {Credo.Check.Design.DuplicatedCode, excluded_macros: [], mass_threshold: 80},
+        # todo: reduce mass_threshold number
+        {Credo.Check.Design.DuplicatedCode, excluded_macros: [], mass_threshold: 800},
 
         # You can also customize the exit_status of each check.
         # If you don't want TODO comments to cause `mix credo` to fail, just

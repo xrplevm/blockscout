@@ -76,9 +76,16 @@ defmodule EthereumJSONRPC.Geth do
              json_rpc_named_arguments_corrected_timeout
            ) do
       case {traces, transactions_params} do
-        {[%{} = first_trace | _], [%{block_hash: block_hash} | _]} ->
+        {[%{} = first_trace | _], [%{block_hash: block_hash, block_number: block_number} | _]} ->
           {:ok,
-           [%{first_trace: first_trace, block_hash: block_hash, json_rpc_named_arguments: json_rpc_named_arguments}]}
+           [
+             %{
+               first_trace: first_trace,
+               block_hash: block_hash,
+               block_number: block_number,
+               json_rpc_named_arguments: json_rpc_named_arguments
+             }
+           ]}
 
         _ ->
           {:error, :not_found}
@@ -278,7 +285,7 @@ defmodule EthereumJSONRPC.Geth do
       responses
       |> Enum.map(fn
         %{result: %{"structLogs" => nil}} ->
-          []
+          {:ok, []}
 
         %{id: id, result: %{"structLogs" => _} = result} ->
           debug_trace_transaction_response_to_internal_transactions_params(
@@ -313,7 +320,11 @@ defmodule EthereumJSONRPC.Geth do
                FetchedCode.request(%{id: id, block_quantity: integer_to_quantity(block_number), address: address})
 
              {id, %{type: "selfdestruct", from_address_hash: hash_data, block_number: block_number}} ->
-               FetchedBalance.request(%{id: id, block_quantity: integer_to_quantity(block_number), hash_data: hash_data})
+               FetchedBalance.request(%{
+                 id: id,
+                 block_quantity: integer_to_quantity(block_number),
+                 hash_data: hash_data
+               })
 
              _ ->
                nil
@@ -441,7 +452,7 @@ defmodule EthereumJSONRPC.Geth do
         )
 
       "" ->
-        unless allow_empty_traces?(), do: log_unknown_type(call)
+        if !allow_empty_traces?(), do: log_unknown_type(call)
         acc
 
       _unknown_type ->
@@ -451,7 +462,7 @@ defmodule EthereumJSONRPC.Geth do
   end
 
   defp parse_call_tracer_calls({%{} = call, _}, acc, _trace_address, _inner?) do
-    unless allow_empty_traces?(), do: log_unknown_type(call)
+    if !allow_empty_traces?(), do: log_unknown_type(call)
     acc
   end
 

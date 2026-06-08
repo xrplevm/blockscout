@@ -3,14 +3,19 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
     Module to interact with Transaction Interpretation Service
   """
 
+  import BlockScoutWeb.Chain, only: [transaction_to_internal_transactions: 2]
+
   alias BlockScoutWeb.API.V2.{Helper, InternalTransactionView, TokenTransferView, TokenView, TransactionView}
   alias Ecto.Association.NotLoaded
-  alias Explorer.Chain
-  alias Explorer.Helper, as: ExplorerHelper
+  alias Explorer.{Chain, HttpClient}
   alias Explorer.Chain.{Data, InternalTransaction, Log, TokenTransfer, Transaction}
-  alias HTTPoison.Response
+  alias Explorer.Helper, as: ExplorerHelper
 
-  import Explorer.Chain.SmartContract.Proxy.Models.Implementation, only: [proxy_implementations_association: 0]
+  import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
+
+  import Explorer.Chain.SmartContract.Proxy.Models.Implementation,
+    only: [proxy_implementations_association: 0, proxy_implementations_smart_contracts_association: 0]
+
   import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata: 1]
   import Explorer.Utility.Microservice, only: [base_url: 2, check_enabled: 2]
   require Logger
@@ -19,6 +24,12 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
   @request_error_msg "Error while sending request to Transaction Interpretation Service"
   @api_true api?: true
   @items_limit 50
+  @token_options [
+    api?: true,
+    necessity_by_association: %{
+      reputation_association() => :optional
+    }
+  ]
   @internal_transaction_necessity_by_association [
     necessity_by_association: %{
       [created_contract_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] =>
@@ -83,8 +94,8 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
   defp http_post_request(url, body) do
     headers = [{"Content-Type", "application/json"}]
 
-    case HTTPoison.post(url, Jason.encode!(body), headers, recv_timeout: @post_timeout) do
-      {:ok, %Response{body: body, status_code: 200}} ->
+    case HttpClient.post(url, Jason.encode!(body), headers, recv_timeout: @post_timeout) do
+      {:ok, %{body: body, status_code: 200}} ->
         body |> Jason.decode() |> preload_template_variables()
 
       error ->
@@ -104,7 +115,7 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
   end
 
   defp try_get_cached_value(hash) do
-    with {:ok, %Response{body: body, status_code: 200}} <- HTTPoison.get(cache_url(hash)),
+    with {:ok, %{body: body, status_code: 200}} <- HttpClient.get(cache_url(hash)),
          {:ok, json} <- body |> Jason.decode() do
       {:ok, json} |> preload_template_variables()
     else
@@ -113,7 +124,7 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
     end
   end
 
-  defp http_response_code({:ok, %Response{status_code: status_code}}), do: status_code
+  defp http_response_code({:ok, %{status_code: status_code}}), do: status_code
   defp http_response_code(_), do: 500
 
   def enabled?, do: check_enabled(:block_scout_web, __MODULE__) == :ok
@@ -198,7 +209,8 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
       [
         necessity_by_association: %{
           [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-          [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional
+          [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
+          [token: reputation_association()] => :optional
         }
       ]
       |> Keyword.merge(@api_true)
@@ -219,8 +231,8 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
       @internal_transaction_necessity_by_association
       |> Keyword.merge(@api_true)
 
-    transaction.hash
-    |> InternalTransaction.transaction_to_internal_transactions(full_options)
+    transaction
+    |> transaction_to_internal_transactions(full_options)
     |> Enum.take(@items_limit)
   end
 
@@ -233,7 +245,7 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
     full_options =
       [
         necessity_by_association: %{
-          [address: [:names, :smart_contract, proxy_implementations_association()]] => :optional
+          [address: [:names, :smart_contract, proxy_implementations_smart_contracts_association()]] => :optional
         }
       ]
       |> Keyword.merge(@api_true)
@@ -255,7 +267,7 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
     log_options =
       [
         necessity_by_association: %{
-          [address: [:names, :smart_contract, proxy_implementations_association()]] => :optional
+          [address: [:names, :smart_contract, proxy_implementations_smart_contracts_association()]] => :optional
         },
         limit: @items_limit
       ]
@@ -277,7 +289,7 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
         necessity_by_association: %{
           [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
           [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-          :token => :optional
+          [token: reputation_association()] => :optional
         }
       ]
       |> Keyword.merge(@api_true)
@@ -308,10 +320,19 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
 
   defp preload_template_variables(error), do: error
 
+  # TODO: remove this once we have updated the transaction interpretation service
   defp preload_template_variable(%{"type" => "token", "value" => %{"address" => address_hash_string} = value}),
     do: %{
       "type" => "token",
-      "value" => address_hash_string |> Chain.token_from_address_hash(@api_true) |> token_from_db() |> Map.merge(value)
+      "value" =>
+        address_hash_string |> Chain.token_from_address_hash(@token_options) |> token_from_db() |> Map.merge(value)
+    }
+
+  defp preload_template_variable(%{"type" => "token", "value" => %{"address_hash" => address_hash_string} = value}),
+    do: %{
+      "type" => "token",
+      "value" =>
+        address_hash_string |> Chain.token_from_address_hash(@token_options) |> token_from_db() |> Map.merge(value)
     }
 
   defp preload_template_variable(%{"type" => "address", "value" => %{"hash" => address_hash_string} = value}),
@@ -321,6 +342,7 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
         address_hash_string
         |> Chain.hash_to_address(
           necessity_by_association: %{
+            :scam_badge => :optional,
             :names => :optional,
             :smart_contract => :optional,
             proxy_implementations_association() => :optional
@@ -373,12 +395,12 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
         type: 0,
         value: "0",
         method: Transaction.method_name(mock_transaction, Transaction.format_decoded_input(decoded_input), true),
-        status: user_op["status"],
-        actions: [],
+        status: (user_op["status"] && :ok) || :error,
         transaction_types: [],
         raw_input: user_op_call_data,
         decoded_input: decoded_input_json,
-        token_transfers: prepared_token_transfers
+        token_transfers: prepared_token_transfers,
+        internal_transactions: []
       },
       logs_data: %{items: prepared_logs},
       chain_id: :block_scout_web |> Application.get_env(:chain_id) |> ExplorerHelper.parse_integer()
@@ -394,7 +416,7 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
   def decode_user_op_calldata(user_op_hash, call_data) do
     {:ok, input} = Data.cast(call_data)
 
-    {:ok, op_hash} = Chain.string_to_transaction_hash(user_op_hash)
+    {:ok, op_hash} = Chain.string_to_full_hash(user_op_hash)
 
     mock_transaction = %Transaction{
       to_address: %NotLoaded{},

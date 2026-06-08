@@ -12,12 +12,15 @@ defmodule Indexer.Block.Catchup.Fetcher do
       async_import_blobs: 2,
       async_import_block_rewards: 2,
       async_import_celo_epoch_block_operations: 2,
+      async_import_celo_accounts: 2,
       async_import_coin_balances: 2,
       async_import_created_contract_codes: 2,
       async_import_filecoin_addresses_info: 2,
       async_import_internal_transactions: 2,
       async_import_replaced_transactions: 2,
+      async_import_signed_authorizations_statuses: 2,
       async_import_token_balances: 2,
+      async_import_current_token_balances: 2,
       async_import_token_instances: 1,
       async_import_tokens: 2,
       async_import_uncles: 2,
@@ -28,7 +31,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
   alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.Chain
   alias Explorer.Chain.NullRoundHeight
-  alias Explorer.Utility.{MassiveBlock, MissingRangesManipulator}
+  alias Explorer.Utility.{MassiveBlock, MissingBlockRange}
   alias Indexer.{Block, Tracer}
   alias Indexer.Block.Catchup.TaskSupervisor
   alias Indexer.Fetcher.OnDemand.ContractCreator, as: ContractCreatorOnDemand
@@ -49,7 +52,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
     Logger.metadata(fetcher: :block_catchup)
     Process.flag(:trap_exit, true)
 
-    case MissingRangesManipulator.get_latest_batch(blocks_batch_size() * blocks_concurrency()) do
+    case MissingBlockRange.get_latest_batch(blocks_batch_size() * blocks_concurrency()) do
       [] ->
         %{
           first_block_number: nil,
@@ -140,12 +143,15 @@ defmodule Indexer.Block.Catchup.Fetcher do
     async_import_internal_transactions(imported, realtime?)
     async_import_tokens(imported, realtime?)
     async_import_token_balances(imported, realtime?)
+    async_import_current_token_balances(imported, realtime?)
     async_import_uncles(imported, realtime?)
     async_import_replaced_transactions(imported, realtime?)
     async_import_token_instances(imported)
     async_import_blobs(imported, realtime?)
     async_import_celo_epoch_block_operations(imported, realtime?)
+    async_import_celo_accounts(imported, realtime?)
     async_import_filecoin_addresses_info(imported, realtime?)
+    async_import_signed_authorizations_statuses(imported, realtime?)
   end
 
   defp stream_fetch_and_import(state, ranges) do
@@ -157,7 +163,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
       timeout: :infinity,
       shutdown: Application.get_env(:indexer, :graceful_shutdown_period)
     )
-    |> Stream.run()
+    |> handle_fetch_and_import_results()
   end
 
   # Run at state.blocks_concurrency max_concurrency when called by `stream_import/1`
@@ -175,23 +181,22 @@ defmodule Indexer.Block.Catchup.Fetcher do
 
     {fetch_duration, result} = :timer.tc(fn -> fetch_and_import_range(block_fetcher, range) end)
 
-    Prometheus.Instrumenter.block_full_process(fetch_duration, __MODULE__)
+    Prometheus.Instrumenter.set_block_full_process(fetch_duration, __MODULE__)
 
     case result do
-      {:ok, %{inserted: inserted, errors: errors}} ->
+      {:ok, %{errors: errors}} ->
         valid_errors = handle_null_rounds(errors)
-        clear_missing_ranges(range, valid_errors)
 
-        {:ok, inserted: inserted}
+        {:ok, %{range: range, errors: valid_errors}}
 
       {:error, {:import = step, [%Changeset{} | _] = changesets}} = error ->
-        Prometheus.Instrumenter.import_errors()
+        Prometheus.Instrumenter.set_import_errors_count()
         Logger.error(fn -> ["failed to validate: ", inspect(changesets), ". Retrying."] end, step: step)
 
         error
 
       {:error, {:import = step, reason}} = error ->
-        Prometheus.Instrumenter.import_errors()
+        Prometheus.Instrumenter.set_import_errors_count()
         Logger.error(fn -> [inspect(reason), ". Retrying."] end, step: step)
         if reason == :timeout, do: add_range_to_massive_blocks(range)
 
@@ -224,6 +229,20 @@ defmodule Indexer.Block.Catchup.Fetcher do
       {:error, exception}
   end
 
+  defp handle_fetch_and_import_results(results) do
+    results
+    |> Enum.reduce([], fn
+      {:ok, {:ok, %{range: range, errors: errors}}}, acc ->
+        success_numbers = Enum.to_list(range) -- Enum.map(errors, &block_error_to_number/1)
+        success_numbers ++ acc
+
+      _result, acc ->
+        acc
+    end)
+    |> numbers_to_ranges()
+    |> MissingBlockRange.clear_batch()
+  end
+
   defp handle_null_rounds(errors) do
     {null_rounds, other_errors} =
       Enum.split_with(errors, fn
@@ -239,12 +258,26 @@ defmodule Indexer.Block.Catchup.Fetcher do
   end
 
   defp timeout_exception?(%{message: message}) when is_binary(message) do
-    String.match?(message, ~r/due to a timeout/)
+    match_timeout_exception?(message)
+  end
+
+  defp timeout_exception?(%{postgres: %{message: message}}) when is_binary(message) do
+    match_timeout_exception?(message)
   end
 
   defp timeout_exception?(_exception), do: false
 
-  defp add_range_to_massive_blocks(range) do
+  defp match_timeout_exception?(error_message) do
+    String.match?(error_message, ~r/due to a timeout/) or String.match?(error_message, ~r/due to user request/)
+  end
+
+  @doc """
+  Adds block numbers or block numbers range into `massive_blocks` and clears them from `missing_block_ranges`
+  """
+  @spec add_range_to_massive_blocks(Range.t() | [non_neg_integer()]) :: any()
+  def add_range_to_massive_blocks([]), do: :ok
+
+  def add_range_to_massive_blocks(range) do
     clear_missing_ranges(range)
 
     range
@@ -257,7 +290,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
 
     success_numbers
     |> numbers_to_ranges()
-    |> MissingRangesManipulator.clear_batch()
+    |> MissingBlockRange.clear_batch()
   end
 
   defp block_error_to_number(%{data: %{number: number}}) when is_integer(number), do: number

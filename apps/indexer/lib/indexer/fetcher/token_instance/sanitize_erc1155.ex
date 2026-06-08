@@ -7,9 +7,9 @@ defmodule Indexer.Fetcher.TokenInstance.SanitizeERC1155 do
 
   use GenServer, restart: :transient
 
+  alias Explorer.{Chain, Repo}
   alias Explorer.Chain.Token.Instance
   alias Explorer.Migrator.MigrationStatus
-  alias Explorer.{Chain, Repo}
   alias Indexer.Fetcher.TokenInstance.Sanitize
 
   @migration_name "backfill_erc1155"
@@ -43,7 +43,7 @@ defmodule Indexer.Fetcher.TokenInstance.SanitizeERC1155 do
     instances_to_fetch =
       (concurrency * batch_size)
       |> Instance.not_inserted_erc_1155_token_instances()
-      |> Repo.all()
+      |> Repo.all(timeout: :infinity)
 
     if Enum.empty?(instances_to_fetch) do
       MigrationStatus.set_status(@migration_name, "completed")

@@ -1,5 +1,5 @@
 defmodule BlockScoutWeb.Account.API.V2.FallbackController do
-  use Phoenix.Controller
+  use Phoenix.Controller, namespace: BlockScoutWeb
 
   alias BlockScoutWeb.Account.API.V2.UserView
   alias Ecto.Changeset
@@ -137,6 +137,20 @@ defmodule BlockScoutWeb.Account.API.V2.FallbackController do
     |> put_status(:forbidden)
     |> put_view(UserView)
     |> render(:message, %{message: "Invalid reCAPTCHA response"})
+  end
+
+  def call(conn, {:token, nil}) do
+    conn
+    |> put_status(:unauthorized)
+    |> put_view(UserView)
+    |> render(:message, %{message: "No Bearer token"})
+  end
+
+  def call(conn, {:enabled, false}) do
+    conn
+    |> put_status(:not_found)
+    |> put_view(UserView)
+    |> render(:message, %{message: "This endpoint is not configured"})
   end
 
   defp unauthorized_error(%{email_verified: false, email: email}) do

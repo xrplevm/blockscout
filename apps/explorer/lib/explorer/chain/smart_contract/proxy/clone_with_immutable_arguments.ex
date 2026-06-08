@@ -1,51 +1,29 @@
 defmodule Explorer.Chain.SmartContract.Proxy.CloneWithImmutableArguments do
   @moduledoc """
-  Module for fetching proxy implementation from https://github.com/wighawag/clones-with-immutable-args
+  Module for fetching proxy implementation from clone contracts with immutable arguments.
+  Supports both wighawag (https://github.com/wighawag/clones-with-immutable-args) and
+  solady (https://github.com/Vectorized/solady/blob/main/src/utils/LibClone.sol) variants.
   """
 
-  alias Explorer.Chain
-  alias Explorer.Chain.{Address, Hash}
-  alias Explorer.Chain.SmartContract.Proxy
+  alias Explorer.Chain.Hash
+  alias Explorer.Chain.SmartContract.Proxy.ResolverBehaviour
 
-  @doc """
-  Get implementation address hash string following "Clone with immutable arguments" proxy pattern. It returns the value as array of the strings.
-  """
-  @spec get_implementation_address_hash_strings(Hash.Address.t(), [Chain.api?()]) :: [binary()]
-  def get_implementation_address_hash_strings(proxy_address_hash, options \\ []) do
-    case get_implementation_address_hash_string(proxy_address_hash, options) do
-      nil -> []
-      implementation_address_hash_string -> [implementation_address_hash_string]
-    end
-  end
+  @behaviour ResolverBehaviour
 
-  # Get implementation address hash string following "Clone with immutable arguments" pattern
-  @spec get_implementation_address_hash_string(Hash.Address.t(), Keyword.t()) :: binary() | nil
-  defp get_implementation_address_hash_string(proxy_address_hash, options) do
-    case Chain.select_repo(options).get(Address, proxy_address_hash) do
-      nil ->
-        nil
+  @impl true
+  def quick_resolve_implementations(proxy_address, _proxy_type) do
+    case proxy_address.contract_code && proxy_address.contract_code.bytes do
+      # wighawag variant: https://github.com/wighawag/clones-with-immutable-args/blob/196f1ecc6485c1bf2d41677fa01d3df4927ff9ce/src/ClonesWithImmutableArgs.sol
+      <<0x3D3D3D3D363D3D3761::9-unit(8), _::2-bytes, 0x603736393661::6-unit(8), _::2-bytes, 0x013D73::3-unit(8),
+        template_address::20-bytes, _::binary>> ->
+        {:ok, template_address_hash} = Hash.Address.cast(template_address)
+        {:ok, [template_address_hash]}
 
-      target_address ->
-        contract_code = target_address.contract_code
-
-        case contract_code do
-          %Chain.Data{bytes: contract_code_bytes} ->
-            contract_bytecode = Base.encode16(contract_code_bytes, case: :lower)
-
-            contract_bytecode |> get_proxy_clone_with_immutable_arguments() |> Proxy.abi_decode_address_output()
-
-          _ ->
-            nil
-        end
-    end
-  end
-
-  defp get_proxy_clone_with_immutable_arguments(contract_bytecode) do
-    case contract_bytecode do
-      "3d3d3d3d363d3d3761" <>
-          <<_::binary-size(4)>> <>
-          "603736393661" <> <<_::binary-size(4)>> <> "013d73" <> <<template_address::binary-size(40)>> <> _ ->
-        "0x" <> template_address
+      # solady variant: https://github.com/Vectorized/solady/blob/main/src/utils/LibClone.sol#L620
+      <<0x363D3D373D3D3D363D73::10-unit(8), template_address::20-bytes, 0x5AF43D3D93803E602A57FD5BF3::13-unit(8),
+        _::binary>> ->
+        {:ok, template_address_hash} = Hash.Address.cast(template_address)
+        {:ok, [template_address_hash]}
 
       _ ->
         nil

@@ -17,8 +17,9 @@ config :block_scout_web,
   # 604800 seconds, 1 week
   session_cookie_ttl: 60 * 60 * 24 * 7,
   invalid_session_key: "invalid_session",
-  api_v2_temp_token_key: "api_v2_temp_token",
-  http_adapter: HTTPoison
+  api_v2_temp_token_cookie_key: "api_v2_temp_token",
+  api_v2_temp_token_header_key: "api-v2-temp-token",
+  http_client: Explorer.HttpClient.Tesla
 
 config :block_scout_web,
   admin_panel_enabled: ConfigHelper.parse_bool_env_var("ADMIN_PANEL_ENABLED")
@@ -48,33 +49,13 @@ config :block_scout_web, BlockScoutWeb.Chain.TransactionHistoryChartController,
   # days
   history_size: 30
 
+config :logger, :block_scout_web,
+  metadata: ConfigHelper.logger_metadata(),
+  metadata_filter: [application: :block_scout_web]
+
 config :ex_cldr,
   default_locale: "en",
   default_backend: BlockScoutWeb.Cldr
-
-config :logger, :block_scout_web,
-  # keep synced with `config/config.exs`
-  format: "$dateT$time $metadata[$level] $message\n",
-  metadata:
-    ~w(application fetcher request_id first_block_number last_block_number missing_block_range_count missing_block_count
-       block_number step count error_count shrunk import_id transaction_id)a,
-  metadata_filter: [application: :block_scout_web]
-
-config :logger, :api,
-  # keep synced with `config/config.exs`
-  format: "$dateT$time $metadata[$level] $message\n",
-  metadata:
-    ~w(application fetcher request_id first_block_number last_block_number missing_block_range_count missing_block_count
-       block_number step count error_count shrunk import_id transaction_id)a,
-  metadata_filter: [application: :api]
-
-config :logger, :api_v2,
-  # keep synced with `config/config.exs`
-  format: "$dateT$time $metadata[$level] $message\n",
-  metadata:
-    ~w(application fetcher request_id first_block_number last_block_number missing_block_range_count missing_block_count
-       block_number step count error_count shrunk import_id transaction_id)a,
-  metadata_filter: [application: :api_v2]
 
 config :prometheus, BlockScoutWeb.Prometheus.PublicExporter,
   path: "/public-metrics",
@@ -82,27 +63,18 @@ config :prometheus, BlockScoutWeb.Prometheus.PublicExporter,
   registry: :public,
   auth: false
 
-config :prometheus, BlockScoutWeb.Prometheus.PhoenixInstrumenter,
-  # override default for Phoenix 1.4 compatibility
-  # * `:transport_name` to `:transport`
-  # * remove `:vsn`
-  channel_join_labels: [:channel, :topic, :transport],
-  # override default for Phoenix 1.4 compatibility
-  # * `:transport_name` to `:transport`
-  # * remove `:vsn`
-  channel_receive_labels: [:channel, :topic, :transport, :event]
-
 config :spandex_phoenix, tracer: BlockScoutWeb.Tracer
 
 config :block_scout_web, BlockScoutWeb.Routers.ApiRouter,
   writing_enabled: !ConfigHelper.parse_bool_env_var("API_V1_WRITE_METHODS_DISABLED"),
   reading_enabled: !ConfigHelper.parse_bool_env_var("API_V1_READ_METHODS_DISABLED")
 
-config :block_scout_web, BlockScoutWeb.Routers.WebRouter, enabled: !ConfigHelper.parse_bool_env_var("DISABLE_WEBAPP")
+config :block_scout_web, BlockScoutWeb.Routers.WebRouter,
+  enabled: !ConfigHelper.parse_bool_env_var("DISABLE_WEBAPP", "true")
 
 config :block_scout_web, BlockScoutWeb.CSPHeader,
-  mixpanel_url: System.get_env("MIXPANEL_URL", "https://api-js.mixpanel.com"),
-  amplitude_url: System.get_env("AMPLITUDE_URL", "https://api2.amplitude.com/2/httpapi")
+  mixpanel_url: ConfigHelper.parse_url_env_var("MIXPANEL_URL", "https://api-js.mixpanel.com"),
+  amplitude_url: ConfigHelper.parse_url_env_var("AMPLITUDE_URL", "https://api2.amplitude.com/2/httpapi")
 
 config :block_scout_web, Api.GraphQL,
   enabled: ConfigHelper.parse_bool_env_var("API_GRAPHQL_ENABLED", "true"),
@@ -118,20 +90,9 @@ config :ueberauth, Ueberauth,
     }
   ]
 
-redis_url = System.get_env("API_RATE_LIMIT_HAMMER_REDIS_URL")
+config :oauth2, adapter: Tesla.Adapter.Mint
 
-if is_nil(redis_url) or redis_url == "" do
-  config :hammer, backend: {Hammer.Backend.ETS, [expiry_ms: 60_000 * 60 * 4, cleanup_interval_ms: 60_000 * 10]}
-else
-  config :hammer,
-    backend:
-      {Hammer.Backend.Redis,
-       [
-         delete_buckets_timeout: 60_000 * 10,
-         expiry_ms: 60_000 * 60 * 4,
-         redis_url: redis_url
-       ]}
-end
+config :tesla, adapter: Tesla.Adapter.Mint
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

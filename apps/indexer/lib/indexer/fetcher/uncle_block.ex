@@ -12,6 +12,7 @@ defmodule Indexer.Fetcher.UncleBlock do
   alias Ecto.Changeset
   alias EthereumJSONRPC.Blocks
   alias Explorer.Chain
+  alias Explorer.Chain.Block, as: ExplorerChainBlock
   alias Explorer.Chain.Cache.{Accounts, Uncles}
   alias Explorer.Chain.Hash
   alias Indexer.{Block, BufferedTask, Tracer}
@@ -49,26 +50,26 @@ defmodule Indexer.Fetcher.UncleBlock do
 
   @doc false
   def child_spec([init_options, gen_server_options]) when is_list(init_options) do
-    {state, mergeable_init_options} = Keyword.pop(init_options, :block_fetcher)
+    case Keyword.pop(init_options, :block_fetcher) do
+      {%Block.Fetcher{} = state, mergeable_init_options} ->
+        merged_init_options =
+          @defaults
+          |> Keyword.merge(mergeable_init_options)
+          |> Keyword.put(:state, %Block.Fetcher{state | broadcast: :uncle, callback_module: __MODULE__})
 
-    unless state do
-      raise ArgumentError,
-            ":json_rpc_named_arguments must be provided to `#{__MODULE__}.child_spec " <>
-              "to allow for json_rpc calls when running."
+        Supervisor.child_spec({BufferedTask, [{__MODULE__, merged_init_options}, gen_server_options]}, id: __MODULE__)
+
+      _ ->
+        raise ArgumentError,
+              ":json_rpc_named_arguments must be provided to `#{__MODULE__}.child_spec " <>
+                "to allow for json_rpc calls when running."
     end
-
-    merged_init_options =
-      @defaults
-      |> Keyword.merge(mergeable_init_options)
-      |> Keyword.put(:state, %Block.Fetcher{state | broadcast: :uncle, callback_module: __MODULE__})
-
-    Supervisor.child_spec({BufferedTask, [{__MODULE__, merged_init_options}, gen_server_options]}, id: __MODULE__)
   end
 
   @impl BufferedTask
   def init(initial, reducer, _) do
     {:ok, final} =
-      Chain.stream_unfetched_uncles(
+      ExplorerChainBlock.stream_unfetched_uncles(
         initial,
         fn uncle, acc ->
           uncle
@@ -226,7 +227,7 @@ defmodule Indexer.Fetcher.UncleBlock do
     loggable_errors = loggable_errors(errors)
     loggable_error_count = Enum.count(loggable_errors)
 
-    unless loggable_error_count == 0 do
+    if loggable_error_count != 0 do
       Logger.error(
         fn ->
           [

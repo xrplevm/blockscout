@@ -55,21 +55,18 @@ defmodule BlockScoutWeb.VerifiedContractsControllerTest do
     end
 
     test "next_page_path exist if not on last page", %{conn: conn} do
-      %SmartContract{address_hash: address_hash} =
+      %SmartContract{id: id} =
         60
         |> insert_list(:smart_contract)
-        |> Enum.reverse()
+        |> Enum.sort_by(& &1.id, :asc)
         |> Enum.fetch!(10)
 
       conn = get(conn, verified_contracts_path(conn, :index), %{"type" => "JSON"})
 
       expected_path =
         verified_contracts_path(conn, :index,
-          coin_balance: nil,
-          hash: address_hash,
-          items_count: "50",
-          transaction_count: nil,
-          transactions_count: nil
+          id: id,
+          items_count: "50"
         )
 
       assert Map.get(json_response(conn, 200), "next_page_path") == expected_path
@@ -84,10 +81,10 @@ defmodule BlockScoutWeb.VerifiedContractsControllerTest do
     end
 
     test "returns solidity contracts", %{conn: conn} do
-      insert(:smart_contract, is_vyper_contract: true, language: nil)
+      insert(:smart_contract, language: :vyper)
 
       %SmartContract{address_hash: solidity_hash} =
-        insert(:smart_contract, is_vyper_contract: false, language: nil)
+        insert(:smart_contract, language: :solidity)
 
       path =
         verified_contracts_path(conn, :index, %{
@@ -104,9 +101,9 @@ defmodule BlockScoutWeb.VerifiedContractsControllerTest do
 
     test "returns vyper contract", %{conn: conn} do
       %SmartContract{address_hash: vyper_hash} =
-        insert(:smart_contract, is_vyper_contract: true, language: nil)
+        insert(:smart_contract, language: :vyper)
 
-      insert(:smart_contract, is_vyper_contract: false, language: nil)
+      insert(:smart_contract, language: :solidity)
 
       path =
         verified_contracts_path(conn, :index, %{
@@ -123,9 +120,9 @@ defmodule BlockScoutWeb.VerifiedContractsControllerTest do
 
     test "returns yul contract", %{conn: conn} do
       %SmartContract{address_hash: yul_hash} =
-        insert(:smart_contract, abi: nil, language: nil)
+        insert(:smart_contract, abi: nil, language: :yul)
 
-      insert(:smart_contract, language: nil)
+      insert(:smart_contract)
 
       path =
         verified_contracts_path(conn, :index, %{

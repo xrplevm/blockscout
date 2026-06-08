@@ -6,7 +6,10 @@ defmodule BlockScoutWeb.Endpoint do
     disable_api?: [:block_scout_web, :disable_api?],
     sql_sandbox: [:block_scout_web, :sql_sandbox],
     cookie_domain: [:block_scout_web, :cookie_domain],
-    session_cookie_ttl: [:block_scout_web, :session_cookie_ttl]
+    session_cookie_ttl: [:block_scout_web, :session_cookie_ttl],
+    api_v2_temp_token_header_key: [:block_scout_web, :api_v2_temp_token_header_key]
+
+  alias Explorer.ThirdPartyIntegrations.UniversalProxy
 
   if @sql_sandbox do
     plug(Phoenix.Ecto.SQL.Sandbox, repo: Explorer.Repo)
@@ -77,7 +80,27 @@ defmodule BlockScoutWeb.Endpoint do
     plug(BlockScoutWeb.Prometheus.PublicExporter)
 
     # 'x-apollo-tracing' header for https://www.graphqlbin.com to work with our GraphQL endpoint
-    plug(CORSPlug, headers: ["x-apollo-tracing" | CORSPlug.defaults()[:headers]])
+    # 'updated-gas-oracle' header for /api/v2/stats endpoint, added to support cross-origin requests (e.g. multichain search explorer)
+    plug(CORSPlug,
+      headers:
+        [
+          "x-apollo-tracing",
+          "updated-gas-oracle",
+          "recaptcha-v2-response",
+          "recaptcha-v3-response",
+          "recaptcha-bypass-token",
+          "scoped-recaptcha-bypass-token",
+          "show-scam-tokens",
+          @api_v2_temp_token_header_key
+        ] ++ CORSPlug.defaults()[:headers],
+      expose: [
+        "bypass-429-option",
+        "x-ratelimit-reset",
+        "x-ratelimit-limit",
+        "x-ratelimit-remaining",
+        @api_v2_temp_token_header_key
+      ]
+    )
 
     plug(BlockScoutWeb.Router)
   end
@@ -85,9 +108,32 @@ defmodule BlockScoutWeb.Endpoint do
   def init(_key, config) do
     if config[:load_from_system_env] do
       port = System.get_env("PORT") || raise "expected the PORT environment variable to be set"
-      {:ok, Keyword.put(config, :http, [:inet6, port: port])}
+      {:ok, Keyword.put(config, :http, [:inet6, port: port, dispatch: dispatch()])}
     else
-      {:ok, config}
+      {:ok,
+       config
+       |> Keyword.put(:http, Keyword.put_new(Keyword.get(config, :http), :dispatch, dispatch()))}
     end
+  end
+
+  defp dispatch do
+    websocket_proxies = UniversalProxy.websocket_proxies()
+
+    universal_proxy_routes =
+      websocket_proxies
+      |> Enum.map(fn {platform_id, url} ->
+        {"/api/v2/proxy/3rdparty/#{platform_id}", Explorer.ThirdPartyIntegrations.UniversalProxy.SocketHandler,
+         [url: url]}
+      end)
+
+    all_routes =
+      [
+        {:_, Phoenix.Endpoint.Cowboy2Handler, {BlockScoutWeb.Endpoint, []}} | universal_proxy_routes
+      ]
+      |> Enum.reverse()
+
+    [
+      {:_, all_routes}
+    ]
   end
 end

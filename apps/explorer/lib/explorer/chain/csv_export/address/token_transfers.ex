@@ -11,10 +11,10 @@ defmodule Explorer.Chain.CsvExport.Address.TokenTransfers do
       where: 3
     ]
 
-  alias Explorer.{PagingOptions, Repo}
   alias Explorer.Chain.{Address, DenormalizationHelper, Hash, TokenTransfer, Transaction}
   alias Explorer.Chain.CsvExport.Helper
   alias Explorer.Helper, as: ExplorerHelper
+  alias Explorer.{PagingOptions, Repo}
 
   @spec export(Hash.Address.t(), String.t(), String.t(), Keyword.t(), String.t() | nil, String.t() | nil) ::
           Enumerable.t()
@@ -132,7 +132,7 @@ defmodule Explorer.Chain.CsvExport.Address.TokenTransfers do
         |> handle_token_transfer_paging_options(paging_options)
         |> preload(^DenormalizationHelper.extend_transaction_preload([:transaction]))
         |> preload(:token)
-        |> Repo.all()
+        |> Repo.replica().all()
     end
   end
 

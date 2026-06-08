@@ -65,7 +65,7 @@ defmodule Indexer.Fetcher.Filecoin.AddressInfo do
   def child_spec([init_options, gen_server_options]) do
     {state, mergeable_init_options} = Keyword.pop(init_options, :json_rpc_named_arguments)
 
-    unless state do
+    if !state do
       raise ArgumentError,
             ":json_rpc_named_arguments must be provided to `#{__MODULE__}.child_spec` " <>
               "to allow for json_rpc calls when running."
@@ -204,12 +204,7 @@ defmodule Indexer.Fetcher.Filecoin.AddressInfo do
          {:ok, maybe_actor_type_string} <- Map.fetch(body_json, "actor_type") do
       robust_address_string =
         if maybe_robust_address_string in ["", "<empty>"] do
-          operation.address_hash
-          |> NativeAddress.cast()
-          |> case do
-            {:ok, native_address} -> to_string(native_address)
-            _ -> nil
-          end
+          cast_native_address(operation.address_hash)
         else
           maybe_robust_address_string
         end
@@ -236,6 +231,15 @@ defmodule Indexer.Fetcher.Filecoin.AddressInfo do
       error ->
         Logger.error("Error processing Beryx API response: #{inspect(error)}")
         :error
+    end
+  end
+
+  defp cast_native_address(address_hash) do
+    address_hash
+    |> NativeAddress.cast()
+    |> case do
+      {:ok, native_address} -> to_string(native_address)
+      _ -> nil
     end
   end
 

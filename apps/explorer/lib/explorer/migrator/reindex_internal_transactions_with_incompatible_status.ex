@@ -8,7 +8,7 @@ defmodule Explorer.Migrator.ReindexInternalTransactionsWithIncompatibleStatus do
 
   import Ecto.Query
 
-  alias Explorer.{Chain, Repo}
+  alias Explorer.Repo
 
   alias Explorer.Chain.{
     Block,
@@ -59,7 +59,9 @@ defmodule Explorer.Migrator.ReindexInternalTransactionsWithIncompatibleStatus do
     it_error_query =
       from(
         it in InternalTransaction,
-        where: parent_as(:transaction).hash == it.transaction_hash and not is_nil(it.error) and it.index > 0,
+        where:
+          parent_as(:transaction).hash == it.transaction_hash and it.index > 0 and
+            (not is_nil(it.error) or not is_nil(it.error_id)),
         select: 1
       )
 
@@ -104,7 +106,7 @@ defmodule Explorer.Migrator.ReindexInternalTransactionsWithIncompatibleStatus do
           Repo.insert_all(PendingTransactionOperation, params, on_conflict: :nothing, returning: [:transaction_hash])
       end
 
-    unless is_nil(Process.whereis(InternalTransactionFetcher)) do
+    if not is_nil(Process.whereis(InternalTransactionFetcher)) do
       {block_numbers, transactions} =
         case pending_operations_type do
           "blocks" ->
@@ -114,7 +116,7 @@ defmodule Explorer.Migrator.ReindexInternalTransactionsWithIncompatibleStatus do
             transactions =
               inserted
               |> Enum.map(& &1.transaction_hash)
-              |> Chain.get_transactions_by_hashes()
+              |> Transaction.get_transactions_by_hashes()
 
             {[], transactions}
         end

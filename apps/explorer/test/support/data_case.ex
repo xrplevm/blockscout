@@ -35,10 +35,12 @@ defmodule Explorer.DataCase do
 
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Explorer.Repo)
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Explorer.Repo.Account)
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Explorer.Repo.EventNotifications)
 
-    unless tags[:async] do
+    if !tags[:async] do
       Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo, {:shared, self()})
       Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.Account, {:shared, self()})
+      Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.EventNotifications, {:shared, self()})
     end
 
     Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.BlockNumber.child_id())
@@ -54,10 +56,11 @@ defmodule Explorer.DataCase do
   end
 
   def wait_for_results(producer) do
+    Process.sleep(100)
     producer.()
   rescue
     [DBConnection.ConnectionError, Ecto.NoResultsError] ->
-      Process.sleep(100)
+      Process.sleep(300)
       wait_for_results(producer)
   end
 

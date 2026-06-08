@@ -21,7 +21,7 @@ config :block_scout_web, BlockScoutWeb.Endpoint,
   ],
   https: [
     port: port + 1,
-    cipher_suite: :strong,
+    cipher_suite: :compatible,
     certfile: System.get_env("CERTFILE") || "priv/cert/selfsigned.pem",
     keyfile: System.get_env("KEYFILE") || "priv/cert/selfsigned_key.pem"
   ]
@@ -38,7 +38,7 @@ config :block_scout_web, BlockScoutWeb.HealthEndpoint,
   ],
   https: [
     port: port + 1,
-    cipher_suite: :strong,
+    cipher_suite: :compatible,
     certfile: System.get_env("CERTFILE") || "priv/cert/selfsigned.pem",
     keyfile: System.get_env("KEYFILE") || "priv/cert/selfsigned_key.pem"
   ]
@@ -65,7 +65,7 @@ queue_target = ConfigHelper.parse_integer_env_var("DATABASE_QUEUE_TARGET", 50)
 config :explorer, Explorer.Repo,
   database: database,
   hostname: hostname,
-  url: System.get_env("DATABASE_URL"),
+  url: ConfigHelper.parse_url_env_var("DATABASE_URL"),
   pool_size: pool_size,
   queue_target: queue_target
 
@@ -109,6 +109,17 @@ config :explorer, Explorer.Repo.Suave,
   url: ExplorerConfigHelper.get_suave_db_url(),
   pool_size: 1
 
+database_event_notification = if System.get_env("DATABASE_EVENT_URL"), do: nil, else: database
+hostname_event_notification = if System.get_env("DATABASE_EVENT_URL"), do: nil, else: hostname
+
+# Configure Event Notification database
+config :explorer, Explorer.Repo.EventNotifications,
+  database: database_event_notification,
+  hostname: hostname_event_notification,
+  url: ExplorerConfigHelper.get_event_notification_db_url(),
+  pool_size: ConfigHelper.parse_integer_env_var("DATABASE_EVENT_POOL_SIZE", 10),
+  queue_target: queue_target
+
 # Actually the following repos are not started, and its pool size remains
 # unused. Separating repos for different CHAIN_TYPE is implemented only for the
 # sake of keeping DB schema update relevant to the current chain type
@@ -136,7 +147,7 @@ for repo <- [
   config :explorer, repo,
     database: database,
     hostname: hostname,
-    url: System.get_env("DATABASE_URL"),
+    url: ConfigHelper.parse_url_env_var("DATABASE_URL"),
     pool_size: 1
 end
 
