@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressInternalTransactionController do
   @moduledoc """
     Manages the displaying of information about internal transactions as they relate to addresses
@@ -6,7 +7,16 @@ defmodule BlockScoutWeb.AddressInternalTransactionController do
   use BlockScoutWeb, :controller
 
   import BlockScoutWeb.Account.AuthController, only: [current_user: 1]
-  import BlockScoutWeb.Chain, only: [current_filter: 1, paging_options: 1, next_page_params: 3, split_list_by_page: 1]
+
+  import BlockScoutWeb.Chain,
+    only: [
+      current_filter: 1,
+      paging_options: 1,
+      next_page_params: 3,
+      split_list_by_page: 1,
+      address_to_internal_transactions: 2
+    ]
+
   import BlockScoutWeb.Models.GetAddressTags, only: [get_address_tags: 2]
 
   alias BlockScoutWeb.{AccessHelper, Controller, InternalTransactionView}
@@ -22,19 +32,16 @@ defmodule BlockScoutWeb.AddressInternalTransactionController do
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params) do
       full_options =
         [
-          necessity_by_association: %{
-            [created_contract_address: :names] => :optional,
-            [from_address: :names] => :optional,
-            [to_address: :names] => :optional,
-            [created_contract_address: :smart_contract] => :optional,
-            [from_address: :smart_contract] => :optional,
-            [to_address: :smart_contract] => :optional
-          }
+          address_preloads: [
+            created_contract_address: [:names, :smart_contract],
+            from_address: [:names, :smart_contract],
+            to_address: [:names, :smart_contract]
+          ]
         ]
         |> Keyword.merge(paging_options(params))
         |> Keyword.merge(current_filter(params))
 
-      internal_transactions_plus_one = Chain.address_to_internal_transactions(address_hash, full_options)
+      internal_transactions_plus_one = address_to_internal_transactions(address_hash, full_options)
       {internal_transactions, next_page} = split_list_by_page(internal_transactions_plus_one)
 
       next_page_path =

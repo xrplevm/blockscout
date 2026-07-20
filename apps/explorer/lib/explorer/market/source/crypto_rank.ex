@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.CryptoRank do
   @moduledoc """
   Adapter for fetching market history from https://cryptorank.io/.
@@ -38,8 +39,12 @@ defmodule Explorer.Market.Source.CryptoRank do
              |> URI.to_string(),
              headers()
            ) do
-      {tokens_to_import, initial_tokens_len} = tokens |> Enum.reduce({[], 0}, &reduce_token(platform_id, &1, &2))
-      {:ok, skip + batch_size, initial_tokens_len < batch_size, tokens_to_import}
+      {tokens_to_import, initial_tokens_len} =
+        tokens |> Enum.reduce({[], 0}, &reduce_token(platform_id, &1, &2))
+
+      fetch_finished? = initial_tokens_len < batch_size
+      new_state = if fetch_finished?, do: nil, else: skip + batch_size
+      {:ok, new_state, fetch_finished?, tokens_to_import}
     else
       nil -> {:error, "Platform ID not specified"}
       {:ok, unexpected_response} -> {:error, Source.unexpected_response_error("CryptoRank", unexpected_response)}
@@ -47,37 +52,37 @@ defmodule Explorer.Market.Source.CryptoRank do
     end
   end
 
-  defp reduce_token(platform_id, %{"contracts" => [_ | _] = tokens} = token, acc) do
-    Enum.reduce(tokens, acc, fn
-      %{
-        "address" => token_contract_address_hash_string,
-        "chainId" => ^platform_id
-      },
-      {tokens, count} ->
+  defp reduce_token(platform_id, %{"contracts" => [_ | _] = tokens} = token, {tokens_to_import, count}) do
+    tokens
+    |> Enum.find_value(fn
+      %{"chainId" => ^platform_id, "address" => token_contract_address_hash_string} ->
         case Hash.Address.cast(token_contract_address_hash_string) do
           {:ok, token_contract_address_hash} ->
             fiat_value = Source.to_decimal(token["priceUSD"])
             circulating_supply = Source.to_decimal(token["circulatingSupply"])
 
-            token = %{
+            %{
               symbol: token["symbol"],
               name: token["name"],
               fiat_value: fiat_value,
               volume_24h: Source.to_decimal(token["volume24hUSD"]),
               circulating_market_cap: circulating_supply && fiat_value && Decimal.mult(fiat_value, circulating_supply),
+              circulating_supply: circulating_supply,
               contract_address_hash: token_contract_address_hash,
               type: "ERC-20"
             }
 
-            {[token | tokens], count + 1}
-
           _ ->
-            {tokens, count + 1}
+            false
         end
 
-      _, {tokens, count} ->
-        {tokens, count + 1}
+      _ ->
+        false
     end)
+    |> case do
+      nil -> {tokens_to_import, count + 1}
+      token -> {[token | tokens_to_import], count + 1}
+    end
   end
 
   defp reduce_token(_, _, {tokens, count}), do: {tokens, count + 1}
@@ -124,7 +129,8 @@ defmodule Explorer.Market.Source.CryptoRank do
          symbol: String.upcase(coin["symbol"]),
          fiat_value: Source.to_decimal(coin_data["price"]),
          volume_24h: Source.to_decimal(coin_data["volume24h"]),
-         image_url: Source.handle_image_url(coin["images"]["60x60"] || coin["images"]["16x16"])
+         image_url: Source.handle_image_url(coin["images"]["60x60"] || coin["images"]["16x16"]),
+         circulating_supply: Source.to_decimal(coin["circulatingSupply"])
        }}
     else
       nil -> {:error, coin_id_not_specified_error}

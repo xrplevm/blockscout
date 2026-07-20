@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.LatestL1BlockNumber do
   @moduledoc """
     Caches latest L1 block number.
@@ -10,6 +11,8 @@ defmodule Explorer.Chain.Cache.LatestL1BlockNumber do
     global_ttl: :timer.seconds(15)
 
   @dialyzer :no_match
+
+  defp handle_fallback(:update), do: {:update, nil}
 
   defp handle_fallback(_key), do: {:return, nil}
 end

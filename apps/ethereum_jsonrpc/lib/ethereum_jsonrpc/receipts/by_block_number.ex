@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Receipts.ByBlockNumber do
   @moduledoc """
     Provides functionality to compose JSON-RPC requests for fetching Ethereum block receipts by the block number.
@@ -19,7 +20,10 @@ defmodule EthereumJSONRPC.Receipts.ByBlockNumber do
       ## Returns
       - A JSON-RPC request map for `eth_getBlockReceipts`
   """
-  @spec request(%{id: EthereumJSONRPC.request_id(), number: EthereumJSONRPC.block_number() | EthereumJSONRPC.quantity()}) ::
+  @spec request(%{
+          id: EthereumJSONRPC.request_id(),
+          number: EthereumJSONRPC.block_number() | EthereumJSONRPC.quantity()
+        }) ::
           Transport.request()
   def request(%{id: id, number: number}) when is_integer(number) do
     block_number = integer_to_quantity(number)

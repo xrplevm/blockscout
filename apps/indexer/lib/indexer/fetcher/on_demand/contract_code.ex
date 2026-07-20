@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.OnDemand.ContractCode do
   @moduledoc """
   Ensures that we have a smart-contract bytecode indexed.
@@ -11,9 +12,11 @@ defmodule Indexer.Fetcher.OnDemand.ContractCode do
   import EthereumJSONRPC, only: [fetch_codes: 2]
 
   alias Explorer.Chain
-  alias Explorer.Chain.Address
+  alias Explorer.Chain.{Address, Data, Hash}
+  alias Explorer.Chain.Cache.Accounts
   alias Explorer.Chain.Cache.Counters.Helper
   alias Explorer.Chain.Events.Publisher
+  alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
   alias Explorer.Utility.{AddressContractCodeFetchAttempt, RateLimiter}
   alias Indexer.Fetcher.OnDemand.ContractCreator, as: ContractCreatorOnDemand
 
@@ -21,13 +24,33 @@ defmodule Indexer.Fetcher.OnDemand.ContractCode do
 
   @spec trigger_fetch(String.t() | nil, Address.t()) :: :ok
   def trigger_fetch(caller \\ nil, address) do
-    if is_nil(address.contract_code) do
+    if is_nil(address.contract_code) or Address.eoa_with_code?(address) do
       case RateLimiter.check_rate(caller, :on_demand) do
         :allow -> GenServer.cast(__MODULE__, {:fetch, address})
         :deny -> :ok
       end
     else
       ContractCreatorOnDemand.trigger_fetch(address)
+    end
+  end
+
+  @doc """
+  Checks database for bytecode first, then fetches from RPC if not found.
+  This function handles the complete verification flow including database fallback.
+
+  Returns `{:ok, bytecode}` if bytecode is found, or `:error` otherwise.
+  """
+  @spec get_or_fetch_bytecode(Hash.Address.t()) ::
+          {:ok, String.t()} | :error
+  def get_or_fetch_bytecode(caller \\ nil, address_hash) do
+    with {:ok, %Address{} = address} <- Chain.hash_to_address(address_hash, []),
+         fetch? = is_nil(address.contract_code) or Address.eoa_with_code?(address),
+         {true, _} <- {fetch?, address.contract_code},
+         :allow <- RateLimiter.check_rate(caller, :on_demand) do
+      GenServer.call(__MODULE__, {:fetch, address})
+    else
+      {false, bytecode} -> {:ok, bytecode}
+      _ -> :error
     end
   end
 
@@ -45,7 +68,7 @@ defmodule Indexer.Fetcher.OnDemand.ContractCode do
   #   `:ok` in all cases.
   @spec fetch_contract_code(Address.t(), %{
           json_rpc_named_arguments: EthereumJSONRPC.json_rpc_named_arguments()
-        }) :: :ok
+        }) :: {:ok, String.t() | nil} | :error
   defp fetch_contract_code(address, state) do
     with {:need_to_fetch, true} <- {:need_to_fetch, fetch?(address)},
          {:retries_number, {retries_number, updated_at}} <-
@@ -58,14 +81,13 @@ defmodule Indexer.Fetcher.OnDemand.ContractCode do
       fetch_and_broadcast_bytecode(address, state)
     else
       {:need_to_fetch, false} ->
-        :ok
+        :error
 
       {:retries_number, nil} ->
         fetch_and_broadcast_bytecode(address, state)
-        :ok
 
       {:retry, false} ->
-        :ok
+        :error
     end
   end
 
@@ -96,7 +118,7 @@ defmodule Indexer.Fetcher.OnDemand.ContractCode do
   #   `:ok` (the function always returns `:ok`, actual results are handled via side effects)
   @spec fetch_and_broadcast_bytecode(Address.t(), %{
           json_rpc_named_arguments: EthereumJSONRPC.json_rpc_named_arguments()
-        }) :: :ok
+        }) :: {:ok, String.t() | nil} | :error
   defp fetch_and_broadcast_bytecode(address, %{json_rpc_named_arguments: _} = state) do
     with {:fetched_code, {:ok, %EthereumJSONRPC.FetchedCodes{params_list: fetched_codes}}} <-
            {:fetched_code,
@@ -106,24 +128,46 @@ defmodule Indexer.Fetcher.OnDemand.ContractCode do
             )},
          contract_code_object = List.first(fetched_codes),
          false <- is_nil(contract_code_object),
-         true <- contract_code_object.code !== "0x" do
-      case Chain.import(%{addresses: %{params: [%{hash: address.hash, contract_code: contract_code_object.code}]}}) do
-        {:ok, _} ->
-          Publisher.broadcast(%{fetched_bytecode: [address.hash, contract_code_object.code]}, :on_demand)
+         {:ok, fetched_code} <-
+           (contract_code_object.code == "0x" && {:ok, nil}) || Data.cast(contract_code_object.code),
+         true <- fetched_code != address.contract_code,
+         {:ok, %{addresses: addresses}} <-
+           Chain.import(%{
+             addresses: %{
+               params: [%{hash: address.hash, contract_code: fetched_code}],
+               on_conflict: {:replace, [:contract_code, :updated_at]},
+               fields_to_update: [:contract_code]
+             }
+           }) do
+      Accounts.drop(addresses)
 
-          ContractCreatorOnDemand.trigger_fetch(address)
+      # Update EIP7702 proxy addresses to avoid inconsistencies between addresses and proxy_implementations tables.
+      # Other proxy types are not handled here, since their bytecode doesn't change the way EIP7702 bytecode does.
+      cond do
+        Address.smart_contract?(address) and !Address.eoa_with_code?(address) ->
+          :ok
 
-          AddressContractCodeFetchAttempt.delete(address.hash)
+        is_nil(fetched_code) ->
+          Implementation.delete_implementations([address.hash])
 
-        error ->
-          Logger.error(fn -> "Error while setting address #{address.hash} deployed bytecode: #{inspect(error)}" end)
+        true ->
+          Implementation.upsert_eip7702_implementations(addresses)
       end
+
+      Publisher.broadcast(%{fetched_bytecode: [address.hash, contract_code_object.code]}, :on_demand)
+
+      ContractCreatorOnDemand.trigger_fetch(address)
+
+      AddressContractCodeFetchAttempt.delete(address.hash)
+
+      {:ok, fetched_code}
     else
       {:fetched_code, {:error, _}} ->
-        :ok
+        :error
 
       _ ->
         AddressContractCodeFetchAttempt.insert_retries_number(address.hash)
+        :error
     end
   end
 
@@ -139,6 +183,23 @@ defmodule Indexer.Fetcher.OnDemand.ContractCode do
   @impl true
   def handle_cast({:fetch, address}, state) do
     fetch_contract_code(address, state)
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_call({:fetch, address}, _from, state) do
+    result = fetch_contract_code(address, state)
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_info({:DOWN, _ref, :process, _pid, :normal}, state) do
+    {:noreply, state}
+  end
+
+  def handle_info(message, state) do
+    Logger.warning("Unexpected message received in handle_info/2: #{inspect(message)}")
 
     {:noreply, state}
   end

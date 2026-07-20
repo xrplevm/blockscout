@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Tokens do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Token.t/0`.
@@ -143,11 +144,13 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
 
     ordered_changes_list =
       changes_list
-      # brand new tokens start with no holders
+      # brand new tokens start with no holders and transfers
       # set cataloged: nil, if not set before, to get proper COALESCE result
       # if don't set it, cataloged will default to false (as in DB schema)
       # and COALESCE in on_conflict will return false
-      |> Stream.map(fn token -> token |> Map.put_new(:holder_count, 0) |> Map.put_new(:cataloged, nil) end)
+      |> Stream.map(fn token ->
+        token |> Map.put_new(:holder_count, 0) |> Map.put_new(:transfer_count, 0) |> Map.put_new(:cataloged, nil)
+      end)
       # Enforce Token ShareLocks order (see docs: sharelocks.md)
       |> Enum.sort_by(& &1.contract_address_hash)
 
@@ -196,7 +199,7 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
             cataloged: fragment("COALESCE(EXCLUDED.cataloged, ?)", token.cataloged),
             bridged: fragment("COALESCE(EXCLUDED.bridged, ?)", token.bridged),
             skip_metadata: fragment("COALESCE(EXCLUDED.skip_metadata, ?)", token.skip_metadata),
-            # `holder_count` is not updated as a pre-existing token means the `holder_count` is already initialized OR
+            # `holder_count` and `transfer_count` are not updated as a pre-existing token means these counts are already initialized OR
             #   need to be migrated with `priv/repo/migrations/scripts/update_new_tokens_holder_count_in_batches.sql.exs`
             # Don't update `contract_address_hash` as it is the primary key and used for the conflict target
             inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token.inserted_at),
@@ -264,21 +267,25 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
           circulating_market_cap:
             fragment("COALESCE(EXCLUDED.circulating_market_cap, ?)", token.circulating_market_cap),
           volume_24h: fragment("COALESCE(EXCLUDED.volume_24h, ?)", token.volume_24h),
+          circulating_supply: fragment("COALESCE(EXCLUDED.circulating_supply, ?)", token.circulating_supply),
           icon_url: fragment("COALESCE(?, EXCLUDED.icon_url)", token.icon_url),
+          decimals: fragment("COALESCE(?, EXCLUDED.decimals)", token.decimals),
           inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token.inserted_at),
           updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token.updated_at)
         ]
       ],
       where:
         fragment(
-          "(EXCLUDED.name, EXCLUDED.symbol, EXCLUDED.type, EXCLUDED.fiat_value, EXCLUDED.circulating_market_cap, EXCLUDED.volume_24h, EXCLUDED.icon_url) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?)",
+          "(EXCLUDED.name, EXCLUDED.symbol, EXCLUDED.type, EXCLUDED.fiat_value, EXCLUDED.circulating_market_cap, EXCLUDED.volume_24h, EXCLUDED.circulating_supply, EXCLUDED.icon_url, EXCLUDED.decimals) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?)",
           token.name,
           token.symbol,
           token.type,
           token.fiat_value,
           token.circulating_market_cap,
           token.volume_24h,
-          token.icon_url
+          token.circulating_supply,
+          token.icon_url,
+          token.decimals
         )
     )
   end
@@ -295,10 +302,69 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
     `:volume_24h`
   """
   @spec market_data_fields_to_update() :: [
-          :name | :symbol | :type | :fiat_value | :circulating_market_cap | :volume_24h
+          :name
+          | :symbol
+          | :type
+          | :fiat_value
+          | :circulating_market_cap
+          | :volume_24h
+          | :circulating_supply
+          | :decimals
         ]
   def market_data_fields_to_update do
-    [:name, :symbol, :type, :fiat_value, :circulating_market_cap, :volume_24h]
+    [:name, :symbol, :type, :fiat_value, :circulating_market_cap, :volume_24h, :circulating_supply, :decimals]
+  end
+
+  @doc """
+  Returns an Ecto query that defines the conflict resolution strategy when importing tokens from a token list
+  """
+  @spec token_list_on_conflict() :: Ecto.Query.t()
+  def token_list_on_conflict do
+    from(
+      token in Token,
+      update: [
+        set: [
+          name: fragment("COALESCE(?, EXCLUDED.name)", token.name),
+          symbol: fragment("COALESCE(?, EXCLUDED.symbol)", token.symbol),
+          decimals: fragment("COALESCE(?, EXCLUDED.decimals)", token.decimals),
+          icon_url:
+            fragment(
+              "CASE WHEN ? THEN ? ELSE COALESCE(EXCLUDED.icon_url, ?) END",
+              token.is_verified_via_admin_panel,
+              token.icon_url,
+              token.icon_url
+            ),
+          inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token.inserted_at),
+          updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token.updated_at)
+        ]
+      ],
+      where:
+        fragment(
+          """
+          (COALESCE(?, EXCLUDED.name), COALESCE(?, EXCLUDED.symbol), COALESCE(?, EXCLUDED.decimals),
+           CASE WHEN ? THEN ? ELSE COALESCE(EXCLUDED.icon_url, ?) END)
+          IS DISTINCT FROM (?, ?, ?, ?)
+          """,
+          token.name,
+          token.symbol,
+          token.decimals,
+          token.is_verified_via_admin_panel,
+          token.icon_url,
+          token.icon_url,
+          token.name,
+          token.symbol,
+          token.decimals,
+          token.icon_url
+        )
+    )
+  end
+
+  @doc """
+  Returns a list of token fields that should be updated when importing from a token list.
+  """
+  @spec token_list_fields_to_update() :: [:name | :symbol | :decimals | :icon_url]
+  def token_list_fields_to_update do
+    [:name, :symbol, :decimals, :icon_url]
   end
 
   defp should_update?(_new_token, nil, _fields_to_replace), do: true

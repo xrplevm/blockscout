@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Mixfile do
   use Mix.Project
 
@@ -14,19 +15,14 @@ defmodule BlockScoutWeb.Mixfile do
         plt_add_deps: :app_tree,
         ignore_warnings: "../../.dialyzer_ignore.exs"
       ],
-      elixir: "~> 1.17",
+      elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env(), Application.get_env(:block_scout_web, :disable_api?)),
       lockfile: "../../mix.lock",
       package: package(),
-      preferred_cli_env: [
-        credo: :test,
-        dialyzer: :test
-      ],
       start_permanent: Mix.env() == :prod,
-      version: "8.0.2",
+      version: "11.2.2",
       xref: [
         exclude: [
-          Explorer.Chain.PolygonZkevm.Reader,
           Explorer.Chain.Beacon.Reader,
           Explorer.Chain.Cache.OptimismFinalizationPeriod,
           Explorer.Chain.Optimism.OutputRoot,
@@ -48,8 +44,13 @@ defmodule BlockScoutWeb.Mixfile do
     ]
   end
 
+  def cli do
+    [preferred_envs: [credo: :test, dialyzer: :test]]
+  end
+
   # Specifies which paths to compile per environment.
-  defp elixirc_paths(:test, _), do: ["test/support", "test/block_scout_web/features/pages"] ++ elixirc_paths()
+  defp elixirc_paths(:test, _),
+    do: ["test/support", "test/block_scout_web/features/pages", "benchmarks/support"] ++ elixirc_paths()
 
   defp elixirc_paths(_, true),
     do: [
@@ -85,6 +86,7 @@ defmodule BlockScoutWeb.Mixfile do
       {:absinthe_plug, git: "https://github.com/blockscout/absinthe_plug.git", tag: "1.5.8", override: true},
       # Absinthe support for the Relay framework
       {:absinthe_relay, "~> 1.5"},
+      {:benchee, "~> 1.5.0", only: :test},
       {:bypass, "~> 2.1", only: :test},
       # To add (CORS)(https://www.w3.org/TR/cors/)
       {:cors_plug, "~> 3.0"},
@@ -107,7 +109,8 @@ defmodule BlockScoutWeb.Mixfile do
       {:floki, "~> 0.31"},
       {:flow, "~> 1.2"},
       {:gettext, "~> 0.26.1"},
-      {:hammer, "~> 6.0"},
+      {:hammer, "~> 7.0"},
+      {:hammer_backend_redis, "~> 7.0"},
       {:httpoison, "~> 2.0"},
       {:indexer, in_umbrella: true, runtime: false},
       # JSON parser and generator
@@ -115,26 +118,25 @@ defmodule BlockScoutWeb.Mixfile do
       {:junit_formatter, ">= 0.0.0", only: [:test], runtime: false},
       # Log errors and application output to separate files
       {:logger_file_backend, "~> 0.0.10"},
+      {:logger_json, "~> 7.0"},
       {:math, "~> 0.7.0"},
       {:mock, "~> 0.3.0", only: [:test], runtime: false},
       {:number, "~> 1.0.1"},
-      {:phoenix, "== 1.5.14"},
+      {:phoenix, "== 1.6.16"},
       {:phoenix_ecto, "~> 4.1"},
-      {:phoenix_html, "== 3.3.4"},
-      {:phoenix_live_reload, "~> 1.2", only: [:dev]},
-      {:phoenix_live_view, "~> 0.17"},
+      {:phoenix_html, "== 4.2.1"},
+      {:phoenix_html_helpers, "~> 1.0"},
+      {:phoenix_live_reload, "~> 1.6", only: [:dev]},
+      {:phoenix_live_view, "~> 1.1"},
       {:phoenix_pubsub, "~> 2.0"},
-      {:prometheus_ex, git: "https://github.com/lanodan/prometheus.ex", branch: "fix/elixir-1.14", override: true},
+      {:prometheus_ex, "~> 5.1.0", override: true},
       # use `:cowboy` for WebServer with `:plug`
       {:plug_cowboy, "~> 2.2"},
       # Waiting for the Pretty Print to be implemented at the Jason lib
       # https://github.com/michalmuskala/jason/issues/15
-      {:poison, "~> 4.0.1"},
+      {:poison, "~> 5.0.0"},
       {:postgrex, ">= 0.0.0"},
-      # For compatibility with `prometheus_process_collector`, which hasn't been updated yet
-      {:prometheus, "~> 4.0", override: true},
-      # Gather methods for Phoenix requests
-      {:prometheus_phoenix, "~> 1.2"},
+      {:prometheus, "~> 6.0", override: true},
       # Expose metrics from URL Prometheus server can scrape
       {:prometheus_plugs, "~> 1.1"},
       # OS process metrics for Prometheus, custom ref to include https://github.com/deadtrickster/prometheus_process_collector/pull/30
@@ -154,12 +156,13 @@ defmodule BlockScoutWeb.Mixfile do
       {:timex, "~> 3.7.1"},
       {:wallaby, "~> 0.30", only: :test, runtime: false},
       # `:cowboy` `~> 2.0` and Phoenix 1.4 compatibility
-      {:ex_json_schema, "~> 0.10.1"},
+      {:ex_json_schema, "~> 0.11.0"},
       {:ueberauth, "~> 0.7"},
       {:ueberauth_auth0, "~> 2.0"},
       {:utils, in_umbrella: true},
       {:bureaucrat, "~> 0.2.9", only: :test},
-      {:logger_json, "~> 5.1"}
+      {:open_api_spex, "~> 3.21"},
+      {:ymlr, "~> 5.1"}
     ]
   end
 
@@ -187,7 +190,7 @@ defmodule BlockScoutWeb.Mixfile do
   defp package do
     [
       maintainers: ["Blockscout"],
-      licenses: ["GPL 3.0"],
+      licenses: ["Blockscout Software Licence"],
       links: %{"GitHub" => "https://github.com/blockscout/blockscout"}
     ]
   end

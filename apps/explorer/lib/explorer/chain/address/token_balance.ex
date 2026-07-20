@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Address.TokenBalance do
   @moduledoc """
   Represents a token balance from an address.
@@ -10,11 +11,12 @@ defmodule Explorer.Chain.Address.TokenBalance do
   use Explorer.Schema
 
   import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
+  import Explorer.QueryHelper, only: [select_ctid: 1, join_on_ctid: 2]
 
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.Address.TokenBalance
-  alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.{Address, Block, Hash, Token}
+  alias Explorer.Chain.Cache.BackgroundMigrations
+  alias Explorer.Utility.MissingBalanceOfToken
 
   @typedoc """
    *  `address` - The `t:Explorer.Chain.Address.t/0` that is the balance's owner.
@@ -56,7 +58,7 @@ defmodule Explorer.Chain.Address.TokenBalance do
   @allowed_fields @optional_fields ++ @required_fields
 
   @doc false
-  def changeset(%TokenBalance{} = token_balance, attrs) do
+  def changeset(%__MODULE__{} = token_balance, attrs) do
     token_balance
     |> cast(attrs, @allowed_fields)
     |> validate_required(@required_fields)
@@ -77,20 +79,21 @@ defmodule Explorer.Chain.Address.TokenBalance do
   def unfetched_token_balances do
     if BackgroundMigrations.get_tb_token_type_finished() do
       from(
-        tb in TokenBalance,
+        tb in __MODULE__,
         where:
           ((tb.address_hash != ^@burn_address_hash and tb.token_type == "ERC-721") or tb.token_type == "ERC-20" or
+             tb.token_type == "ZRC-2" or
              tb.token_type == "ERC-1155" or tb.token_type == "ERC-404") and
             (is_nil(tb.value_fetched_at) or is_nil(tb.value)) and
             (is_nil(tb.refetch_after) or tb.refetch_after < ^Timex.now())
       )
     else
       from(
-        tb in TokenBalance,
+        tb in __MODULE__,
         join: t in Token,
         on: tb.token_contract_address_hash == t.contract_address_hash,
         where:
-          ((tb.address_hash != ^@burn_address_hash and t.type == "ERC-721") or t.type == "ERC-20" or
+          ((tb.address_hash != ^@burn_address_hash and t.type == "ERC-721") or t.type == "ERC-20" or t.type == "ZRC-2" or
              t.type == "ERC-1155" or t.type == "ERC-404") and
             (is_nil(tb.value_fetched_at) or is_nil(tb.value)) and
             (is_nil(tb.refetch_after) or tb.refetch_after < ^Timex.now())
@@ -105,7 +108,7 @@ defmodule Explorer.Chain.Address.TokenBalance do
 
   def fetch_token_balance(address_hash, token_contract_address_hash, block_number, nil) do
     from(
-      tb in TokenBalance,
+      tb in __MODULE__,
       where: tb.address_hash == ^address_hash,
       where: tb.token_contract_address_hash == ^token_contract_address_hash,
       where: tb.block_number <= ^block_number,
@@ -116,7 +119,7 @@ defmodule Explorer.Chain.Address.TokenBalance do
 
   def fetch_token_balance(address_hash, token_contract_address_hash, block_number, token_id) do
     from(
-      tb in TokenBalance,
+      tb in __MODULE__,
       where: tb.address_hash == ^address_hash,
       where: tb.token_contract_address_hash == ^token_contract_address_hash,
       where: tb.token_id == ^token_id,
@@ -142,10 +145,57 @@ defmodule Explorer.Chain.Address.TokenBalance do
   @spec delete_token_balance_placeholders_below(atom(), Hash.Address.t(), Block.block_number()) ::
           {non_neg_integer(), nil | [term()]}
   def delete_token_balance_placeholders_below(module, token_contract_address_hash, block_number) do
-    module
-    |> where([tb], tb.token_contract_address_hash == ^token_contract_address_hash)
-    |> where([tb], tb.block_number <= ^block_number)
-    |> where([tb], is_nil(tb.value_fetched_at) or is_nil(tb.value))
-    |> Repo.delete_all()
+    {:ok, result} =
+      Repo.transaction(fn ->
+        ordered_query =
+          from(tb in module,
+            where: tb.token_contract_address_hash == ^token_contract_address_hash,
+            where: tb.block_number <= ^block_number,
+            where: is_nil(tb.value_fetched_at) or is_nil(tb.value),
+            select: select_ctid(tb),
+            # Enforce TokenBalance ShareLocks order (see docs: sharelocks.md)
+            order_by: [
+              tb.token_contract_address_hash,
+              tb.token_id,
+              tb.address_hash,
+              tb.block_number
+            ],
+            lock: "FOR UPDATE"
+          )
+
+        query =
+          from(tb in module,
+            inner_join: ordered_address_token_balance in subquery(ordered_query),
+            on: join_on_ctid(tb, ordered_address_token_balance)
+          )
+
+        Repo.delete_all(query)
+      end)
+
+    result
+  end
+
+  @doc """
+  Returns a stream of all token balances that weren't fetched values.
+  """
+  @spec stream_unfetched_token_balances(
+          initial :: accumulator,
+          reducer :: (entry :: __MODULE__.t(), accumulator -> accumulator),
+          limited? :: boolean()
+        ) :: {:ok, accumulator}
+        when accumulator: term()
+  def stream_unfetched_token_balances(initial, reducer, limited? \\ false) when is_function(reducer, 2) do
+    __MODULE__.unfetched_token_balances()
+    |> MissingBalanceOfToken.filter_token_balances_query()
+    |> add_token_balances_fetcher_limit(limited?)
+    |> Repo.stream_reduce(initial, reducer)
+  end
+
+  def add_token_balances_fetcher_limit(query, false), do: query
+
+  def add_token_balances_fetcher_limit(query, true) do
+    token_balances_fetcher_limit = Application.get_env(:indexer, :token_balances_fetcher_init_limit)
+
+    limit(query, ^token_balances_fetcher_limit)
   end
 end

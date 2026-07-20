@@ -1,8 +1,10 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Tokens.Instance.MetadataController do
   use BlockScoutWeb, :controller
 
   alias BlockScoutWeb.Tokens.Instance.Helper
   alias Explorer.Chain
+  alias Explorer.Chain.Token
   alias Explorer.Chain.Token.Instance
 
   def index(conn, %{"token_id" => token_address_hash, "instance_id" => token_id_string}) do
@@ -10,7 +12,7 @@ defmodule BlockScoutWeb.Tokens.Instance.MetadataController do
 
     with {:ok, hash} <- Chain.string_to_address_hash(token_address_hash),
          {:ok, token} <- Chain.token_from_address_hash(hash, options),
-         false <- Chain.erc_20_token?(token),
+         false <- Chain.erc_20_token?(token) or Token.zrc_2_token?(token),
          {token_id, ""} <- Integer.parse(token_id_string),
          {:ok, token_instance} <-
            Instance.nft_instance_by_token_id_and_token_address(token_id, hash) do

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.NFTHelper do
   @moduledoc """
     Module with functions for NFT view
@@ -19,7 +20,7 @@ defmodule BlockScoutWeb.NFTHelper do
         metadata["image"] ->
           retrieve_image(metadata["image"])
 
-        image = metadata["properties"]["image"] ->
+        image = is_map(metadata["properties"]) && metadata["properties"]["image"] ->
           if is_map(image), do: image["description"], else: image
 
         true ->

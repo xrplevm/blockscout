@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.SignedAuthorizations do
   @moduledoc """
     Helper functions for extracting signed authorizations from EIP-7702 transactions.
@@ -30,12 +31,24 @@ defmodule Indexer.Transform.SignedAuthorizations do
       &(&1.authorization_list
         |> Enum.with_index()
         |> Enum.map(fn {authorization, index} ->
-          authorization
-          |> Map.merge(%{
-            transaction_hash: &1.hash,
-            index: index,
-            authority: recover_authority(authorization)
-          })
+          new_authorization =
+            authorization
+            |> Map.merge(%{
+              transaction_hash: &1.hash,
+              index: index,
+              authority: recover_authority(authorization)
+            })
+
+          # we can immediately do some basic validation that doesn't require any extra JSON-RPC requests
+          # full validation for :invalid_nonce is deferred to async fetcher (so :ok is replaced with nil)
+          status =
+            case SignedAuthorization.basic_validate(new_authorization) do
+              :ok -> nil
+              status -> status
+            end
+
+          new_authorization
+          |> Map.put(:status, status)
         end))
     )
   end

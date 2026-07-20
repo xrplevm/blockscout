@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.ZkSyncController do
   use BlockScoutWeb, :controller
 
   import BlockScoutWeb.Chain,
     only: [
-      next_page_params: 4,
+      next_page_params: 5,
       paging_options: 1,
       split_list_by_page: 1
     ]
@@ -56,6 +57,7 @@ defmodule BlockScoutWeb.API.V2.ZkSyncController do
         next_page,
         batches,
         params,
+        false,
         fn %TransactionBatch{number: number} -> %{"number" => number} end
       )
 

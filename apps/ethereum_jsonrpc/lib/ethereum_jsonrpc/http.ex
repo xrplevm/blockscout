@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.HTTP do
   @moduledoc """
   JSONRPC over HTTP
@@ -44,7 +45,19 @@ defmodule EthereumJSONRPC.HTTP do
   end
 
   def json_rpc(batch_request, options) when is_list(batch_request) do
-    chunked_json_rpc([batch_request], options, [])
+    batch_size = Application.get_env(:ethereum_jsonrpc, __MODULE__)[:batch_size]
+    chunked_batch_request = Enum.chunk_every(batch_request, batch_size)
+    maybe_log_big_batch(chunked_batch_request)
+    chunked_json_rpc(chunked_batch_request, options, [])
+  end
+
+  defp maybe_log_big_batch([]), do: :ok
+  defp maybe_log_big_batch([_]), do: :ok
+
+  defp maybe_log_big_batch([first_chunk | _] = batch) do
+    Logger.warning(
+      "Big amount of node requests in batch: #{batch |> Enum.map(&length/1) |> Enum.sum()}, 1st_chunk_1st_request: #{inspect(List.first(first_chunk))}"
+    )
   end
 
   defp chunked_json_rpc([], _options, decoded_response_bodies) when is_list(decoded_response_bodies) do
@@ -191,11 +204,11 @@ defmodule EthereumJSONRPC.HTTP do
   """
   @spec standardize_response(map()) :: %{
           :id => nil | non_neg_integer(),
-          :jsonrpc => binary(),
+          optional(:jsonrpc) => binary(),
           optional(:error) => %{:code => integer(), :message => binary(), optional(:data) => any()},
           optional(:result) => any()
         }
-  def standardize_response(%{"jsonrpc" => "2.0" = jsonrpc} = unstandardized) do
+  def standardize_response(unstandardized) do
     # Avoid extracting `id` directly in the function declaration. Some endpoints
     # do not adhere to standards and may omit the `id` in responses related to
     # error scenarios. Consequently, the function call would fail during input
@@ -204,7 +217,7 @@ defmodule EthereumJSONRPC.HTTP do
     # Nethermind return string ids
     id = sanitize_id(unstandardized["id"])
 
-    standardized = %{jsonrpc: jsonrpc, id: id}
+    standardized = %{jsonrpc: unstandardized["jsonrpc"], id: id}
 
     case {id, unstandardized} do
       {_id, %{"result" => _, "error" => _}} ->
@@ -266,6 +279,15 @@ defmodule EthereumJSONRPC.HTTP do
   end
 
   defp headers do
-    Application.get_env(:ethereum_jsonrpc, __MODULE__)[:headers]
+    gzip_enabled? = Application.get_env(:ethereum_jsonrpc, __MODULE__)[:gzip_enabled?]
+
+    additional_headers =
+      if gzip_enabled? do
+        [{"Accept-Encoding", "gzip"}]
+      else
+        []
+      end
+
+    Application.get_env(:ethereum_jsonrpc, __MODULE__)[:headers] ++ additional_headers
   end
 end

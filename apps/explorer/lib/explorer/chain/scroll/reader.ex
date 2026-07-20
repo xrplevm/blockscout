@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Scroll.Reader do
   @moduledoc "Contains read functions for Scroll modules."
 
@@ -14,9 +15,9 @@ defmodule Explorer.Chain.Scroll.Reader do
 
   import Explorer.Chain, only: [select_repo: 1]
 
-  alias Explorer.Chain.Scroll.{Batch, BatchBundle, Bridge, L1FeeParam}
   alias Explorer.{Chain, PagingOptions, Repo}
   alias Explorer.Chain.{Block, Transaction}
+  alias Explorer.Chain.Scroll.{Batch, BatchBundle, Bridge, L1FeeParam}
   alias Explorer.Prometheus.Instrumenter
 
   @doc """
@@ -300,8 +301,7 @@ defmodule Explorer.Chain.Scroll.Reader do
             base_query,
             [p],
             p.name == ^name and
-              (p.block_number < ^transaction.block_number or
-                 (p.block_number == ^transaction.block_number and p.transaction_index < ^transaction.index))
+              {p.block_number, p.transaction_index} < {^transaction.block_number, ^transaction.index}
           )
       end
 

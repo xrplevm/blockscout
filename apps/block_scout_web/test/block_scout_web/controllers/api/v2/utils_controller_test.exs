@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.UtilsControllerTest do
   use BlockScoutWeb.ConnCase
 
@@ -9,7 +10,8 @@ defmodule BlockScoutWeb.API.V2.UtilsControllerTest do
         :transaction_to_verified_contract
         |> insert()
 
-      TestHelper.get_all_proxies_implementation_zero_addresses()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       assert conn
              |> get("/api/v2/utils/decode-calldata", %{
@@ -25,7 +27,8 @@ defmodule BlockScoutWeb.API.V2.UtilsControllerTest do
                  }
                }
 
-      TestHelper.get_all_proxies_implementation_zero_addresses()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       assert conn
              |> post("/api/v2/utils/decode-calldata", %{

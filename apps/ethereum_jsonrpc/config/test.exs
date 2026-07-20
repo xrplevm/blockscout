@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 import Config
 
 config :ethereum_jsonrpc, EthereumJSONRPC.RequestCoordinator,
@@ -17,6 +18,6 @@ config :ethereum_jsonrpc, EthereumJSONRPC.RequestCoordinator,
 
 config :ethereum_jsonrpc, EthereumJSONRPC.Tracer, disabled?: false
 
-config :logger, :ethereum_jsonrpc,
-  level: :warn,
-  path: Path.absname("logs/test/ethereum_jsonrpc.log")
+config :tesla, adapter: Explorer.Mock.TeslaAdapter
+
+config :logger, :ethereum_jsonrpc, path: Path.absname("logs/test/ethereum_jsonrpc.log")

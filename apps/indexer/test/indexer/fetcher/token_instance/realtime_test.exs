@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenInstance.RealtimeTest do
   use EthereumJSONRPC.Case
   use Explorer.DataCase
@@ -28,6 +29,8 @@ defmodule Indexer.Fetcher.TokenInstance.RealtimeTest do
 
     test "retry once after timeout" do
       bypass = Bypass.open()
+
+      Application.put_env(:tesla, :adapter, Tesla.Adapter.Mint)
 
       []
       |> TokenInstanceRealtime.Supervisor.child_spec()
@@ -100,23 +103,37 @@ defmodule Indexer.Fetcher.TokenInstance.RealtimeTest do
           type: "ERC-1155"
         )
 
-      insert(:token_instance,
-        token_id: 777,
-        token_contract_address_hash: token.contract_address_hash,
-        metadata: nil,
-        error: nil
-      )
+      inserted_instance =
+        insert(:token_instance,
+          token_id: 777,
+          token_contract_address_hash: token.contract_address_hash,
+          metadata: nil,
+          error: nil
+        )
 
       TokenInstanceRealtime.async_fetch([
-        %{token_contract_address_hash: token.contract_address_hash, token_ids: [Decimal.new(777)]}
+        %{token_contract_address_hash: token.contract_address_hash, token_id: Decimal.new(777)}
       ])
 
-      :timer.sleep(150)
+      instance =
+        Enum.reduce_while(1..30, nil, fn _, _ ->
+          :timer.sleep(100)
 
-      [instance] = Repo.all(Instance)
+          case Repo.get_by(Instance,
+                 token_id: inserted_instance.token_id,
+                 token_contract_address_hash: inserted_instance.token_contract_address_hash
+               ) do
+            %{metadata: metadata} = inst when not is_nil(metadata) -> {:halt, inst}
+            _ -> {:cont, nil}
+          end
+        end)
+
+      assert instance != nil,
+             "Timed out waiting for token instance #{inserted_instance.token_id} at #{inserted_instance.token_contract_address_hash} metadata to be populated"
 
       assert is_nil(instance.error)
       assert instance.metadata == %{"name" => "name"}
+      Application.put_env(:tesla, :adapter, Explorer.Mock.TeslaAdapter)
       Bypass.down(bypass)
     end
   end

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.AverageBlockTime do
   @moduledoc """
   Caches the average block time in milliseconds.
@@ -11,7 +12,6 @@ defmodule Explorer.Chain.Cache.Counters.AverageBlockTime do
   alias Explorer.Repo
   alias Timex.Duration
 
-  @num_of_blocks 100
   @offset 100
 
   @doc """
@@ -73,10 +73,13 @@ defmodule Explorer.Chain.Cache.Counters.AverageBlockTime do
     first_block_from_config =
       RangesHelper.get_min_block_number_from_range_string(Application.get_env(:indexer, :block_ranges))
 
+    num_of_blocks =
+      Application.get_env(:explorer, __MODULE__)[:num_of_blocks]
+
     base_query =
       from(block in Block,
         where: block.number > ^first_block_from_config,
-        limit: ^@num_of_blocks,
+        limit: ^num_of_blocks,
         offset: ^@offset,
         order_by: [desc: block.number],
         select: {block.number, block.timestamp}
@@ -96,7 +99,14 @@ defmodule Explorer.Chain.Cache.Counters.AverageBlockTime do
 
     timestamps =
       raw_timestamps
-      |> Enum.sort_by(fn {_, timestamp} -> timestamp end, &Timex.after?/2)
+      |> Enum.sort(fn
+        {number_a, timestamp_a}, {number_b, timestamp_b} ->
+          case Timex.compare(timestamp_a, timestamp_b) do
+            1 -> true
+            -1 -> false
+            0 -> number_a > number_b
+          end
+      end)
       |> Enum.map(fn {number, timestamp} ->
         {number, DateTime.to_unix(timestamp, :millisecond)}
       end)

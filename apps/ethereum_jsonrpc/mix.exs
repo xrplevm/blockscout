@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.MixProject do
   use Mix.Project
 
@@ -15,15 +16,11 @@ defmodule EthereumJSONRPC.MixProject do
         plt_add_apps: [:mix],
         ignore_warnings: "../../.dialyzer_ignore.exs"
       ],
-      elixir: "~> 1.17",
+      elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       lockfile: "../../mix.lock",
-      preferred_cli_env: [
-        credo: :test,
-        dialyzer: :test
-      ],
       start_permanent: Mix.env() == :prod,
-      version: "8.0.2"
+      version: "11.2.2"
     ]
   end
 
@@ -31,8 +28,12 @@ defmodule EthereumJSONRPC.MixProject do
   def application do
     [
       mod: {EthereumJSONRPC.Application, []},
-      extra_applications: [:logger]
+      extra_applications: [:logger, :tesla]
     ]
+  end
+
+  def cli do
+    [preferred_envs: [credo: :test, dialyzer: :test]]
   end
 
   defp aliases(env) do
@@ -67,13 +68,15 @@ defmodule EthereumJSONRPC.MixProject do
       {:jason, "~> 1.3"},
       # Log errors and application output to separate files
       {:logger_file_backend, "~> 0.0.10"},
+      {:logger_json, "~> 7.0"},
       # Mocking `EthereumJSONRPC.Transport` and `EthereumJSONRPC.HTTP` so we avoid hitting real chains for local testing
-      {:mox, "~> 1.0", only: [:test]},
-      {:prometheus_ex, git: "https://github.com/lanodan/prometheus.ex", branch: "fix/elixir-1.14", override: true},
+      {:mox, "~> 1.1.0", only: [:test]},
+      {:prometheus_ex, "~> 5.1.0", override: true},
       # Tracing
       {:spandex, "~> 3.0"},
       # `:spandex` integration with Datadog
       {:spandex_datadog, "~> 1.0"},
+      {:tesla, "~> 1.20.0"},
       # Convert unix timestamps in JSONRPC to DateTimes
       {:timex, "~> 3.7.1"},
       # Encode/decode function names and arguments
@@ -85,9 +88,8 @@ defmodule EthereumJSONRPC.MixProject do
       {:decorator, "~> 1.4"},
       {:hackney, "~> 1.18"},
       {:poolboy, "~> 1.5.2"},
-      {:logger_json, "~> 5.1"},
       {:utils, in_umbrella: true},
-      {:websockex, "~> 0.4.3"}
+      {:websockex, "~> 0.5.0"}
     ]
   end
 end

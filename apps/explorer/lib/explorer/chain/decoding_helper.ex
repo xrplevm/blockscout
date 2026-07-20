@@ -1,9 +1,9 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.DecodingHelper do
   @moduledoc """
   Data decoding functions
   """
   alias ABI.FunctionSelector
-  alias Explorer.Helper, as: ExplorerHelper
   alias Explorer.Chain.{Address, Hash}
 
   require Logger
@@ -55,7 +55,7 @@ defmodule Explorer.Chain.DecodingHelper do
   end
 
   defp base_value_json(_, {:dynamic, value}) do
-    ExplorerHelper.add_0x_prefix(value)
+    "0x" <> Base.encode16(value, case: :lower)
   end
 
   defp base_value_json(:address, value) do
@@ -66,7 +66,7 @@ defmodule Explorer.Chain.DecodingHelper do
   end
 
   defp base_value_json(:bytes, value) do
-    ExplorerHelper.add_0x_prefix(value)
+    "0x" <> Base.encode16(value, case: :lower)
   end
 
   defp base_value_json(_, value), do: to_string(value)

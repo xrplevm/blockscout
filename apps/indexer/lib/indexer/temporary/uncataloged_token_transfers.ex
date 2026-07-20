@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Temporary.UncatalogedTokenTransfers do
   @moduledoc """
   Catalogs token transfer logs missing an accompanying token transfer record.
@@ -13,7 +14,7 @@ defmodule Indexer.Temporary.UncatalogedTokenTransfers do
   require Logger
 
   alias Explorer.Chain.TokenTransfer
-  alias Explorer.Utility.MissingRangesManipulator
+  alias Explorer.Utility.MissingBlockRange
   alias Indexer.Temporary.UncatalogedTokenTransfers
 
   def child_spec([init_arguments]) do
@@ -96,7 +97,7 @@ defmodule Indexer.Temporary.UncatalogedTokenTransfers do
   defp async_push_front(block_numbers) do
     Task.Supervisor.async_nolink(
       UncatalogedTokenTransfers.TaskSupervisor,
-      MissingRangesManipulator,
+      MissingBlockRange,
       :add_ranges_by_block_numbers,
       [block_numbers]
     )

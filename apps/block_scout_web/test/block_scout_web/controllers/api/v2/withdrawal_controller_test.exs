@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.WithdrawalControllerTest do
   use BlockScoutWeb.ConnCase
 
@@ -43,8 +44,8 @@ defmodule BlockScoutWeb.API.V2.WithdrawalControllerTest do
       request = get(conn, "/api/v2/withdrawals/counters")
 
       assert %{
-               "withdrawal_count" => _,
-               "withdrawal_sum" => _
+               "withdrawals_count" => _,
+               "withdrawals_sum" => _
              } = json_response(request, 200)
     end
   end

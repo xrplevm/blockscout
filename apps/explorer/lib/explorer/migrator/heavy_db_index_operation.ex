@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation do
   @moduledoc """
   Provides a template for making heavy DB operations such as creation/deletion of new indexes in the large tables
@@ -7,7 +8,7 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
   @doc """
   Returns the name of the migration. The name is used to track the operation's status in
   `Explorer.Migrator.MigrationStatus`.
-  Heavy DB migration is either `heavy_indexes_create_{lower_case_index_name}` or `heavy_indexes_drop_{lower_case_index_name}`
+  Heavy DB migration is either `heavy_indexes_create_{lower_case_index_name}`, `heavy_indexes_drop_{lower_case_index_name}`, or `heavy_indexes_rename_{lower_case_index_name}`
   """
   @callback migration_name :: String.t()
 
@@ -27,18 +28,21 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
               | :logs
               | :internal_transactions
               | :token_transfers
+              | :token_instances
               | :addresses
               | :smart_contracts
               | :arbitrum_batch_l2_blocks
-
+              | :smart_contracts_additional_sources
+              | :tokens
   @doc """
   Specifies the type of operation to be performed on the database index.
 
   ## Returns
   - `:create` - Indicates that the operation is to add a new index.
   - `:drop` - Indicates that the operation is to drop an existing index.
+  - `:rename` - Indicates that the operation is to rename an existing index.
   """
-  @callback operation_type :: :create | :drop
+  @callback operation_type :: :create | :drop | :rename
 
   @doc """
   Returns the name of the index as a string.
@@ -126,6 +130,7 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
       import Ecto.Query
 
       alias Ecto.Adapters.SQL
+      alias Explorer.Chain.Block
       alias Explorer.Migrator.HeavyDbIndexOperation.Helper, as: HeavyDbIndexOperationHelper
       alias Explorer.Migrator.MigrationStatus
       alias Explorer.Repo
@@ -148,7 +153,22 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
 
       @impl true
       def init(_) do
-        {:ok, %{}, {:continue, :ok}}
+        with {:green_install?, true} <- {:green_install?, not Repo.exists?(Block)},
+             {:migration_finished?, false} <- {:migration_finished?, migration_finished?()},
+             {:dependent_from_migrations_completed?, true} <-
+               {:dependent_from_migrations_completed?, dependent_from_migrations_completed?()},
+             {:db_index_operation, :ok} <- {:db_index_operation, db_index_operation()} do
+          MigrationStatus.set_status(migration_name(), "completed")
+          update_cache()
+          :ignore
+        else
+          {:migration_finished?, true} ->
+            update_cache()
+            :ignore
+
+          _ ->
+            {:ok, %{}, {:continue, :ok}}
+        end
       end
 
       @impl true
@@ -165,20 +185,9 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
             {:stop, :normal, state}
 
           migration_status ->
-            Process.send(self(), :check_if_db_operation_need_to_be_started, [])
+            Process.send(self(), :check_db_index_operation_progress, [])
             {:noreply, state}
         end
-      end
-
-      @impl true
-      def handle_info(:check_if_db_operation_need_to_be_started, state) do
-        if db_operation_is_ready_to_start?() do
-          Process.send(self(), :check_db_index_operation_progress, [])
-        else
-          schedule_next_db_operation_readiness_check()
-        end
-
-        {:noreply, state}
       end
 
       @impl true
@@ -187,9 +196,14 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
                {:index_operation_progress, check_db_index_operation_progress()},
              {:db_index_operation_status, :not_initialized} <-
                {:db_index_operation_status, db_index_operation_status()} do
-          MigrationStatus.set_status(migration_name(), "started")
-          db_index_operation()
-          schedule_next_db_operation_status_check()
+          if db_operation_is_ready_to_start?() do
+            MigrationStatus.set_status(migration_name(), "started")
+            timeout = (db_index_operation() == :ok && 0) || nil
+            schedule_next_db_operation_status_check(timeout)
+          else
+            schedule_next_db_operation_readiness_check()
+          end
+
           {:noreply, state}
         else
           {:index_operation_progress, _status} ->
@@ -228,16 +242,20 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
         if running_other_heavy_migration_exists?(migration_name()) do
           false
         else
-          if Enum.empty?(dependent_from_migrations()) do
-            true
-          else
-            all_statuses =
-              MigrationStatus.fetch_migration_statuses(dependent_from_migrations())
+          dependent_from_migrations_completed?()
+        end
+      end
 
-            all_statuses_completed? = not Enum.empty?(all_statuses) && all_statuses |> Enum.all?(&(&1 == "completed"))
+      defp dependent_from_migrations_completed? do
+        if Enum.empty?(dependent_from_migrations()) do
+          true
+        else
+          all_statuses =
+            MigrationStatus.fetch_migration_statuses(dependent_from_migrations())
 
-            all_statuses_completed? && Enum.count(all_statuses) == Enum.count(dependent_from_migrations())
-          end
+          all_statuses_completed? = not Enum.empty?(all_statuses) && all_statuses |> Enum.all?(&(&1 == "completed"))
+
+          all_statuses_completed? && Enum.count(all_statuses) == Enum.count(dependent_from_migrations())
         end
       end
 
@@ -252,7 +270,7 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
       defp schedule_next_db_operation_readiness_check(timeout \\ nil) do
         Process.send_after(
           self(),
-          :check_if_db_operation_need_to_be_started,
+          :check_db_index_operation_progress,
           timeout || HeavyDbIndexOperationHelper.get_check_interval()
         )
       end

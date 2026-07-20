@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Utility.EventNotification do
   @moduledoc """
   An auxiliary schema for sending postgres notifications.
@@ -7,6 +8,8 @@ defmodule Explorer.Utility.EventNotification do
 
   typed_schema "event_notifications" do
     field(:data, :string)
+
+    timestamps()
   end
 
   @doc false

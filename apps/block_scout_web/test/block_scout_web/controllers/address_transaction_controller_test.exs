@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressTransactionControllerTest do
   use BlockScoutWeb.ConnCase, async: true
   use ExUnit.Case, async: false
@@ -137,8 +138,8 @@ defmodule BlockScoutWeb.AddressTransactionControllerTest do
         created_contract_address: address,
         to_address: nil,
         transaction: transaction,
-        block_hash: block.hash,
-        block_index: 0
+        transaction_index: transaction.index,
+        block_number: transaction.block_number
       )
 
       conn = get(conn, address_transaction_path(conn, :index, Address.checksum(address)), %{"type" => "JSON"})

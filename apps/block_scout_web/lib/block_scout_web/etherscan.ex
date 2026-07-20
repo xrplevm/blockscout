@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Etherscan do
   @moduledoc """
   Documentation data for Etherscan-compatible API.
@@ -82,7 +83,8 @@ defmodule BlockScoutWeb.Etherscan do
         "contractAddress" => "",
         "cumulativeGasUsed" => "122207",
         "gasUsed" => "122207",
-        "confirmations" => "5994246"
+        "confirmations" => "5994246",
+        "methodId" => "0xf00d4b5d"
       }
     ]
   }
@@ -665,6 +667,12 @@ defmodule BlockScoutWeb.Etherscan do
     example: ~s("6005998")
   }
 
+  @method_id_type %{
+    type: "string",
+    definition: "Method signature used in transaction (0x for simple coin transfers)",
+    example: ~s("0xf00d4b5d")
+  }
+
   @transaction_index_type %{
     type: "transaction index",
     definition: "Index of the transaction in it's block.",
@@ -786,7 +794,8 @@ defmodule BlockScoutWeb.Etherscan do
       contractAddress: @address_hash_type,
       cumulativeGasUsed: @gas_type,
       gasUsed: @gas_type,
-      confirmations: @confirmation_type
+      confirmations: @confirmation_type,
+      methodId: @method_id_type
     }
   }
 

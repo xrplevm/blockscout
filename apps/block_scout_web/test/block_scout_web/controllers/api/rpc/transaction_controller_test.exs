@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.RPC.TransactionControllerTest do
   use BlockScoutWeb.ConnCase
 
@@ -265,11 +266,11 @@ defmodule BlockScoutWeb.API.RPC.TransactionControllerTest do
 
       internal_transaction_details = [
         transaction: transaction,
+        transaction_index: transaction.index,
         index: 0,
         type: :reward,
         error: error,
-        block_hash: transaction.block_hash,
-        block_index: 0
+        block_number: transaction.block_number
       ]
 
       insert(:internal_transaction, internal_transaction_details)

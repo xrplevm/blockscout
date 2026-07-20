@@ -1,30 +1,31 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Utils.MixProject do
   use Mix.Project
 
   def project do
     [
       app: :utils,
-      version: "8.0.2",
+      version: "11.2.2",
       build_path: "../../_build",
       # config_path: "../../config/config.exs",
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
-      elixir: "~> 1.17",
+      elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps(),
-      preferred_cli_env: [
-        credo: :test,
-        dialyzer: :test
-      ]
+      deps: deps()
     ]
   end
 
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger, :tesla]
     ]
+  end
+
+  def cli do
+    [preferred_envs: [credo: :test, dialyzer: :test]]
   end
 
   # Run "mix help deps" to learn about dependencies.
@@ -32,7 +33,8 @@ defmodule Utils.MixProject do
     [
       {:credo, "~> 1.5", only: [:test, :dev], runtime: false},
       {:httpoison, "~> 2.0"},
-      {:mime, "~> 2.0"}
+      {:mime, "~> 2.0"},
+      {:tesla, "~> 1.20.0"}
     ]
   end
 

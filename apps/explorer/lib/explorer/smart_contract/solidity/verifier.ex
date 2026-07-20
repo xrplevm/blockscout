@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 # credo:disable-for-this-file
 defmodule Explorer.SmartContract.Solidity.Verifier do
   @moduledoc """
@@ -12,6 +13,7 @@ defmodule Explorer.SmartContract.Solidity.Verifier do
     only: [
       cast_libraries: 1,
       fetch_data_for_verification: 1,
+      parse_solidity_verification_language: 1,
       prepare_bytecode_for_microservice: 3
     ]
 
@@ -52,8 +54,7 @@ defmodule Explorer.SmartContract.Solidity.Verifier do
     %{}
     |> prepare_bytecode_for_microservice(creation_transaction_input, deployed_bytecode)
     |> Map.put("sourceFiles", %{
-      "#{params["name"]}.#{smart_contract_source_file_extension(parse_boolean(params["is_yul"]))}" =>
-        params["contract_source_code"]
+      "#{params["name"]}.#{smart_contract_source_file_extension(params)}" => params["contract_source_code"]
     })
     |> Map.put("libraries", params["external_libraries"])
     |> Map.put("optimizationRuns", prepare_optimization_runs(params["optimization"], params["optimization_runs"]))
@@ -90,8 +91,9 @@ defmodule Explorer.SmartContract.Solidity.Verifier do
     end
   end
 
-  defp smart_contract_source_file_extension(true), do: "yul"
-  defp smart_contract_source_file_extension(_), do: "sol"
+  defp smart_contract_source_file_extension(params) do
+    if parse_solidity_verification_language(params) == :yul, do: "yul", else: "sol"
+  end
 
   defp prepare_optimization_runs(false_, _) when false_ in [false, "false"], do: nil
 
@@ -479,6 +481,7 @@ defmodule Explorer.SmartContract.Solidity.Verifier do
       {meta, last_2_bytes}
     else
       _ ->
+        Logger.warning("Could not extract CBOR metadata from deployed bytecode")
         {"", ""}
     end
   end
@@ -489,6 +492,7 @@ defmodule Explorer.SmartContract.Solidity.Verifier do
       decoded_meta
     else
       _ ->
+        Logger.warning("Failed to decode CBOR metadata from bytecode, falling back to empty metadata")
         %{}
     end
   end

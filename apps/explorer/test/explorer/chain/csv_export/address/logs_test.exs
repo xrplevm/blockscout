@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Address.LogsTest do
   use Explorer.DataCase
 
@@ -44,7 +45,7 @@ defmodule Explorer.Chain.Address.LogsTest do
 
       [result] =
         address.hash
-        |> AddressLogsCsvExporter.export(from_period, to_period, [])
+        |> AddressLogsCsvExporter.export(from_period, to_period, [], nil, nil)
         |> Enum.to_list()
         |> Enum.drop(1)
         |> Enum.map(fn [
@@ -122,7 +123,7 @@ defmodule Explorer.Chain.Address.LogsTest do
 
       result =
         address.hash
-        |> AddressLogsCsvExporter.export(from_period, to_period, [])
+        |> AddressLogsCsvExporter.export(from_period, to_period, [], nil, nil)
         |> Enum.to_list()
         |> Enum.drop(1)
 

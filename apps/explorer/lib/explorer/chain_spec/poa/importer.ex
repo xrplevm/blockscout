@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ChainSpec.POA.Importer do
   @moduledoc """
   Imports emission reward range for POA chain.
@@ -5,11 +6,11 @@ defmodule Explorer.ChainSpec.POA.Importer do
 
   require Logger
 
+  alias Explorer.Chain.Block.{EmissionReward, Range}
   alias Explorer.Chain.Wei
+  alias Explorer.ChainSpec.GenesisData
   alias Explorer.Repo
   alias Explorer.SmartContract.Reader
-  alias Explorer.Chain.Block.{EmissionReward, Range}
-  alias Explorer.ChainSpec.GenesisData
 
   import Ecto.Query
 

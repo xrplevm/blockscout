@@ -1,11 +1,12 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Validator do
   @moduledoc """
     Tracks info about POA validator
   """
 
   use Explorer.Schema
-  alias Explorer.Chain.Hash.Address
   alias Explorer.{Chain, Repo}
+  alias Explorer.Chain.Hash.Address
 
   @primary_key false
   typed_schema "validators" do

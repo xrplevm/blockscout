@@ -1,15 +1,15 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.MicroserviceInterfaces.BENS do
   @moduledoc """
     Interface to interact with Blockscout ENS microservice
   """
 
-  alias Explorer.Chain
+  alias Explorer.{Chain, HttpClient}
   alias Explorer.Chain.Address.MetadataPreloader
 
-  alias Explorer.Chain.{Address, Transaction}
+  alias Explorer.Chain.{Address, Block, Transaction}
 
   alias Explorer.Utility.Microservice
-  alias HTTPoison.Response
 
   require Logger
 
@@ -19,72 +19,95 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   @request_error_msg "Error while sending request to BENS microservice"
 
   @doc """
-    Batch request for ENS names via POST {{baseUrl}}/api/v1/:chainId/addresses:batch-resolve-names
+    Batch request for ENS names via POST.
+    In multiprotocol mode: {{baseUrl}}/api/v1/addresses:batch-resolve with protocols in body.
+    In legacy mode: {{baseUrl}}/api/v1/:chainId/addresses:batch-resolve-names
   """
   @spec ens_names_batch_request([binary()]) :: {:error, :disabled | binary() | Jason.DecodeError.t()} | {:ok, any}
   def ens_names_batch_request(addresses) do
     with :ok <- Microservice.check_enabled(__MODULE__) do
-      body = %{
-        addresses: Enum.map(addresses, &to_string/1)
-      }
+      body =
+        %{addresses: Enum.map(addresses, &to_string/1)}
+        |> maybe_put_protocols_in_body()
 
       http_post_request(batch_resolve_name_url(), body)
     end
   end
 
   @doc """
-    Request for ENS name via GET {{baseUrl}}/api/v1/:chainId/addresses:lookup
+    Request for address ENS name via GET.
+    In multiprotocol mode: {{baseUrl}}/api/v1/addresses:lookup with protocols query parameter.
+    In legacy mode: {{baseUrl}}/api/v1/:chainId/addresses:lookup
   """
   @spec address_lookup(binary()) :: {:error, :disabled | binary() | Jason.DecodeError.t()} | {:ok, any}
   def address_lookup(address) do
     with :ok <- Microservice.check_enabled(__MODULE__) do
-      query_params = %{
-        "address" => to_string(address),
-        "resolved_to" => true,
-        "owned_by" => false,
-        "only_active" => true,
-        "order" => "ASC"
-      }
+      query_params =
+        %{
+          "address" => to_string(address),
+          "resolved_to" => true,
+          "owned_by" => false,
+          "only_active" => true,
+          "order" => "ASC"
+        }
+        |> maybe_put_protocols_param()
 
       http_get_request(address_lookup_url(), query_params)
     end
   end
 
   @doc """
-    Request for ENS name via GET {{baseUrl}}/api/v1/:chainId/addresses/{address_hash}
+    Request for address ENS name via GET.
+    In multiprotocol mode: {{baseUrl}}/api/v1/addresses/{address_hash} with protocol_id query parameter (first protocol).
+    In legacy mode: {{baseUrl}}/api/v1/:chainId/addresses/{address_hash}
   """
   @spec get_address(binary()) :: map() | nil
   def get_address(address) do
     result =
       with :ok <- Microservice.check_enabled(__MODULE__) do
-        http_get_request(get_address_url(address), nil)
+        http_get_request(get_address_url(address), maybe_protocol_id_param())
       end
 
     parse_get_address_response(result)
   end
 
   @doc """
-    Lookup for ENS domain name via GET {{baseUrl}}/api/v1/:chainId/domains:lookup
+    Lookup for ENS domain name via GET.
+    In multiprotocol mode: {{baseUrl}}/api/v1/domains:lookup with protocols query parameter.
+    In legacy mode: {{baseUrl}}/api/v1/:chainId/domains:lookup
   """
   @spec ens_domain_lookup(binary()) :: {:error, :disabled | binary() | Jason.DecodeError.t()} | {:ok, any}
   def ens_domain_lookup(domain) do
     with :ok <- Microservice.check_enabled(__MODULE__) do
-      query_params = %{
-        "name" => domain,
-        "only_active" => true,
-        "sort" => "registration_date",
-        "order" => "DESC"
-      }
+      query_params =
+        %{
+          "name" => domain,
+          "only_active" => true,
+          "sort" => "registration_date",
+          "order" => "DESC"
+        }
+        |> maybe_put_protocols_param()
 
       http_get_request(domain_lookup_url(), query_params)
     end
   end
 
   @doc """
-    Request for ENS name via GET {{baseUrl}}/api/v1/:chainId/domains:lookup
+    Request for ENS name via GET.
+    In multiprotocol mode: {{baseUrl}}/api/v1/domains:lookup
+    In legacy mode: {{baseUrl}}/api/v1/:chainId/domains:lookup
   """
   @spec ens_domain_name_lookup(binary()) ::
-          nil | %{address_hash: binary(), expiry_date: any(), name: any(), names_count: integer(), protocol: any()}
+          nil
+          | %{
+              address_hash: binary() | nil,
+              expiry_date: any(),
+              name: any(),
+              names_count: integer(),
+              protocol: any(),
+              protocol_dapp_url: binary() | nil,
+              protocol_dapp_logo: binary() | nil
+            }
   def ens_domain_name_lookup(domain) do
     domain |> ens_domain_lookup() |> parse_lookup_response()
   end
@@ -92,8 +115,8 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   defp http_post_request(url, body) do
     headers = [{"Content-Type", "application/json"}]
 
-    case HTTPoison.post(url, Jason.encode!(body), headers, recv_timeout: @post_timeout) do
-      {:ok, %Response{body: body, status_code: 200}} ->
+    case HttpClient.post(url, Jason.encode!(body), headers, recv_timeout: @post_timeout) do
+      {:ok, %{body: body, status_code: 200}} ->
         Jason.decode(body)
 
       {_, error} ->
@@ -113,8 +136,8 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   end
 
   defp http_get_request(url, query_params) do
-    case HTTPoison.get(url, [], params: query_params) do
-      {:ok, %Response{body: body, status_code: 200}} ->
+    case HttpClient.get(url, [], params: query_params) do
+      {:ok, %{body: body, status_code: 200}} ->
         Jason.decode(body)
 
       {_, error} ->
@@ -138,10 +161,18 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
 
   defp batch_resolve_name_url do
     # workaround for https://github.com/PSPDFKit-labs/bypass/issues/122
-    if Mix.env() == :test do
-      "#{addresses_url()}:batch_resolve_names"
-    else
-      "#{addresses_url()}:batch-resolve-names"
+    cond do
+      Mix.env() == :test and multiprotocol?() ->
+        "#{addresses_url()}:batch_resolve"
+
+      Mix.env() == :test ->
+        "#{addresses_url()}:batch_resolve_names"
+
+      multiprotocol?() ->
+        "#{addresses_url()}:batch-resolve"
+
+      true ->
+        "#{addresses_url()}:batch-resolve-names"
     end
   end
 
@@ -166,8 +197,50 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   end
 
   defp base_url do
-    chain_id = Application.get_env(:block_scout_web, :chain_id)
-    "#{Microservice.base_url(__MODULE__)}/api/v1/#{chain_id}"
+    if multiprotocol?() do
+      "#{Microservice.base_url(__MODULE__)}/api/v1"
+    else
+      chain_id = Application.get_env(:block_scout_web, :chain_id)
+      "#{Microservice.base_url(__MODULE__)}/api/v1/#{chain_id}"
+    end
+  end
+
+  defp protocols do
+    Application.get_env(:explorer, __MODULE__)[:protocols] || []
+  end
+
+  defp multiprotocol? do
+    protocols() != []
+  end
+
+  defp main_protocol do
+    List.first(protocols())
+  end
+
+  defp protocols_string do
+    Enum.join(protocols(), ",")
+  end
+
+  defp maybe_put_protocols_param(query_params) do
+    if multiprotocol?() do
+      Map.put(query_params, "protocols", protocols_string())
+    else
+      query_params
+    end
+  end
+
+  defp maybe_protocol_id_param do
+    if multiprotocol?() do
+      %{"protocol_id" => main_protocol()}
+    end
+  end
+
+  defp maybe_put_protocols_in_body(body) do
+    if multiprotocol?() do
+      Map.put(body, :protocols, protocols_string())
+    else
+      body
+    end
   end
 
   defp parse_lookup_response(
@@ -178,21 +251,24 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
                 %{
                   "name" => name,
                   "expiry_date" => expiry_date,
-                  "resolved_address" => %{"hash" => address_hash_string},
+                  "resolved_address" => resolved_address,
                   "protocol" => protocol
-                }
+                } = first_item
                 | _other
               ] = items
           }}
        ) do
-    {:ok, hash} = Chain.string_to_address_hash(address_hash_string)
+    hash_or_nil = resolved_address["hash"] && Chain.string_to_address_hash_or_nil(resolved_address["hash"])
+    address_hash = hash_or_nil && Address.checksum(hash_or_nil)
 
     %{
       name: name,
       expiry_date: expiry_date,
       names_count: Enum.count(items),
-      address_hash: Address.checksum(hash),
-      protocol: protocol
+      address_hash: address_hash,
+      protocol: protocol,
+      protocol_dapp_url: first_item["protocol_dapp_url"],
+      protocol_dapp_logo: first_item["protocol_dapp_logo"]
     }
   end
 
@@ -201,11 +277,12 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   defp parse_get_address_response(
          {:ok,
           %{
-            "domain" => %{
-              "name" => name,
-              "expiry_date" => expiry_date,
-              "resolved_address" => %{"hash" => address_hash_string}
-            },
+            "domain" =>
+              %{
+                "name" => name,
+                "expiry_date" => expiry_date,
+                "resolved_address" => %{"hash" => address_hash_string}
+              } = domain,
             "resolved_domains_count" => resolved_domains_count
           }}
        ) do
@@ -215,7 +292,9 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
       name: name,
       expiry_date: expiry_date,
       names_count: resolved_domains_count,
-      address_hash: Address.checksum(hash)
+      address_hash: Address.checksum(hash),
+      protocol_dapp_url: domain["protocol_dapp_url"],
+      protocol_dapp_logo: domain["protocol_dapp_logo"]
     }
   end
 
@@ -251,5 +330,68 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   @spec maybe_preload_ens_to_address(Address.t()) :: Address.t()
   def maybe_preload_ens_to_address(address) do
     maybe_preload_meta(address, __MODULE__, &MetadataPreloader.preload_ens_to_address/1)
+  end
+
+  @doc """
+  Preloads ENS data to the block if BENS is enabled
+  """
+  @spec maybe_preload_ens_to_block(Block.t()) :: Block.t()
+  def maybe_preload_ens_to_block(block) do
+    maybe_preload_meta(block, __MODULE__, &MetadataPreloader.preload_ens_to_block/1)
+  end
+
+  @doc """
+  Preloads ENS data to the list of blocks unless disabled via DISABLE_BLOCKS_BENS_PRELOAD.
+
+  Checks `Application.get_env(:explorer, __MODULE__, [])[:disable_blocks_bens_preload]`;
+  if the flag is set, the input is returned unchanged, otherwise `maybe_preload_ens/1`
+  is called to enrich the list with ENS names from the BENS microservice.
+
+  ## Parameters
+
+  - `blocks` (`MetadataPreloader.supported_input()`) — a list of block structs
+    (or any value accepted by `MetadataPreloader.supported_input()`) whose miner
+    and other address fields should be enriched with ENS domain names.
+
+  ## Returns
+
+  - `MetadataPreloader.supported_input()` — the original `blocks` value unchanged
+    when `DISABLE_BLOCKS_BENS_PRELOAD` is `true`; otherwise the same collection
+    with ENS names preloaded via `maybe_preload_ens/1`.
+  """
+  @spec maybe_preload_ens_for_blocks(MetadataPreloader.supported_input()) ::
+          MetadataPreloader.supported_input()
+  def maybe_preload_ens_for_blocks(blocks) do
+    if Application.get_env(:explorer, __MODULE__, [])[:disable_blocks_bens_preload] do
+      blocks
+    else
+      maybe_preload_ens(blocks)
+    end
+  end
+
+  @doc """
+  Preloads ENS data to the list of token transfers unless disabled via DISABLE_TOKEN_TRANSFERS_BENS_PRELOAD
+  """
+  @spec maybe_preload_ens_for_token_transfers(MetadataPreloader.supported_input()) ::
+          MetadataPreloader.supported_input()
+  def maybe_preload_ens_for_token_transfers(token_transfers) do
+    if Application.get_env(:explorer, __MODULE__, [])[:disable_token_transfers_bens_preload] do
+      token_transfers
+    else
+      maybe_preload_ens(token_transfers)
+    end
+  end
+
+  @doc """
+  Preloads ENS data to the list of transactions unless disabled via DISABLE_TRANSACTIONS_BENS_PRELOAD
+  """
+  @spec maybe_preload_ens_for_transactions(MetadataPreloader.supported_input()) ::
+          MetadataPreloader.supported_input()
+  def maybe_preload_ens_for_transactions(transactions) do
+    if Application.get_env(:explorer, __MODULE__, [])[:disable_transactions_bens_preload] do
+      transactions
+    else
+      maybe_preload_ens(transactions)
+    end
   end
 end

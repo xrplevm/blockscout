@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Celo.ElectionRewards do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Celo.ElectionReward.t/0`.
@@ -64,8 +65,8 @@ defmodule Explorer.Chain.Import.Runner.Celo.ElectionRewards do
       Enum.sort_by(
         changes_list,
         &{
-          &1.block_hash,
           &1.type,
+          &1.epoch_number,
           &1.account_address_hash,
           &1.associated_account_address_hash
         }
@@ -80,8 +81,8 @@ defmodule Explorer.Chain.Import.Runner.Celo.ElectionRewards do
         timeout: timeout,
         timestamps: timestamps,
         conflict_target: [
-          :block_hash,
           :type,
+          :epoch_number,
           :account_address_hash,
           :associated_account_address_hash
         ],

@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.MicroserviceInterfaces.AccountAbstraction do
   @moduledoc """
     Interface to interact with Blockscout Account Abstraction (EIP-4337) microservice
   """
 
+  alias Explorer.HttpClient
   alias Explorer.Utility.Microservice
-  alias HTTPoison.Response
   require Logger
 
   @doc """
@@ -138,13 +139,13 @@ defmodule Explorer.MicroserviceInterfaces.AccountAbstraction do
   end
 
   defp http_get_request(url, query_params) do
-    case HTTPoison.get(url, [], params: query_params) do
-      {:ok, %Response{body: body, status_code: status_code}}
+    case HttpClient.get(url, [], params: query_params) do
+      {:ok, %{body: body, status_code: status_code}}
       when status_code in [200, 404] ->
         {:ok, response_json} = Jason.decode(body)
         {status_code, response_json}
 
-      {_, %Response{body: body, status_code: status_code} = error} ->
+      {_, %{body: body, status_code: status_code} = error} ->
         old_truncate = Application.get_env(:logger, :truncate)
         Logger.configure(truncate: :infinity)
 
@@ -159,7 +160,7 @@ defmodule Explorer.MicroserviceInterfaces.AccountAbstraction do
         {:ok, response_json} = Jason.decode(body)
         {status_code, response_json}
 
-      {:error, %HTTPoison.Error{reason: reason}} ->
+      {:error, reason} ->
         {500, %{error: reason}}
     end
   end

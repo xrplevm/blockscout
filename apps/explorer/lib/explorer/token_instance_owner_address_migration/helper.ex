@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.TokenInstanceOwnerAddressMigration.Helper do
   @moduledoc """
     Auxiliary functions for TokenInstanceOwnerAddressMigration.{Worker and Supervisor}
@@ -8,8 +9,8 @@ defmodule Explorer.TokenInstanceOwnerAddressMigration.Helper do
     ]
 
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.Token.Instance
   alias Explorer.Chain.{SmartContract, TokenTransfer}
+  alias Explorer.Chain.Token.Instance
 
   require Logger
 

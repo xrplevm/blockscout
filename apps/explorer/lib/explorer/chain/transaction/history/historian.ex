@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Transaction.History.Historian do
   @moduledoc """
   Implements behaviour Historian which will compile TransactionStats from Block/Transaction data and then save the TransactionStats into the database for later retrieval.
@@ -7,6 +8,7 @@ defmodule Explorer.Chain.Transaction.History.Historian do
 
   alias Explorer.Chain.{Block, DenormalizationHelper, Transaction}
   alias Explorer.Chain.Block.Reader.General, as: BlockGeneralReader
+  alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Transaction.History.TransactionStats
   alias Explorer.History.Process, as: HistoryProcess
@@ -111,32 +113,31 @@ defmodule Explorer.Chain.Transaction.History.Historian do
               select: {min(block.number), max(block.number)}
             )
 
-          case Repo.one(min_max_block_query, timeout: :infinity) do
-            {min_block, max_block} when not is_nil(min_block) and not is_nil(max_block) ->
-              # Collects stats for the block range determining the given day and add
-              # the date determining the day to the record.
-              record =
-                min_block
-                |> compile_records_in_range(max_block)
-                |> Map.put(:date, day_to_fetch)
-
-              records = [
-                record
-                | records
-              ]
-
-              # By making recursive calls to collect stats for every next day, eventually
-              # all stats for the specified number of days will be collected.
-              compile_records(num_days - 1, records)
-
-            _ ->
-              # If it is not possible to identify the block range for the given day,
-              # the stats for the day are set to zero.
-              Logger.warning("tx/per day chart: failed to get min/max blocks through a fallback option}")
-              records = [%{date: day_to_fetch, number_of_transactions: 0, gas_used: 0, total_fee: 0} | records]
-              compile_records(num_days - 1, records)
-          end
+          compile_records_with_fallback_range(min_max_block_query, day_to_fetch, num_days, records)
       end
+    end
+  end
+
+  defp compile_records_with_fallback_range(min_max_block_query, day_to_fetch, num_days, records) do
+    case Repo.one(min_max_block_query, timeout: :infinity) do
+      {min_block, max_block} when not is_nil(min_block) and not is_nil(max_block) ->
+        # Collects stats for the block range determining the given day and add
+        # the date determining the day to the record.
+        record =
+          min_block
+          |> compile_records_in_range(max_block)
+          |> Map.put(:date, day_to_fetch)
+
+        # By making recursive calls to collect stats for every next day, eventually
+        # all stats for the specified number of days will be collected.
+        compile_records(num_days - 1, [record | records])
+
+      _ ->
+        # If it is not possible to identify the block range for the given day,
+        # the stats for the day are set to zero.
+        Logger.warning("tx/per day chart: failed to get min/max blocks through a fallback option}")
+        records = [%{date: day_to_fetch, number_of_transactions: 0, gas_used: 0, total_fee: 0} | records]
+        compile_records(num_days - 1, records)
     end
   end
 
@@ -253,6 +254,12 @@ defmodule Explorer.Chain.Transaction.History.Historian do
 
     Logger.info("tx/per day chart: number of inserted #{num_inserted}")
 
+    # we need to store the last timestamp of success to use it in Indexer.Fetcher.MultichainSearchDb.CountersFetcher
+    LastFetchedCounter.upsert(%{
+      counter_type: transaction_stats_last_save_records_timestamp(),
+      value: DateTime.to_unix(DateTime.utc_now())
+    })
+
     Publisher.broadcast(:transaction_stats)
     num_inserted
   end
@@ -268,5 +275,17 @@ defmodule Explorer.Chain.Transaction.History.Historian do
   @spec date_today() :: Date.t()
   defp date_today do
     HistoryProcess.config_or_default(:utc_today, Date.utc_today(), __MODULE__)
+  end
+
+  @doc """
+    Defines a name of counter type for LastFetchedCounter row
+    storing the last timestamp of when the `save_records` function was called.
+
+    ## Returns
+    - The counter type name.
+  """
+  @spec transaction_stats_last_save_records_timestamp() :: String.t()
+  def transaction_stats_last_save_records_timestamp do
+    "transaction_stats_last_save_records_timestamp"
   end
 end

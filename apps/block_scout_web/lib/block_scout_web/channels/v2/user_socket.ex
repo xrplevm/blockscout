@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.V2.UserSocket do
   @moduledoc """
     Module to distinct new and old UI websocket connections
@@ -12,12 +13,10 @@ defmodule BlockScoutWeb.V2.UserSocket do
   channel("transactions:*", BlockScoutWeb.V2.TransactionChannel)
   channel("tokens:*", BlockScoutWeb.V2.TokenChannel)
   channel("token_instances:*", BlockScoutWeb.TokenInstanceChannel)
-  channel("zkevm_batches:*", BlockScoutWeb.V2.PolygonZkevmConfirmedBatchChannel)
 
   case @chain_type do
     :arbitrum -> channel("arbitrum:*", BlockScoutWeb.ArbitrumChannel)
-    # todo: change `optimism*"` to `optimism:*` after the deprecated `optimism_deposits:new_deposits` topic is removed
-    :optimism -> channel("optimism*", BlockScoutWeb.OptimismChannel)
+    :optimism -> channel("optimism:*", BlockScoutWeb.OptimismChannel)
     _ -> nil
   end
 

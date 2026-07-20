@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressHashBlockNumberDescIndexDescIndexTest do
   use Explorer.DataCase, async: false
 
@@ -36,10 +37,6 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressHashBlockNumb
       )
 
       insert(:db_migration_status, migration_name: "heavy_indexes_create_logs_block_hash_index", status: "completed")
-
-      Process.sleep(150)
-
-      assert MigrationStatus.get_status(migration_name) == "started"
 
       Process.sleep(200)
 

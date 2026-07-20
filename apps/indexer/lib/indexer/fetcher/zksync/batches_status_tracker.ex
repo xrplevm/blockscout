@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.ZkSync.BatchesStatusTracker do
   @moduledoc """
     Updates batches statuses and imports historical batches to the `zksync_transaction_batches` table.
@@ -87,12 +88,12 @@ defmodule Indexer.Fetcher.ZkSync.BatchesStatusTracker do
          json_l1_rpc_named_arguments: [
            transport: EthereumJSONRPC.HTTP,
            transport_options: [
-             http: EthereumJSONRPC.HTTP.HTTPoison,
+             http: EthereumJSONRPC.HTTP.Tesla,
              urls: [l1_rpc],
              http_options: [
                recv_timeout: :timer.minutes(10),
                timeout: :timer.minutes(10),
-               hackney: [pool: :ethereum_jsonrpc]
+               pool: :ethereum_jsonrpc
              ]
            ]
          ],

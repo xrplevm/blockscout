@@ -1,5 +1,7 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Account.Api.V2.UserControllerTest do
   use BlockScoutWeb.ConnCase
+  use Utils.RuntimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   alias Explorer.Account.{
     Identity,
@@ -20,6 +22,15 @@ defmodule BlockScoutWeb.Account.Api.V2.UserControllerTest do
   end
 
   describe "Test account/api/account/v2/user" do
+    setup do
+      initial_value = :persistent_term.get(:market_token_fetcher_enabled, false)
+      :persistent_term.put(:market_token_fetcher_enabled, true)
+
+      on_exit(fn ->
+        :persistent_term.put(:market_token_fetcher_enabled, initial_value)
+      end)
+    end
+
     test "get user info", %{conn: conn, user: user} do
       result_conn =
         conn
@@ -566,6 +577,32 @@ defmodule BlockScoutWeb.Account.Api.V2.UserControllerTest do
       Application.put_env(:explorer, Explorer.Account, old_env)
     end
 
+    test "can't insert contract watchlist address", %{conn: conn} do
+      address = insert(:contract_address)
+
+      response =
+        conn
+        |> post(
+          "/api/account/v2/user/watchlist",
+          build(:watchlist_address) |> Map.put("address_hash", to_string(address.hash))
+        )
+        |> json_response(422)
+
+      assert response == %{"errors" => %{"address_hash" => ["This address isn't EOA"]}}
+    end
+
+    test "can insert EOA with code watchlist address", %{conn: conn, user: _user} do
+      address = insert(:contract_address, contract_code: "0xef01000000000000000000000000000000000000000123")
+
+      _response =
+        conn
+        |> post(
+          "/api/account/v2/user/watchlist",
+          build(:watchlist_address) |> Map.put("address_hash", to_string(address.hash))
+        )
+        |> json_response(200)
+    end
+
     test "check watchlist tags pagination", %{conn: conn, user: user} do
       tags_address =
         for _ <- 0..50 do
@@ -1052,169 +1089,6 @@ defmodule BlockScoutWeb.Account.Api.V2.UserControllerTest do
     end
   end
 
-  describe "public tags" do
-    test "create public tags request", %{conn: conn} do
-      public_tags_request = build(:public_tags_request)
-
-      post_public_tags_request_response =
-        conn
-        |> post(
-          "/api/account/v2/user/public_tags",
-          public_tags_request
-        )
-        |> doc(description: "Submit request to add a public tag")
-        |> json_response(200)
-
-      assert post_public_tags_request_response["full_name"] == public_tags_request["full_name"]
-      assert post_public_tags_request_response["email"] == public_tags_request["email"]
-      assert post_public_tags_request_response["tags"] == public_tags_request["tags"]
-      assert post_public_tags_request_response["website"] == public_tags_request["website"]
-      assert post_public_tags_request_response["additional_comment"] == public_tags_request["additional_comment"]
-      assert post_public_tags_request_response["addresses"] == public_tags_request["addresses"]
-      assert post_public_tags_request_response["company"] == public_tags_request["company"]
-      assert post_public_tags_request_response["is_owner"] == public_tags_request["is_owner"]
-      assert post_public_tags_request_response["id"]
-    end
-
-    test "get one public tags requests", %{conn: conn} do
-      public_tags_request = build(:public_tags_request)
-
-      post_public_tags_request_response =
-        conn
-        |> post(
-          "/api/account/v2/user/public_tags",
-          public_tags_request
-        )
-        |> json_response(200)
-
-      assert post_public_tags_request_response["full_name"] == public_tags_request["full_name"]
-      assert post_public_tags_request_response["email"] == public_tags_request["email"]
-      assert post_public_tags_request_response["tags"] == public_tags_request["tags"]
-      assert post_public_tags_request_response["website"] == public_tags_request["website"]
-      assert post_public_tags_request_response["additional_comment"] == public_tags_request["additional_comment"]
-      assert post_public_tags_request_response["addresses"] == public_tags_request["addresses"]
-      assert post_public_tags_request_response["company"] == public_tags_request["company"]
-      assert post_public_tags_request_response["is_owner"] == public_tags_request["is_owner"]
-      assert post_public_tags_request_response["id"]
-
-      assert conn
-             |> get("/api/account/v2/user/public_tags")
-             |> json_response(200)
-             |> Enum.map(&convert_date/1) ==
-               [post_public_tags_request_response]
-               |> Enum.map(&convert_date/1)
-    end
-
-    test "get and delete several public tags requests", %{conn: conn} do
-      public_tags_list = build_list(10, :public_tags_request)
-
-      final_list =
-        public_tags_list
-        |> Enum.map(fn request ->
-          response =
-            conn
-            |> post(
-              "/api/account/v2/user/public_tags",
-              request
-            )
-            |> json_response(200)
-
-          assert response["full_name"] == request["full_name"]
-          assert response["email"] == request["email"]
-          assert response["tags"] == request["tags"]
-          assert response["website"] == request["website"]
-          assert response["additional_comment"] == request["additional_comment"]
-          assert response["addresses"] == request["addresses"]
-          assert response["company"] == request["company"]
-          assert response["is_owner"] == request["is_owner"]
-          assert response["id"]
-
-          convert_date(response)
-        end)
-        |> Enum.reverse()
-
-      assert conn
-             |> get("/api/account/v2/user/public_tags")
-             |> doc(description: "Get list of requests to add a public tag")
-             |> json_response(200)
-             |> Enum.map(&convert_date/1) == final_list
-
-      %{"id" => id} = Enum.at(final_list, 0)
-
-      assert conn
-             |> delete("/api/account/v2/user/public_tags/#{id}", %{"remove_reason" => "reason"})
-             |> doc(description: "Delete public tags request")
-             |> json_response(200) == %{"message" => "OK"}
-
-      Enum.each(Enum.drop(final_list, 1), fn request ->
-        assert conn
-               |> delete("/api/account/v2/user/public_tags/#{request["id"]}", %{"remove_reason" => "reason"})
-               |> json_response(200) == %{"message" => "OK"}
-      end)
-
-      assert conn
-             |> get("/api/account/v2/user/public_tags")
-             |> json_response(200) == []
-    end
-
-    test "edit public tags request", %{conn: conn} do
-      public_tags_request = build(:public_tags_request)
-
-      post_public_tags_request_response =
-        conn
-        |> post(
-          "/api/account/v2/user/public_tags",
-          public_tags_request
-        )
-        |> json_response(200)
-
-      assert post_public_tags_request_response["full_name"] == public_tags_request["full_name"]
-      assert post_public_tags_request_response["email"] == public_tags_request["email"]
-      assert post_public_tags_request_response["tags"] == public_tags_request["tags"]
-      assert post_public_tags_request_response["website"] == public_tags_request["website"]
-      assert post_public_tags_request_response["additional_comment"] == public_tags_request["additional_comment"]
-      assert post_public_tags_request_response["addresses"] == public_tags_request["addresses"]
-      assert post_public_tags_request_response["company"] == public_tags_request["company"]
-      assert post_public_tags_request_response["is_owner"] == public_tags_request["is_owner"]
-      assert post_public_tags_request_response["id"]
-
-      assert conn
-             |> get("/api/account/v2/user/public_tags")
-             |> json_response(200)
-             |> Enum.map(&convert_date/1) ==
-               [post_public_tags_request_response]
-               |> Enum.map(&convert_date/1)
-
-      new_public_tags_request = build(:public_tags_request)
-
-      put_public_tags_request_response =
-        conn
-        |> put(
-          "/api/account/v2/user/public_tags/#{post_public_tags_request_response["id"]}",
-          new_public_tags_request
-        )
-        |> doc(description: "Edit request to add a public tag")
-        |> json_response(200)
-
-      assert put_public_tags_request_response["full_name"] == new_public_tags_request["full_name"]
-      assert put_public_tags_request_response["email"] == new_public_tags_request["email"]
-      assert put_public_tags_request_response["tags"] == new_public_tags_request["tags"]
-      assert put_public_tags_request_response["website"] == new_public_tags_request["website"]
-      assert put_public_tags_request_response["additional_comment"] == new_public_tags_request["additional_comment"]
-      assert put_public_tags_request_response["addresses"] == new_public_tags_request["addresses"]
-      assert put_public_tags_request_response["company"] == new_public_tags_request["company"]
-      assert put_public_tags_request_response["is_owner"] == new_public_tags_request["is_owner"]
-      assert put_public_tags_request_response["id"] == post_public_tags_request_response["id"]
-
-      assert conn
-             |> get("/api/account/v2/user/public_tags")
-             |> json_response(200)
-             |> Enum.map(&convert_date/1) ==
-               [put_public_tags_request_response]
-               |> Enum.map(&convert_date/1)
-    end
-  end
-
   def convert_date(request) do
     {:ok, time, _} = DateTime.from_iso8601(request["submission_date"])
     %{request | "submission_date" => Calendar.strftime(time, "%b %d, %Y")}
@@ -1253,12 +1127,22 @@ defmodule BlockScoutWeb.Account.Api.V2.UserControllerTest do
       }
     }
 
+    notification_settings_extended =
+      if chain_type() == :zilliqa do
+        Map.put(notification_settings, "ZRC-2", %{
+          "incoming" => watchlist.watch_zrc_2_input,
+          "outcoming" => watchlist.watch_zrc_2_output
+        })
+      else
+        notification_settings
+      end
+
     assert json["address_hash"] == to_string(watchlist.address_hash)
     assert json["name"] == watchlist.name
     assert json["id"] == watchlist.id
     assert json["address"]["hash"] == Address.checksum(watchlist.address_hash)
     assert json["notification_methods"]["email"] == watchlist.notify_email
-    assert json["notification_settings"] == notification_settings
+    assert json["notification_settings"] == notification_settings_extended
   end
 
   defp check_paginated_response(first_page_resp, second_page_resp, list) do

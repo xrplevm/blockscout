@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.RPC.RPCTranslator do
   @moduledoc """
   Converts an RPC-style request into a controller action.
@@ -18,11 +19,53 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
   import Plug.Conn
   import Phoenix.Controller, only: [put_view: 2]
 
-  alias BlockScoutWeb.AccessHelper
   alias BlockScoutWeb.API.APILogger
   alias BlockScoutWeb.API.RPC.RPCView
+
+  alias BlockScoutWeb.API.RPC.{
+    AddressController,
+    BlockController,
+    CeloController,
+    ContractController,
+    LogsController,
+    RPCView,
+    StatsController,
+    TokenController,
+    TransactionController
+  }
+
   alias Phoenix.Controller
   alias Plug.Conn
+
+  @on_load :load_atoms
+
+  @doc """
+  Ensures that the specified controller modules are loaded into memory.
+
+  This function iterates over a predefined list of controller modules and calls `Code.ensure_loaded?/1`
+  on each, which loads the module if it hasn't been loaded yet. This is useful for ensuring that
+  all necessary controllers are available before performing operations that depend on them.
+
+  Returns `:ok` after attempting to load all modules.
+  """
+  @spec load_atoms() :: :ok
+  def load_atoms do
+    Enum.each(
+      [
+        AddressController,
+        BlockController,
+        CeloController,
+        ContractController,
+        LogsController,
+        StatsController,
+        TokenController,
+        TransactionController
+      ],
+      &Code.ensure_loaded?/1
+    )
+
+    :ok
+  end
 
   def init(opts) do
     opts
@@ -33,7 +76,6 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
          {:ok, {controller, write_actions}} <- translate_module(translations, module),
          {:ok, action} <- translate_action(action),
          true <- action_accessed?(action, write_actions),
-         :ok <- AccessHelper.check_rate_limit(conn),
          {:ok, conn} <- call_controller(conn, controller, action) do
       conn
     else
@@ -53,7 +95,12 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
 
       {:error, error} ->
         APILogger.error(fn ->
-          ["Error while calling RPC action", inspect(error, limit: :infinity, printable_limit: :infinity)]
+          redacted_query_string = redact_apikey(conn.query_string)
+
+          [
+            "Error while calling RPC action #{action} in module #{module} with query string #{redacted_query_string}",
+            inspect(error, limit: :infinity, printable_limit: :infinity)
+          ]
         end)
 
         conn
@@ -61,9 +108,6 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
         |> put_view(RPCView)
         |> Controller.render(:error, error: "Something went wrong.")
         |> halt()
-
-      :rate_limit_reached ->
-        AccessHelper.handle_rate_limit_deny(conn)
 
       {:valid_api_v1_request, false} ->
         conn
@@ -87,6 +131,14 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
     |> put_view(RPCView)
     |> Controller.render(:error, error: "Params 'module' and 'action' are required parameters")
     |> halt()
+  end
+
+  @doc """
+  Redacts the API key from the query string.
+  """
+  @spec redact_apikey(String.t()) :: String.t()
+  def redact_apikey(query_string) do
+    String.replace(query_string, ~r/apikey=[^&]*/i, "apikey=[REDACTED]")
   end
 
   @doc false

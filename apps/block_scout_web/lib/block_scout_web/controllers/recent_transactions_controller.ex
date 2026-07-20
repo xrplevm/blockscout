@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.RecentTransactionsController do
   use BlockScoutWeb, :controller
 
   import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
 
   alias Explorer.{Chain, PagingOptions}
-  alias Explorer.Chain.{DenormalizationHelper, Hash}
+  alias Explorer.Chain.{DenormalizationHelper, Hash, Transaction}
   alias Phoenix.View
 
   {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
@@ -13,7 +14,7 @@ defmodule BlockScoutWeb.RecentTransactionsController do
   def index(conn, _params) do
     if ajax?(conn) do
       recent_transactions =
-        Chain.recent_collated_transactions(
+        Transaction.recent_collated_transactions(
           true,
           DenormalizationHelper.extend_block_necessity(
             [

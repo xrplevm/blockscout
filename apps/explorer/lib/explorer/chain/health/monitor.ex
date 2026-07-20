@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Health.Monitor do
   @moduledoc """
   This module provides functionality for monitoring of the application health.
@@ -11,7 +12,6 @@ defmodule Explorer.Chain.Health.Monitor do
   alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Chain.Health.Helper, as: HealthHelper
   alias Explorer.Chain.Optimism.Reader, as: OptimismReader
-  alias Explorer.Chain.PolygonZkevm.Reader, as: PolygonZkevmReader
   alias Explorer.Chain.Scroll.Reader, as: ScrollReader
   alias Explorer.Chain.ZkSync.Reader, as: ZkSyncReader
   alias Explorer.Repo
@@ -79,9 +79,6 @@ defmodule Explorer.Chain.Health.Monitor do
 
         :optimism ->
           get_latest_batch_info_from_module(OptimismReader)
-
-        :polygon_zkevm ->
-          get_latest_batch_info_from_module(PolygonZkevmReader)
 
         :scroll ->
           get_latest_batch_info_from_module(ScrollReader)

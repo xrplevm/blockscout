@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Beacon.BlobTransactions do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Beacon.BlobTransaction.t/0`.
@@ -7,8 +8,8 @@ defmodule Explorer.Chain.Import.Runner.Beacon.BlobTransactions do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Explorer.Chain.Beacon.BlobTransaction
   alias Ecto.{Multi, Repo}
+  alias Explorer.Chain.Beacon.BlobTransaction
   alias Explorer.Chain.{Hash, Import}
   alias Explorer.Prometheus.Instrumenter
 

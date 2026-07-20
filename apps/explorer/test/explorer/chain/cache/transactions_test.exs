@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.TransactionsTest do
   use Explorer.DataCase
 
@@ -5,6 +6,13 @@ defmodule Explorer.Chain.Cache.TransactionsTest do
   alias Explorer.Repo
 
   @size 51
+
+  setup do
+    old_value = Application.get_env(:explorer, :mode)
+    Application.put_env(:explorer, :mode, :all)
+    on_exit(fn -> Application.put_env(:explorer, :mode, old_value) end)
+    :ok
+  end
 
   describe "update/1" do
     test "adds a new value to a new cache with preloads" do
@@ -77,6 +85,33 @@ defmodule Explorer.Chain.Cache.TransactionsTest do
     end
   end
 
+  describe "indexer mode" do
+    setup do
+      old_mode = Application.get_env(:explorer, :mode)
+      Application.put_env(:explorer, :mode, :indexer)
+
+      Supervisor.terminate_child(Explorer.Supervisor, Transactions.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, Transactions.child_id())
+
+      on_exit(fn -> Application.put_env(:explorer, :mode, old_mode) end)
+
+      :ok
+    end
+
+    test "update/1 writes to local ConCache without connected API nodes" do
+      assert Explorer.mode() == :indexer
+      # Single-node test env: propagation multicasts to an empty list, so only the
+      # local-first write in do_raw_update/2 populates the cache.
+      assert Node.list() == []
+
+      transaction = insert(:transaction) |> preload_all()
+
+      Transactions.update(transaction)
+
+      assert Transactions.take(1) == [transaction]
+    end
+  end
+
   defp preload_all(transactions) when is_list(transactions) do
     Enum.map(transactions, &preload_all(&1))
   end
@@ -86,10 +121,7 @@ defmodule Explorer.Chain.Cache.TransactionsTest do
       :block,
       created_contract_address: :names,
       from_address: :names,
-      to_address: :names,
-      token_transfers: :token,
-      token_transfers: :from_address,
-      token_transfers: :to_address
+      to_address: :names
     ])
   end
 end

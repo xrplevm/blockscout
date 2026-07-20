@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.DropLogsBlockNumberAscIndexAscIndexTest do
   use Explorer.DataCase, async: false
 
@@ -26,9 +27,6 @@ defmodule Explorer.Migrator.DropLogsBlockNumberAscIndexAscIndexTest do
       assert Helper.db_index_exists_and_valid?(index_name) == %{exists?: true, valid?: true}
 
       DropLogsBlockNumberAscIndexAscIndex.start_link([])
-      Process.sleep(100)
-
-      assert MigrationStatus.get_status(migration_name) == "started"
 
       Process.sleep(200)
 

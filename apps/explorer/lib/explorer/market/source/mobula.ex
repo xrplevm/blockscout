@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.Mobula do
   @moduledoc """
   Adapter for fetching exchange rates from https://mobula.io
@@ -43,35 +44,43 @@ defmodule Explorer.Market.Source.Mobula do
              headers()
            ) do
       {tokens_to_import, initial_tokens_len} =
-        Enum.reduce(tokens, {[], 0}, fn token, {to_import, count} ->
-          address_hash = token["contracts"] && List.first(token["contracts"])["address"]
+        Enum.reduce(tokens, {[], 0}, &reduce_mobula_token/2)
 
-          case address_hash && Hash.Address.cast(address_hash) do
-            {:ok, token_contract_address_hash} ->
-              token_to_import = %{
-                symbol: token["symbol"],
-                name: token["name"],
-                fiat_value: Source.to_decimal(token["price"]),
-                volume_24h: Source.to_decimal(token["off_chain_volume"]),
-                circulating_market_cap: Source.to_decimal(token["market_cap"]),
-                icon_url: Source.handle_image_url(token["logo"]),
-                contract_address_hash: token_contract_address_hash,
-                type: "ERC-20"
-              }
+      fetch_finished? = initial_tokens_len < batch_size
+      new_state = if fetch_finished?, do: nil, else: offset + batch_size
 
-              {[token_to_import | to_import], count + 1}
-
-            _ ->
-              {to_import, count + 1}
-          end
-        end)
-
-      {:ok, offset + batch_size, initial_tokens_len < batch_size, tokens_to_import}
+      {:ok, new_state, fetch_finished?, tokens_to_import}
     else
       nil -> {:error, "Platform ID not specified"}
       {:ok, unexpected_response} -> {:error, Source.unexpected_response_error("Mobula", unexpected_response)}
       {:error, _reason} = error -> error
     end
+  end
+
+  defp reduce_mobula_token(token, {to_import, count}) do
+    address_hash = token["contracts"] && List.first(token["contracts"])["address"]
+
+    to_import_updated =
+      case address_hash && Hash.Address.cast(address_hash) do
+        {:ok, token_contract_address_hash} -> [build_mobula_token(token, token_contract_address_hash) | to_import]
+        _ -> to_import
+      end
+
+    {to_import_updated, count + 1}
+  end
+
+  defp build_mobula_token(token, token_contract_address_hash) do
+    %{
+      symbol: token["symbol"],
+      name: token["name"],
+      fiat_value: Source.to_decimal(token["price"]),
+      volume_24h: Source.to_decimal(token["off_chain_volume"]),
+      circulating_market_cap: Source.to_decimal(token["market_cap"]),
+      circulating_supply: Source.to_decimal(token["circulating_supply"]),
+      icon_url: Source.handle_image_url(token["logo"]),
+      contract_address_hash: token_contract_address_hash,
+      type: "ERC-20"
+    }
   end
 
   @impl Source
@@ -120,7 +129,8 @@ defmodule Explorer.Market.Source.Mobula do
          symbol: data["symbol"],
          fiat_value: Source.to_decimal(data["price"]),
          volume_24h: Source.to_decimal(data["off_chain_volume"]),
-         image_url: Source.handle_image_url(data["logo"])
+         image_url: Source.handle_image_url(data["logo"]),
+         circulating_supply: Source.to_decimal(data["circulating_supply"])
        }}
     else
       nil ->

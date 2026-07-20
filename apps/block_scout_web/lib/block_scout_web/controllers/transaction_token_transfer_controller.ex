@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.TransactionTokenTransferController do
   use BlockScoutWeb, :controller
 
@@ -9,14 +10,15 @@ defmodule BlockScoutWeb.TransactionTokenTransferController do
 
   alias BlockScoutWeb.{AccessHelper, Controller, TransactionController, TransactionTokenTransferView}
   alias Explorer.{Chain, Market}
+  alias Explorer.Chain.Transaction
   alias Phoenix.View
 
   {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
   @burn_address_hash burn_address_hash
 
   def index(conn, %{"transaction_id" => transaction_hash_string, "type" => "JSON"} = params) do
-    with {:ok, transaction_hash} <- Chain.string_to_transaction_hash(transaction_hash_string),
-         :ok <- Chain.check_transaction_exists(transaction_hash),
+    with {:ok, transaction_hash} <- Chain.string_to_full_hash(transaction_hash_string),
+         :ok <- Transaction.check_transaction_exists(transaction_hash),
          {:ok, transaction} <-
            Chain.hash_to_transaction(
              transaction_hash,
@@ -87,7 +89,7 @@ defmodule BlockScoutWeb.TransactionTokenTransferController do
   end
 
   def index(conn, %{"transaction_id" => transaction_hash_string} = params) do
-    with {:ok, transaction_hash} <- Chain.string_to_transaction_hash(transaction_hash_string),
+    with {:ok, transaction_hash} <- Chain.string_to_full_hash(transaction_hash_string),
          {:ok, transaction} <-
            Chain.hash_to_transaction(
              transaction_hash,

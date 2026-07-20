@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.Workers.Batches.Events do
   @moduledoc """
   Provides functionality for retrieving Arbitrum `SequencerBatchDelivered` event logs.
@@ -38,7 +39,7 @@ defmodule Indexer.Fetcher.Arbitrum.Workers.Batches.Events do
         json_rpc_named_arguments
       )
 
-    if length(logs) > 0 do
+    unless Enum.empty?(logs) do
       log_debug("Found #{length(logs)} SequencerBatchDelivered logs")
     end
 

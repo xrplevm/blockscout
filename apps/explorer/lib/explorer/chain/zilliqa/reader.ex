@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Zilliqa.Reader do
   @moduledoc """
   Reads Zilliqa-related data from the database.
@@ -39,7 +40,7 @@ defmodule Explorer.Chain.Zilliqa.Reader do
         a in Address,
         join: t in Transaction,
         on: a.hash == t.created_contract_address_hash,
-        where: t.v == 0 and not is_nil(a.contract_code) and a.verified == false,
+        where: t.status == :ok and t.v == 0 and not is_nil(a.contract_code) and a.verified == false,
         order_by: [desc: t.block_number],
         select: a
       )

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
   @moduledoc """
   The representation of proxy smart-contract implementation.
@@ -11,20 +12,34 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
   import Ecto.Query,
     only: [
       from: 2,
-      select: 3
+      select: 3,
+      where: 3
     ]
 
   alias Explorer.{Chain, Repo}
   alias Explorer.Chain.{Address, Hash, SmartContract}
   alias Explorer.Chain.Cache.Counters.AverageBlockTime
   alias Explorer.Chain.SmartContract.Proxy
+  alias Explorer.Chain.SmartContract.Proxy.EIP7702
   alias Timex.Duration
 
-  @burn_address_hash_string "0x0000000000000000000000000000000000000000"
-  @burn_address_hash_string_32 "0x0000000000000000000000000000000000000000000000000000000000000000"
-  @max_implementations_number_per_proxy 100
-
-  defguard is_burn_signature(term) when term in ["0x", "0x0", @burn_address_hash_string, @burn_address_hash_string_32]
+  @proxy_types [
+    :eip1167,
+    :eip1967,
+    :eip1822,
+    :eip1967_oz,
+    :eip1967_beacon,
+    :master_copy,
+    :basic_implementation,
+    :basic_get_implementation,
+    :comptroller,
+    :eip2535,
+    :clone_with_immutable_arguments,
+    :eip7702,
+    :resolved_delegate_proxy,
+    :erc7760,
+    :minimal_proxy
+  ]
 
   @typedoc """
   * `proxy_address_hash` - proxy `smart_contract` address hash.
@@ -37,31 +52,16 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
     field(:proxy_address_hash, Hash.Address, primary_key: true, null: false)
 
     # the order matches order of enum values in the DB
-    field(:proxy_type, Ecto.Enum,
-      values: [
-        :eip1167,
-        :eip1967,
-        :eip1822,
-        # todo: it is obsolete. Consider re-define the custom type in the future to remove this value.
-        :eip930,
-        :master_copy,
-        :basic_implementation,
-        :basic_get_implementation,
-        :comptroller,
-        :eip2535,
-        :clone_with_immutable_arguments,
-        :eip7702,
-        :resolved_delegate_proxy,
-        :erc7760,
-        :unknown
-      ],
-      null: true
-    )
+    field(:proxy_type, Ecto.Enum, values: @proxy_types, null: true)
 
     field(:address_hashes, {:array, Hash.Address}, null: false)
     field(:names, {:array, :string}, null: false)
+    field(:conflicting_proxy_types, {:array, Ecto.Enum}, values: @proxy_types, null: true)
+    field(:conflicting_address_hashes, {:array, {:array, Hash.Address}}, null: true)
 
     has_many(:addresses, Address, foreign_key: :hash, references: :address_hashes)
+    has_many(:smart_contracts, SmartContract, foreign_key: :address_hash, references: :address_hashes)
+    has_many(:conflicting_addresses, Address, foreign_key: :hash, references: :conflicting_address_hashes)
 
     belongs_to(
       :address,
@@ -80,9 +80,15 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
       :proxy_address_hash,
       :proxy_type,
       :address_hashes,
+      :names,
+      :conflicting_proxy_types,
+      :conflicting_address_hashes
+    ])
+    |> validate_required([
+      :proxy_address_hash,
+      :address_hashes,
       :names
     ])
-    |> validate_required([:proxy_address_hash, :proxy_type, :address_hashes, :names])
     |> unique_constraint([:proxy_address_hash])
   end
 
@@ -90,7 +96,7 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
   Returns all implementations for the given smart-contract address hash
   """
   @spec get_proxy_implementations(Hash.Address.t() | nil, Keyword.t()) :: __MODULE__.t() | nil
-  def get_proxy_implementations(proxy_address_hash, options \\ []) do
+  def get_proxy_implementations(proxy_address_hash, options \\ [api?: true]) do
     proxy_address_hash
     |> get_proxy_implementations_query()
     |> Chain.select_repo(options).one()
@@ -197,8 +203,7 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
   def get_implementation(
         %{
           updated: %SmartContract{
-            address_hash: address_hash,
-            abi: abi
+            address_hash: address_hash
           },
           implementation_updated_at: implementation_updated_at,
           implementation_address_fetched?: implementation_address_fetched?,
@@ -215,7 +220,7 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
         Task.async(fn ->
           # Here and only here we fetch implementations for the given address
           # using requests to the JSON RPC node for known proxy patterns
-          result = Proxy.fetch_implementation_address_hash(address_hash, abi, options)
+          result = Proxy.fetch_implementation_address_hash(address_hash, options)
 
           callback = Keyword.get(options, :callback, nil)
           uid = Keyword.get(options, :uid)
@@ -308,126 +313,182 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
   @doc """
   Saves proxy's implementation into the DB
   """
-  @spec save_implementation_data([String.t()], Hash.Address.t(), atom() | nil, Keyword.t()) ::
-          __MODULE__.t() | :empty | :error
-  def save_implementation_data(:error, _proxy_address_hash, _proxy_type, _options) do
-    :error
-  end
-
-  def save_implementation_data(implementation_address_hash_strings, proxy_address_hash, proxy_type, options)
-      when implementation_address_hash_strings == [] do
-    upsert_implementations(proxy_address_hash, proxy_type, [], [], options)
-
-    :empty
-  end
-
-  def save_implementation_data(
-        [empty_implementation_address_hash_string],
-        proxy_address_hash,
-        proxy_type,
-        options
+  @spec save_implementation_data(
+          %{
+            proxy_address_hash: Hash.Address.t(),
+            address_hashes: [Hash.Address.t()],
+            proxy_type: atom() | nil,
+            conflicting_proxy_types: [atom()] | nil,
+            conflicting_address_hashes: [[Hash.Address.t()]] | nil
+          },
+          Keyword.t()
+        ) :: __MODULE__.t() | :error
+  def save_implementation_data(proxy_implementations, options) do
+    query =
+      from(
+        address in Address,
+        where: address.hash in ^proxy_implementations.address_hashes,
+        left_join: s1 in assoc(address, :smart_contract),
+        left_join: s2 in SmartContract,
+        on: fragment("md5(?)", address.contract_code) == s2.contract_code_md5 and is_nil(s1),
+        select: {address.hash, fragment("COALESCE(?, ?)", s1.name, s2.name)}
       )
-      when is_burn_signature(empty_implementation_address_hash_string) do
-    upsert_implementations(proxy_address_hash, proxy_type, [], [], options)
 
-    :empty
+    implementation_names_map =
+      query
+      |> Chain.select_repo(options).all()
+      |> Enum.into(%{})
+
+    implementation_names = proxy_implementations.address_hashes |> Enum.map(&Map.get(implementation_names_map, &1))
+
+    case upsert_implementations(proxy_implementations |> Map.put(:names, implementation_names)) do
+      {:ok, result} ->
+        result
+
+      {:error, error} ->
+        Logger.error("Error while upserting proxy implementations data into the DB: #{inspect(error)}")
+        :error
+    end
   end
 
-  def save_implementation_data(
-        implementation_address_hash_strings,
-        proxy_address_hash,
-        proxy_type,
-        options
-      ) do
-    {implementation_addresses, implementation_names} =
-      implementation_address_hash_strings
-      |> Enum.map(fn implementation_address_hash_string ->
-        with {:ok, implementation_address_hash} <- Chain.string_to_address_hash(implementation_address_hash_string),
-             {:implementation, {%SmartContract{name: name}, _}} <- {
-               :implementation,
-               SmartContract.address_hash_to_smart_contract_with_bytecode_twin(implementation_address_hash, options)
-             } do
-          {implementation_address_hash_string, name}
-        else
-          :error ->
-            :error
+  @spec upsert_implementations(%{
+          proxy_address_hash: Hash.Address.t(),
+          address_hashes: [Hash.Address.t()],
+          proxy_type: atom() | nil,
+          conflicting_proxy_types: [atom()] | nil,
+          conflicting_address_hashes: [[Hash.Address.t()]] | nil,
+          names: [String.t()]
+        }) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+  defp upsert_implementations(proxy_implementations) do
+    %__MODULE__{}
+    |> changeset(proxy_implementations)
+    |> Repo.insert(on_conflict: on_conflict(), conflict_target: [:proxy_address_hash], allow_stale: true)
+  end
 
-          {:implementation, _} ->
-            {implementation_address_hash_string, nil}
+  defp on_conflict do
+    from(
+      proxy_implementations in __MODULE__,
+      update: [
+        set: [
+          proxy_type: fragment("EXCLUDED.proxy_type"),
+          address_hashes: fragment("EXCLUDED.address_hashes"),
+          names: fragment("EXCLUDED.names"),
+          conflicting_proxy_types: fragment("EXCLUDED.conflicting_proxy_types"),
+          conflicting_address_hashes: fragment("EXCLUDED.conflicting_address_hashes"),
+          inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", proxy_implementations.inserted_at),
+          updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", proxy_implementations.updated_at)
+        ]
+      ],
+      where:
+        fragment("EXCLUDED.proxy_type <> ?", proxy_implementations.proxy_type) or
+          fragment("EXCLUDED.address_hashes <> ?", proxy_implementations.address_hashes) or
+          fragment("EXCLUDED.names <> ?", proxy_implementations.names) or
+          fragment("EXCLUDED.conflicting_proxy_types IS DISTINCT FROM ?", proxy_implementations.conflicting_proxy_types) or
+          fragment(
+            "EXCLUDED.conflicting_address_hashes IS DISTINCT FROM ?",
+            proxy_implementations.conflicting_address_hashes
+          )
+    )
+  end
+
+  @doc """
+  Deletes all proxy implementations associated with the given proxy address hashes.
+
+  ## Parameters
+
+    - `address_hashes` (binary): The list of proxy address hashes whose implementations
+      should be deleted.
+
+  ## Returns
+
+    - `{count, nil}`: A tuple where `count` is the number of records deleted.
+
+  This function uses a query to find all proxy implementations matching the
+  provided `address_hashes` and deletes them from the database.
+  """
+  @spec delete_implementations([Hash.Address.t()]) :: {non_neg_integer(), nil}
+  def delete_implementations(address_hashes) do
+    __MODULE__
+    |> where([proxy_implementations], proxy_implementations.proxy_address_hash in ^address_hashes)
+    |> Repo.delete_all()
+  end
+
+  @doc """
+  Upserts multiple EIP-7702 proxy records for given addresses.
+
+  ## Parameters
+
+    - `addresses`: The list of addresses to upsert EIP-7702 proxy records for.
+
+  ## Returns
+
+    - `{count, nil}`: A tuple where `count` is the number of records updated.
+  """
+  @spec upsert_eip7702_implementations([Address.t()]) :: {non_neg_integer(), nil | []}
+  def upsert_eip7702_implementations(addresses) do
+    now = DateTime.utc_now()
+
+    records =
+      addresses
+      |> Repo.preload(:smart_contract)
+      |> Enum.flat_map(fn address ->
+        case EIP7702.quick_resolve_implementations(address) do
+          {:ok, [delegate_address_hash]} ->
+            # credo:disable-for-lines:2 Credo.Check.Refactor.Nesting
+            name =
+              case address do
+                %{smart_contract: %{name: name}} -> name
+                _ -> nil
+              end
+
+            [
+              %{
+                proxy_address_hash: address.hash,
+                proxy_type: :eip7702,
+                address_hashes: [delegate_address_hash],
+                names: [name],
+                inserted_at: now,
+                updated_at: now
+              }
+            ]
+
+          _ ->
+            []
         end
       end)
-      |> Enum.filter(&(&1 !== :error))
-      |> Enum.unzip()
 
-    if Enum.empty?(implementation_addresses) do
-      :empty
-    else
-      case upsert_implementations(
-             proxy_address_hash,
-             proxy_type,
-             implementation_addresses,
-             implementation_names,
-             options
-           ) do
-        {:ok, result} ->
-          result
-
-        {:error, error} ->
-          Logger.error("Error while upserting proxy implementations data into the DB: #{inspect(error)}")
-          :error
-      end
-    end
+    Repo.insert_all(__MODULE__, records,
+      on_conflict: eip7702_on_conflict(),
+      conflict_target: [:proxy_address_hash]
+    )
   end
 
-  defp upsert_implementations(proxy_address_hash, proxy_type, implementation_address_hash_strings, names, options) do
-    proxy = get_proxy_implementations(proxy_address_hash, options)
-
-    if proxy do
-      update_implementations(proxy, proxy_type, implementation_address_hash_strings, names)
-    else
-      insert_implementations(proxy_address_hash, proxy_type, implementation_address_hash_strings, names)
-    end
-  end
-
-  @spec insert_implementations(Hash.Address.t(), atom() | nil, [EthereumJSONRPC.hash()], [String.t()]) ::
-          {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
-  defp insert_implementations(proxy_address_hash, proxy_type, implementation_address_hash_strings, names)
-       when not is_nil(proxy_address_hash) do
-    sanitized_implementation_address_hash_strings =
-      sanitize_implementation_address_hash_strings(implementation_address_hash_strings)
-
-    changeset = %{
-      proxy_address_hash: proxy_address_hash,
-      proxy_type: proxy_type,
-      address_hashes: sanitized_implementation_address_hash_strings,
-      names: names
-    }
-
-    %__MODULE__{}
-    |> changeset(changeset)
-    |> Repo.insert()
-  end
-
-  @spec update_implementations(__MODULE__.t(), atom() | nil, [EthereumJSONRPC.hash()], [String.t()]) ::
-          {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
-  defp update_implementations(proxy, proxy_type, implementation_address_hash_strings, names) do
-    sanitized_implementation_address_hash_strings =
-      sanitize_implementation_address_hash_strings(implementation_address_hash_strings)
-
-    proxy
-    |> changeset(%{
-      proxy_type: proxy_type,
-      address_hashes: sanitized_implementation_address_hash_strings,
-      names: names
-    })
-    |> Repo.update()
-  end
-
-  # Cut off implementations per proxy up to @max_implementations_number_per_proxy number
-  # before insert into the DB to prevent DoS via the verification endpoint of Diamond smart contracts.
-  @spec sanitize_implementation_address_hash_strings([EthereumJSONRPC.hash()]) :: [EthereumJSONRPC.hash()]
-  defp sanitize_implementation_address_hash_strings(implementation_address_hash_strings) do
-    Enum.take(implementation_address_hash_strings, @max_implementations_number_per_proxy)
+  defp eip7702_on_conflict do
+    from(
+      proxy_implementations in __MODULE__,
+      update: [
+        set: [
+          address_hashes: fragment("EXCLUDED.address_hashes"),
+          names: fragment("EXCLUDED.names"),
+          conflicting_proxy_types: fragment("EXCLUDED.conflicting_proxy_types"),
+          conflicting_address_hashes: fragment("EXCLUDED.conflicting_address_hashes"),
+          inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", proxy_implementations.inserted_at),
+          updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", proxy_implementations.updated_at)
+        ]
+      ],
+      where:
+        fragment("EXCLUDED.proxy_type = ?", proxy_implementations.proxy_type) and
+          (fragment("EXCLUDED.address_hashes <> ?", proxy_implementations.address_hashes) or
+             fragment("EXCLUDED.names <> ?", proxy_implementations.names) or
+             fragment(
+               "EXCLUDED.conflicting_proxy_types IS DISTINCT FROM ?",
+               proxy_implementations.conflicting_proxy_types
+             ) or
+             fragment(
+               "EXCLUDED.conflicting_address_hashes IS DISTINCT FROM ?",
+               proxy_implementations.conflicting_address_hashes
+             ))
+    )
   end
 
   @doc """
@@ -439,7 +500,7 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
   def names(proxy_address, options) when not is_nil(proxy_address) do
     proxy_implementations = get_proxy_implementations(proxy_address.hash, options)
 
-    if proxy_implementations && not Enum.empty?(proxy_implementations.names) do
+    if proxy_implementations do
       proxy_implementations.names
     else
       []
@@ -447,6 +508,43 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
   end
 
   def names(_, _), do: []
+
+  @doc """
+  Fetches and associates smart contracts for a nested list of address hashes.
+
+  This function takes a nested list of address hashes (`nested_address_hashes`), queries the database
+  for smart contracts matching the flattened list of address hashes, and then maps the results back
+  to the original nested structure. Each address hash is associated with its corresponding smart
+  contract, if found.
+
+  ## Parameters
+
+    - `nested_address_hashes`: A nested list of address hashes (e.g., `[[hash1, hash2], [hash3]]`).
+
+  ## Returns
+
+    - A list of tuples where each tuple contains:
+      - The original list of address hashes.
+      - A list of smart contracts corresponding to the address hashes.
+
+  """
+  @spec smart_contract_association_for_implementations([Hash.Address.t()]) :: [
+          {[Hash.Address.t()], [SmartContract.t() | nil]}
+        ]
+  def smart_contract_association_for_implementations(nested_address_hashes) do
+    query =
+      from(smart_contract in SmartContract, where: smart_contract.address_hash in ^List.flatten(nested_address_hashes))
+
+    smart_contracts_map =
+      query
+      |> Repo.replica().all()
+      |> Map.new(&{&1.address_hash, &1})
+
+    for address_hashes <- nested_address_hashes,
+        smart_contracts when not is_nil(smart_contracts) <- address_hashes |> Enum.map(&smart_contracts_map[&1]) do
+      {address_hashes, smart_contracts}
+    end
+  end
 
   if @chain_type == :filecoin do
     @doc """
@@ -471,7 +569,7 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
         |> Map.new(&{&1.hash, &1})
 
       for ids <- nested_ids,
-          address <- ids |> Enum.map(&addresses_map[&1]) do
+          address when not is_nil(address) <- ids |> List.flatten() |> Enum.map(&addresses_map[&1]) do
         {ids, address}
       end
     end
@@ -484,10 +582,15 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
     ## Examples
 
       iex> Explorer.Chain.SmartContract.Proxy.Models.Implementation.proxy_implementations_association()
-      [proxy_implementations: [addresses: &Explorer.Chain.SmartContract.Proxy.Models.Implementation.addresses_association_for_filecoin/1]]
+      [
+        proxy_implementations: [
+          addresses: &Explorer.Chain.SmartContract.Proxy.Models.Implementation.addresses_association_for_filecoin/1,
+          conflicting_addresses: &Explorer.Chain.SmartContract.Proxy.Models.Implementation.addresses_association_for_filecoin/1
+        ]
+      ]
     """
     @spec proxy_implementations_association() :: [
-            proxy_implementations: [addresses: fun()]
+            proxy_implementations: [addresses: fun(), conflicting_addresses: fun()]
           ]
     def proxy_implementations_association do
       [proxy_implementations: proxy_implementations_addresses_association()]
@@ -501,12 +604,28 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
     ## Examples
 
       iex> Explorer.Chain.SmartContract.Proxy.Models.Implementation.proxy_implementations_addresses_association()
-      [addresses: &Explorer.Chain.SmartContract.Proxy.Models.Implementation.addresses_association_for_filecoin/1]
+      [
+        addresses: &Explorer.Chain.SmartContract.Proxy.Models.Implementation.addresses_association_for_filecoin/1,
+        conflicting_addresses: &Explorer.Chain.SmartContract.Proxy.Models.Implementation.addresses_association_for_filecoin/1
+      ]
 
     """
-    @spec proxy_implementations_association() :: [addresses: fun()]
+    @spec proxy_implementations_addresses_association() :: [addresses: fun(), conflicting_addresses: fun()]
     def proxy_implementations_addresses_association do
-      [addresses: &__MODULE__.addresses_association_for_filecoin/1]
+      [
+        addresses: &__MODULE__.addresses_association_for_filecoin/1,
+        conflicting_addresses: &__MODULE__.addresses_association_for_filecoin/1
+      ]
+    end
+
+    def proxy_implementations_smart_contracts_association do
+      [
+        proxy_implementations: [
+          addresses: &__MODULE__.addresses_association_for_filecoin/1,
+          conflicting_addresses: &__MODULE__.addresses_association_for_filecoin/1,
+          smart_contracts: &__MODULE__.smart_contract_association_for_implementations/1
+        ]
+      ]
     end
   else
     @doc """
@@ -540,6 +659,10 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
     @spec proxy_implementations_addresses_association() :: []
     def proxy_implementations_addresses_association do
       []
+    end
+
+    def proxy_implementations_smart_contracts_association do
+      [proxy_implementations: [smart_contracts: &__MODULE__.smart_contract_association_for_implementations/1]]
     end
   end
 end

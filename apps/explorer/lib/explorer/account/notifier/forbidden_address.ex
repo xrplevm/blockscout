@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.Notifier.ForbiddenAddress do
   @moduledoc """
     Check if address is forbidden to notify
@@ -49,7 +50,7 @@ defmodule Explorer.Account.Notifier.ForbiddenAddress do
   defp contract?(%Explorer.Chain.Hash{} = address_hash) do
     case hash_to_address(address_hash) do
       {:error, :not_found} -> false
-      {:ok, address} -> Address.smart_contract?(address)
+      {:ok, address} -> Address.smart_contract?(address) && !Address.eoa_with_code?(address)
     end
   end
 

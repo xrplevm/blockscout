@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.L1Batch do
   @moduledoc """
     Models an L1 batch for Arbitrum.
@@ -8,6 +9,7 @@ defmodule Explorer.Chain.Arbitrum.L1Batch do
     Migrations:
     - Explorer.Repo.Arbitrum.Migrations.CreateArbitrumTables
     - Explorer.Repo.Arbitrum.Migrations.AddDaInfo
+    - Explorer.Repo.Arbitrum.Migrations.AddEigendaBatches
   """
 
   use Explorer.Schema
@@ -31,7 +33,7 @@ defmodule Explorer.Chain.Arbitrum.L1Batch do
     * `before_acc` - The hash of the state before the batch.
     * `after_acc` - The hash of the state after the batch.
     * `commitment_id` - The ID of the commitment L1 transaction from Explorer.Chain.Arbitrum.LifecycleTransaction.
-    * `batch_container` - The tag meaning the container of the batch data: `:in_blob4844`, `:in_calldata`, `:in_celestia`, `:in_anytrust`
+    * `batch_container` - The tag meaning the container of the batch data: `:in_blob4844`, `:in_calldata`, `:in_celestia`, `:in_anytrust`, `:in_eigenda`
   """
   @type to_import :: %{
           number: non_neg_integer(),
@@ -41,7 +43,7 @@ defmodule Explorer.Chain.Arbitrum.L1Batch do
           before_acc: binary(),
           after_acc: binary(),
           commitment_id: non_neg_integer(),
-          batch_container: :in_blob4844 | :in_calldata | :in_celestia | :in_anytrust
+          batch_container: :in_blob4844 | :in_calldata | :in_celestia | :in_anytrust | :in_eigenda
         }
 
   @typedoc """
@@ -53,7 +55,7 @@ defmodule Explorer.Chain.Arbitrum.L1Batch do
     * `after_acc` - The hash of the state after the batch.
     * `commitment_id` - The ID of the commitment L1 transaction from `Explorer.Chain.Arbitrum.LifecycleTransaction`.
     * `commitment_transaction` - An instance of `Explorer.Chain.Arbitrum.LifecycleTransaction` referenced by `commitment_id`.
-    * `batch_container` - The tag meaning the container of the batch data: `:in_blob4844`, `:in_calldata`, `:in_celestia`, `:in_anytrust`
+    * `batch_container` - The tag meaning the container of the batch data: `:in_blob4844`, `:in_calldata`, `:in_celestia`, `:in_anytrust`, `:in_eigenda`
   """
   @primary_key {:number, :integer, autogenerate: false}
   typed_schema "arbitrum_l1_batches" do
@@ -69,7 +71,7 @@ defmodule Explorer.Chain.Arbitrum.L1Batch do
       type: :integer
     )
 
-    field(:batch_container, Ecto.Enum, values: [:in_blob4844, :in_calldata, :in_celestia, :in_anytrust])
+    field(:batch_container, Ecto.Enum, values: [:in_blob4844, :in_calldata, :in_celestia, :in_anytrust, :in_eigenda])
 
     timestamps()
   end

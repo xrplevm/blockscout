@@ -1,9 +1,14 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.BlockTransactionView do
   use BlockScoutWeb, :view
 
   use Gettext, backend: BlockScoutWeb.Gettext
 
   def block_not_found_message({:ok, true}) do
+    gettext("Easy Cowboy! This block does not exist yet!")
+  end
+
+  def block_not_found_message({:error, :not_found}) do
     gettext("Easy Cowboy! This block does not exist yet!")
   end
 

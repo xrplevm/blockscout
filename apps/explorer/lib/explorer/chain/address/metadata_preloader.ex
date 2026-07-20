@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Address.MetadataPreloader do
   @moduledoc """
   Module responsible for preloading metadata (from BENS, Metadata microservices) to addresses.
@@ -8,6 +9,7 @@ defmodule Explorer.Chain.Address.MetadataPreloader do
   alias Explorer.Chain.{
     Address,
     Address.CurrentTokenBalance,
+    Beacon.Deposit,
     Block,
     InternalTransaction,
     Log,
@@ -16,6 +18,8 @@ defmodule Explorer.Chain.Address.MetadataPreloader do
     Transaction,
     Withdrawal
   }
+
+  alias Explorer.Stats.HotSmartContracts
 
   @type supported_types ::
           Address.t()
@@ -57,6 +61,15 @@ defmodule Explorer.Chain.Address.MetadataPreloader do
   def preload_ens_to_address(address) do
     [address_with_ens] = preload_ens_to_list([address])
     address_with_ens
+  end
+
+  @doc """
+  Preloads ENS name to Block.t()
+  """
+  @spec preload_ens_to_block(Block.t()) :: Block.t()
+  def preload_ens_to_block(block) do
+    [block_with_ens] = preload_ens_to_list([block])
+    block_with_ens
   end
 
   @doc """
@@ -108,6 +121,15 @@ defmodule Explorer.Chain.Address.MetadataPreloader do
   def preload_metadata_to_transaction(transaction) do
     [transaction_with_metadata] = preload_metadata_to_list([transaction])
     transaction_with_metadata
+  end
+
+  @doc """
+  Preloads metadata to Block.t()
+  """
+  @spec preload_metadata_to_block(Block.t()) :: Block.t()
+  def preload_metadata_to_block(block) do
+    [block_with_metadata] = preload_metadata_to_list([block])
+    block_with_metadata
   end
 
   @doc """
@@ -186,6 +208,21 @@ defmodule Explorer.Chain.Address.MetadataPreloader do
 
   defp item_to_address_hash_strings(%Instance{owner_address_hash: owner_address_hash}) do
     [to_string(owner_address_hash)]
+  end
+
+  defp item_to_address_hash_strings(%Deposit{
+         from_address_hash: from_address_hash,
+         withdrawal_address_hash: withdrawal_address_hash
+       }) do
+    if withdrawal_address_hash do
+      [to_string(withdrawal_address_hash), to_string(from_address_hash)]
+    else
+      [to_string(from_address_hash)]
+    end
+  end
+
+  defp item_to_address_hash_strings(%HotSmartContracts{contract_address_hash: contract_address_hash}) do
+    [to_string(contract_address_hash)]
   end
 
   defp put_ens_names(names, items) do
@@ -290,6 +327,35 @@ defmodule Explorer.Chain.Address.MetadataPreloader do
          field_to_put_info
        ) do
     %Instance{instance | owner: alter_address(owner_address, owner_address_hash, names, field_to_put_info)}
+  end
+
+  defp put_meta_to_item(
+         %Deposit{
+           from_address: from_address,
+           from_address_hash: from_address_hash,
+           withdrawal_address: withdrawal_address,
+           withdrawal_address_hash: withdrawal_address_hash
+         } = deposit,
+         names,
+         field_to_put_info
+       ) do
+    %Deposit{
+      deposit
+      | from_address: alter_address(from_address, from_address_hash, names, field_to_put_info),
+        withdrawal_address: alter_address(withdrawal_address, withdrawal_address_hash, names, field_to_put_info)
+    }
+  end
+
+  defp put_meta_to_item(
+         %HotSmartContracts{contract_address_hash: contract_address_hash, contract_address: contract_address} =
+           hot_contract,
+         names,
+         field_to_put_info
+       ) do
+    %HotSmartContracts{
+      hot_contract
+      | contract_address: alter_address(contract_address, contract_address_hash, names, field_to_put_info)
+    }
   end
 
   defp alter_address(address, nil, _names, _field), do: address

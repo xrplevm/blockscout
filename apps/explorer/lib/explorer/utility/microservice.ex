@@ -1,28 +1,19 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Utility.Microservice do
   @moduledoc """
   Module is responsible for common utils related to microservices.
   """
 
-  alias Explorer.Helper
+  alias Utils.ConfigHelper, as: UtilsConfigHelper
 
   @doc """
     Returns base url of the microservice or nil if it is invalid or not set
   """
-  @spec base_url(atom(), atom()) :: false | nil | binary()
+  @spec base_url(atom(), atom()) :: nil | binary()
   def base_url(application \\ :explorer, module) do
-    url = Application.get_env(application, module)[:service_url]
+    url = config(application, module)[:service_url]
 
-    cond do
-      not Helper.valid_url?(url) ->
-        nil
-
-      String.ends_with?(url, "/") ->
-        url
-        |> String.slice(0..(String.length(url) - 2))
-
-      true ->
-        url
-    end
+    if UtilsConfigHelper.valid_url?(url), do: url, else: nil
   end
 
   @doc """
@@ -30,7 +21,7 @@ defmodule Explorer.Utility.Microservice do
   """
   @spec check_enabled(atom(), atom()) :: :ok | {:error, :disabled}
   def check_enabled(application \\ :explorer, module) do
-    if Application.get_env(application, module)[:enabled] && base_url(application, module) do
+    if config(application, module)[:enabled] && base_url(application, module) do
       :ok
     else
       {:error, :disabled}
@@ -46,8 +37,11 @@ defmodule Explorer.Utility.Microservice do
       "your_api_key_here"
 
   """
-  @spec api_key(atom(), atom()) :: String.t()
+  @spec api_key(atom(), atom()) :: String.t() | nil
   def api_key(application \\ :explorer, module) do
-    Application.get_env(application, module)[:api_key]
+    config(application, module)[:api_key]
   end
+
+  @spec config(atom(), atom()) :: keyword()
+  defp config(application, module), do: Application.get_env(application, module, [])
 end

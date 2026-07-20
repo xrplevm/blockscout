@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule ConfigHelperTest do
   use ExUnit.Case
 
@@ -37,6 +38,59 @@ defmodule ConfigHelperTest do
       refute System.get_env("ETHEREUM_JSONRPC_FALLBACK_TRACE_URL")
 
       assert ConfigHelper.parse_urls_list(:fallback_trace) == ["test"]
+    end
+  end
+
+  describe "parse_path_env_var/2" do
+    test "common case" do
+      System.put_env("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "test")
+      assert ConfigHelper.parse_path_env_var("NFT_MEDIA_HANDLER_BUCKET_FOLDER") == "/test"
+    end
+
+    test "don't use defined default" do
+      System.put_env("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "test")
+      assert ConfigHelper.parse_path_env_var("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "default") == "/test"
+    end
+
+    test "don't prepend / if path already has it" do
+      System.put_env("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "/test")
+      assert ConfigHelper.parse_path_env_var("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "default") == "/test"
+    end
+
+    test "using defined fallback default" do
+      System.delete_env("NFT_MEDIA_HANDLER_BUCKET_FOLDER")
+      assert ConfigHelper.parse_path_env_var("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "default") == "/default"
+    end
+
+    test "invalid path" do
+      System.put_env("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "//test")
+
+      assert_raise RuntimeError, "Invalid path in environment variable NFT_MEDIA_HANDLER_BUCKET_FOLDER: //test", fn ->
+        ConfigHelper.parse_path_env_var("NFT_MEDIA_HANDLER_BUCKET_FOLDER")
+      end
+    end
+
+    test "invalid path with default" do
+      System.put_env("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "//test")
+
+      assert_raise RuntimeError, "Invalid path in environment variable NFT_MEDIA_HANDLER_BUCKET_FOLDER: //test", fn ->
+        ConfigHelper.parse_path_env_var("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "default")
+      end
+    end
+
+    test "empty path with default" do
+      System.delete_env("NFT_MEDIA_HANDLER_BUCKET_FOLDER")
+      assert ConfigHelper.parse_path_env_var("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "default") == "/default"
+    end
+
+    test "nil path" do
+      System.delete_env("NFT_MEDIA_HANDLER_BUCKET_FOLDER")
+      assert ConfigHelper.parse_path_env_var("NFT_MEDIA_HANDLER_BUCKET_FOLDER") == nil
+    end
+
+    test "nil path with default" do
+      System.delete_env("NFT_MEDIA_HANDLER_BUCKET_FOLDER")
+      assert ConfigHelper.parse_path_env_var("NFT_MEDIA_HANDLER_BUCKET_FOLDER", "default") == "/default"
     end
   end
 

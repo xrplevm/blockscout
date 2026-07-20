@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Fetcher.Coin do
   @moduledoc """
   Local cache for native coin exchange rates.
@@ -75,7 +76,7 @@ defmodule Explorer.Market.Fetcher.Coin do
       :ets.insert(table_name(), {secondary_coin?, coin})
     end
 
-    unless secondary_coin? do
+    if !secondary_coin? do
       broadcast_event(:exchange_rate)
     end
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.BlockWithdrawalController do
   use BlockScoutWeb, :controller
 
@@ -57,8 +58,8 @@ defmodule BlockScoutWeb.BlockWithdrawalController do
       {:error, :not_found} ->
         conn
         |> put_status(:not_found)
+        |> put_view(BlockTransactionView)
         |> render(
-          BlockTransactionView,
           "404.html",
           block: nil,
           block_above_tip: block_above_tip(formatted_block_hash_or_number)
@@ -95,8 +96,8 @@ defmodule BlockScoutWeb.BlockWithdrawalController do
       {:error, :not_found} ->
         conn
         |> put_status(:not_found)
+        |> put_view(BlockTransactionView)
         |> render(
-          BlockTransactionView,
           "404.html",
           block: nil,
           block_above_tip: block_above_tip(formatted_block_hash_or_number)

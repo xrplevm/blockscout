@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Withdrawal do
   @moduledoc """
   Reindexes withdrawals from blocks that were indexed before app update.
@@ -50,7 +51,7 @@ defmodule Indexer.Fetcher.Withdrawal do
       # withdrawals from all other blocks will be imported by realtime and catchup indexers
       json_rpc_named_arguments = opts[:json_rpc_named_arguments]
 
-      unless json_rpc_named_arguments do
+      if !json_rpc_named_arguments do
         raise ArgumentError,
               ":json_rpc_named_arguments must be provided to `#{__MODULE__}.init to allow for json_rpc calls when running."
       end

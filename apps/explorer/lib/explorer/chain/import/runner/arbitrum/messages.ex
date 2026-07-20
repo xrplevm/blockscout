@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Arbitrum.Messages do
   @moduledoc """
     Bulk imports of Explorer.Chain.Arbitrum.Message.
@@ -42,7 +43,7 @@ defmodule Explorer.Chain.Import.Runner.Arbitrum.Messages do
       |> Map.put_new(:timeout, @timeout)
       |> Map.put(:timestamps, timestamps)
 
-    Multi.run(multi, :insert_arbitrum_messages, fn repo, _ ->
+    Multi.run(multi, CrosslevelMessage.insert_result_key(), fn repo, _ ->
       Instrumenter.block_import_stage_runner(
         fn -> insert(repo, changes_list, insert_options) end,
         :block_referencing,

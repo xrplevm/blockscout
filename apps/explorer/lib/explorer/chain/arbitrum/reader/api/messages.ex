@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.Reader.API.Messages do
   @moduledoc """
     Provides API-specific functions for querying Arbitrum cross-chain message data from the database.
@@ -21,8 +22,8 @@ defmodule Explorer.Chain.Arbitrum.Reader.API.Messages do
   import Ecto.Query, only: [from: 2, limit: 2, where: 3]
   import Explorer.Chain, only: [select_repo: 1]
 
-  alias Explorer.Chain.Arbitrum.Message
   alias Explorer.{Chain, PagingOptions}
+  alias Explorer.Chain.Arbitrum.Message
 
   @api_true [api?: true]
 

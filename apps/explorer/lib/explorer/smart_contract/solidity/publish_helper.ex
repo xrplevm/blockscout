@@ -1,7 +1,9 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.Solidity.PublishHelper do
   @moduledoc """
     Module responsible for preparing and publishing smart contracts
   """
+  require Logger
 
   use Utils.RuntimeEnvHelper,
     eth_bytecode_db_enabled?: [
@@ -47,7 +49,9 @@ defmodule Explorer.SmartContract.Solidity.PublishHelper do
           :on_demand
         )
 
-      _ ->
+      error ->
+        Logger.error("Unexpected error during verification: #{inspect(error)}")
+
         EventsPublisher.broadcast(
           prepare_verification_error("Unexpected error", address_hash_string, conn, api_v2?),
           :on_demand

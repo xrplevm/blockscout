@@ -1,16 +1,18 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Plug.RedisCookie do
   @moduledoc """
     Extended version of Plug.Session.COOKIE from https://github.com/elixir-plug/plug/blob/main/lib/plug/session/cookie.ex
     Added Redis to have a possibility to invalidate session
   """
 
-  require Logger
-  @behaviour Plug.Session.Store
-
-  import Explorer.ThirdPartyIntegrations.Auth0, only: [cookie_key: 1]
+  import Explorer.Helper, only: [redis_key: 1]
 
   alias Plug.Crypto
   alias Plug.Crypto.{KeyGenerator, MessageEncryptor, MessageVerifier}
+
+  require Logger
+
+  @behaviour Plug.Session.Store
 
   @impl true
   def init(opts) do
@@ -196,7 +198,7 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
   defp store_to_redis(cookie) do
     Redix.command(:redix, [
       "SET",
-      cookie_key(hash(cookie)),
+      redis_key(hash(cookie)),
       1,
       "EX",
       Application.get_env(:block_scout_web, :session_cookie_ttl)
@@ -206,14 +208,14 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
   end
 
   defp remove_from_redis(sid) do
-    Redix.command(:redix, ["DEL", cookie_key(sid)])
+    Redix.command(:redix, ["DEL", redis_key(sid)])
   end
 
   defp check_in_redis({sid, map}, _cookie) when is_nil(sid) or map == %{}, do: {nil, %{}}
 
   defp check_in_redis({_sid, session}, cookie) do
     hash = hash(cookie)
-    key = cookie_key(hash)
+    key = redis_key(hash)
 
     case Redix.command(:redix, ["GET", key]) do
       {:ok, one} when one in [1, "1"] ->

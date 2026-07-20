@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.DA.Anytrust do
   @moduledoc """
     Provides functionality for handling AnyTrust data availability information
@@ -362,13 +363,13 @@ defmodule Indexer.Fetcher.Arbitrum.DA.Anytrust do
         json_rpc_named_arguments
       )
 
-    if length(logs) > 0 do
+    if Enum.empty?(logs) do
+      log_error("No SetValidKeyset logs found in the block #{block_number}")
+      nil
+    else
       log_info("Found #{length(logs)} SetValidKeyset logs")
 
       set_valid_keyset_event_parse(List.first(logs))
-    else
-      log_error("No SetValidKeyset logs found in the block #{block_number}")
-      nil
     end
   end
 

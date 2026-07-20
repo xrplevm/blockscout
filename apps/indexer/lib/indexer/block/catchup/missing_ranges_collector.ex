@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Catchup.MissingRangesCollector do
   @moduledoc """
   Collects and manages missing block ranges in the blockchain.
@@ -62,10 +63,9 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   use Utils.CompileTimeEnvHelper, future_check_interval: [:indexer, [__MODULE__, :future_check_interval]]
 
   alias EthereumJSONRPC.Utility.RangesHelper
-  alias Explorer.{Chain, Helper, Repo}
-  alias Explorer.Chain.Cache.BlockNumber
+  alias Explorer.{Chain, Repo}
   alias Explorer.Chain.Cache.Counters.LastFetchedCounter
-  alias Explorer.Utility.{MissingBlockRange, MissingRangesManipulator}
+  alias Explorer.Utility.MissingBlockRange
 
   @default_missing_ranges_batch_size 100_000
   @past_check_interval 10
@@ -188,7 +188,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
     ranges
     |> Enum.reverse()
     |> Enum.flat_map(fn f..l//_ -> Chain.missing_block_number_ranges(l..f) end)
-    |> MissingRangesManipulator.save_batch()
+    |> MissingBlockRange.save_batch()
 
     if not is_nil(max_fetched_block_number) do
       schedule_future_check()
@@ -276,7 +276,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
       %{min: nil, max: nil} ->
         max_number = last_block()
         {min_number, first_batch} = fetch_missing_ranges_batch(max_number, false)
-        MissingRangesManipulator.save_batch(first_batch)
+        MissingBlockRange.save_batch(first_batch)
         {min_number, max_number}
 
       %{min: min, max: max} ->
@@ -298,7 +298,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   def handle_info(:update_future, %{max_fetched_block_number: max_number} = state) do
     if continue_future_updating?(max_number) do
       {new_max_number, batch} = fetch_missing_ranges_batch(max_number, true)
-      MissingRangesManipulator.save_batch(batch)
+      MissingBlockRange.save_batch(batch)
       schedule_future_check()
       {:noreply, %{state | max_fetched_block_number: new_max_number}}
     else
@@ -322,7 +322,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   def handle_info(:update_past, %{min_fetched_block_number: min_number} = state) do
     if min_number > first_block() do
       {new_min_number, batch} = fetch_missing_ranges_batch(min_number, false)
-      MissingRangesManipulator.save_batch(batch)
+      MissingBlockRange.save_batch(batch)
       schedule_past_check(state.first_check_completed?)
       {:noreply, %{state | min_fetched_block_number: new_min_number}}
     else
@@ -393,23 +393,17 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   @spec last_block() :: non_neg_integer()
   defp last_block do
     last_block = Application.get_env(:indexer, :last_block)
-    if last_block, do: last_block + 1, else: fetch_max_block_number()
+    if last_block, do: last_block + 1, else: fetch_max_block_number_from_node()
   end
 
-  # Retrieves the highest block number from cache or blockchain.
-  @spec fetch_max_block_number() :: non_neg_integer()
-  defp fetch_max_block_number do
-    case BlockNumber.get_max() do
-      0 ->
-        json_rpc_named_arguments = Application.get_env(:indexer, :json_rpc_named_arguments)
+  # Retrieves the highest block number from blockchain.
+  @spec fetch_max_block_number_from_node() :: non_neg_integer()
+  defp fetch_max_block_number_from_node do
+    json_rpc_named_arguments = Application.get_env(:indexer, :json_rpc_named_arguments)
 
-        case EthereumJSONRPC.fetch_block_number_by_tag("latest", json_rpc_named_arguments) do
-          {:ok, number} -> number
-          _ -> 0
-        end
-
-      number ->
-        number
+    case EthereumJSONRPC.fetch_block_number_by_tag("latest", json_rpc_named_arguments) do
+      {:ok, number} -> number
+      _ -> 0
     end
   end
 
@@ -487,22 +481,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   @spec parse_block_ranges(binary()) ::
           {:finite_ranges, [Range.t()]} | {:infinite_ranges, [Range.t()], non_neg_integer()} | :no_ranges
   def parse_block_ranges(block_ranges_string) do
-    ranges =
-      block_ranges_string
-      |> String.split(",")
-      |> Enum.map(fn string_range ->
-        case String.split(string_range, "..") do
-          [from_string, "latest"] ->
-            Helper.parse_integer(from_string)
-
-          [from_string, to_string] ->
-            get_from_to(from_string, to_string)
-
-          _ ->
-            nil
-        end
-      end)
-      |> RangesHelper.sanitize_ranges()
+    ranges = RangesHelper.parse_block_ranges(block_ranges_string)
 
     case List.last(ranges) do
       _from.._to//_ ->
@@ -513,17 +492,6 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
 
       num ->
         {:infinite_ranges, List.delete_at(ranges, -1), num - 1}
-    end
-  end
-
-  # Creates a range from string boundaries, returning nil if parsing fails or if from > to
-  @spec get_from_to(binary(), binary()) :: Range.t() | nil
-  defp get_from_to(from_string, to_string) do
-    with {from, ""} <- Integer.parse(from_string),
-         {to, ""} <- Integer.parse(to_string) do
-      if from <= to, do: from..to, else: nil
-    else
-      _ -> nil
     end
   end
 end

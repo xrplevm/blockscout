@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Wei do
   @moduledoc """
   The smallest fractional unit of Ether. Using wei instead of ether allows code to do integer match instead of using
@@ -315,6 +316,15 @@ defmodule Explorer.Chain.Wei do
   @spec to(t(), :wei) :: wei() | nil
   def to(nil, :wei), do: nil
   def to(%__MODULE__{value: wei}, :wei), do: wei
+
+  @doc """
+  Returns zero Wei value.
+
+  ## Returns
+  - Zero Wei value.
+  """
+  @spec zero() :: __MODULE__.t()
+  def zero, do: %__MODULE__{value: Decimal.new(0)}
 end
 
 defimpl Inspect, for: Explorer.Chain.Wei do

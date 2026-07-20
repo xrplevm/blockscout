@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.NFTMediaHandler.Queue do
   @moduledoc """
   Queue for fetching media
@@ -124,7 +125,7 @@ defmodule Indexer.NFTMediaHandler.Queue do
       end
 
     dets_insert_wrapper(in_progress, instances)
-    {:reply, urls, {queue, in_progress, continuation}}
+    {:reply, {urls, Application.get_env(:nft_media_handler, :r2_folder)}, {queue, in_progress, continuation}}
   end
 
   @doc """

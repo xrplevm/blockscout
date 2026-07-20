@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Beacon.BlobTest do
   use Explorer.DataCase, async: false
 
@@ -45,8 +46,6 @@ defmodule Indexer.Fetcher.Beacon.BlobTest do
         assert {:error, :not_found} = Reader.blob(blob_c.hash, true)
         assert {:ok, _} = Reader.blob(blob_d.hash, true)
 
-        Application.put_env(:explorer, :http_adapter, Explorer.Mox.HTTPoison)
-
         result_ab = """
         {
           "data": [
@@ -79,16 +78,18 @@ defmodule Indexer.Fetcher.Beacon.BlobTest do
         }
         """
 
-        Explorer.Mox.HTTPoison
-        |> expect(:get, 2, fn url ->
-          case url do
-            "http://localhost:5052/eth/v1/beacon/blob_sidecars/8269188" ->
-              {:ok, %HTTPoison.Response{status_code: 200, body: result_c}}
+        Tesla.Test.expect_tesla_call(
+          times: 2,
+          returns: fn %{url: url}, _opts ->
+            case url do
+              "http://localhost:5052/eth/v1/beacon/blob_sidecars/8269188" ->
+                {:ok, %Tesla.Env{status: 200, body: result_c}}
 
-            "http://localhost:5052/eth/v1/beacon/blob_sidecars/8269198" ->
-              {:ok, %HTTPoison.Response{status_code: 200, body: result_ab}}
+              "http://localhost:5052/eth/v1/beacon/blob_sidecars/8269198" ->
+                {:ok, %Tesla.Env{status: 200, body: result_ab}}
+            end
           end
-        end)
+        )
 
         BlobSupervisor.Case.start_supervised!()
 
@@ -100,8 +101,6 @@ defmodule Indexer.Fetcher.Beacon.BlobTest do
         assert {:ok, _} = Reader.blob(blob_b.hash, true)
         assert {:ok, _} = Reader.blob(blob_c.hash, true)
         assert {:ok, _} = Reader.blob(blob_d.hash, true)
-
-        Application.put_env(:explorer, :http_adapter, HTTPoison)
       end
     end
 
@@ -116,8 +115,6 @@ defmodule Indexer.Fetcher.Beacon.BlobTest do
       end
 
       test "fetches blobs for block timestamp" do
-        Application.put_env(:explorer, :http_adapter, Explorer.Mox.HTTPoison)
-
         {:ok, now, _} = DateTime.from_iso8601("2024-01-24 00:00:00Z")
         block_a = insert(:block, timestamp: now)
 
@@ -141,10 +138,16 @@ defmodule Indexer.Fetcher.Beacon.BlobTest do
         }
         """
 
-        Explorer.Mox.HTTPoison
-        |> expect(:get, fn "http://localhost:5052/eth/v1/beacon/blob_sidecars/8269198" ->
-          {:ok, %HTTPoison.Response{status_code: 200, body: result_a}}
-        end)
+        Tesla.Test.expect_tesla_call(
+          times: 1,
+          returns: fn %{url: "http://localhost:5052/eth/v1/beacon/blob_sidecars/8269198"}, _opts ->
+            {:ok,
+             %Tesla.Env{
+               status: 200,
+               body: result_a
+             }}
+          end
+        )
 
         BlobSupervisor.Case.start_supervised!()
 
@@ -162,8 +165,6 @@ defmodule Indexer.Fetcher.Beacon.BlobTest do
                  kzg_commitment: ^kzg_commitment_a,
                  kzg_proof: ^kzg_proof_a
                } = blob
-
-        Application.put_env(:explorer, :http_adapter, HTTPoison)
       end
     end
   end

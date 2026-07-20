@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Routers.ChainTypeScopeTest do
   use BlockScoutWeb.ConnCase
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
@@ -17,7 +18,7 @@ defmodule BlockScoutWeb.Routers.ChainTypeScopeTest do
       test "stability validators counters are accessible when chain type is stability", %{conn: conn} do
         Application.put_env(:explorer, :chain_type, :stability)
 
-        assert response =
+        assert _response =
                  conn
                  |> get("/api/v2/validators/stability/counters")
                  |> json_response(200)
@@ -34,17 +35,20 @@ defmodule BlockScoutWeb.Routers.ChainTypeScopeTest do
 
     test "blackfort validators counters are accessible when chain type is blackfort and stability is not",
          %{conn: conn} do
+      chain_type = Application.get_env(:explorer, :chain_type)
       Application.put_env(:explorer, :chain_type, :blackfort)
 
-      assert response =
-               conn
-               |> get("/api/v2/validators/blackfort/counters")
-               |> json_response(200)
+      on_exit(fn ->
+        Application.put_env(:explorer, :chain_type, chain_type)
+      end)
 
-      assert response =
-               conn
-               |> get("/api/v2/validators/stability/counters")
-               |> json_response(404)
+      assert conn
+             |> get("/api/v2/validators/blackfort/counters")
+             |> json_response(200)
+
+      assert conn
+             |> get("/api/v2/validators/stability/counters")
+             |> json_response(404)
     end
   end
 end

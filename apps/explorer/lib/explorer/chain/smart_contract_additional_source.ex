@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.SmartContractAdditionalSource do
   @moduledoc """
   The representation of a verified Smart Contract additional sources.
@@ -19,6 +20,7 @@ defmodule Explorer.Chain.SmartContractAdditionalSource do
     field(:file_name, :string, null: false)
     field(:contract_source_code, :string, null: false)
 
+    # TODO: Why not use smart_contract_id?
     belongs_to(
       :smart_contract,
       SmartContract,
@@ -38,19 +40,19 @@ defmodule Explorer.Chain.SmartContractAdditionalSource do
       :contract_source_code,
       :address_hash
     ])
-    |> validate_required([:file_name, :contract_source_code, :address_hash])
-    |> unique_constraint(:address_hash)
+    |> validate_required([:address_hash, :file_name, :contract_source_code])
+    |> unique_constraint([:address_hash, :file_name])
   end
 
   def invalid_contract_changeset(%__MODULE__{} = smart_contract_additional_source, attrs, error) do
     validated =
       smart_contract_additional_source
       |> cast(attrs, [
+        :address_hash,
         :file_name,
-        :contract_source_code,
-        :address_hash
+        :contract_source_code
       ])
-      |> validate_required([:file_name, :address_hash])
+      |> validate_required([:address_hash, :file_name])
 
     add_error(validated, :contract_source_code, error_message(error))
   end

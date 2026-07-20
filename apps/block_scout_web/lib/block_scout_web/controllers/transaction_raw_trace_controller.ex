@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.TransactionRawTraceController do
   use BlockScoutWeb, :controller
 
@@ -11,7 +12,7 @@ defmodule BlockScoutWeb.TransactionRawTraceController do
   alias Indexer.Fetcher.OnDemand.FirstTrace, as: FirstTraceOnDemand
 
   def index(conn, %{"transaction_id" => hash_string} = params) do
-    with {:ok, hash} <- Chain.string_to_transaction_hash(hash_string),
+    with {:ok, hash} <- Chain.string_to_full_hash(hash_string),
          {:ok, transaction} <-
            Chain.hash_to_transaction(
              hash,
@@ -26,16 +27,7 @@ defmodule BlockScoutWeb.TransactionRawTraceController do
            ),
          {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
          {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
-      if is_nil(transaction.block_number) do
-        render_raw_trace(conn, [], transaction, hash)
-      else
-        FirstTraceOnDemand.maybe_trigger_fetch(transaction)
-
-        case Chain.fetch_transaction_raw_traces(transaction) do
-          {:ok, raw_traces} -> render_raw_trace(conn, raw_traces, transaction, hash)
-          _error -> unprocessable_entity(conn)
-        end
-      end
+      render_fetched_trace(conn, transaction, hash)
     else
       {:restricted_access, _} ->
         TransactionController.set_not_found_view(conn, hash_string)
@@ -45,6 +37,19 @@ defmodule BlockScoutWeb.TransactionRawTraceController do
 
       {:error, :not_found} ->
         TransactionController.set_not_found_view(conn, hash_string)
+    end
+  end
+
+  defp render_fetched_trace(conn, transaction, hash) do
+    if is_nil(transaction.block_number) do
+      render_raw_trace(conn, [], transaction, hash)
+    else
+      FirstTraceOnDemand.maybe_trigger_fetch(transaction)
+
+      case Chain.fetch_transaction_raw_traces(transaction) do
+        {:ok, raw_traces} -> render_raw_trace(conn, raw_traces, transaction, hash)
+        _error -> unprocessable_entity(conn)
+      end
     end
   end
 

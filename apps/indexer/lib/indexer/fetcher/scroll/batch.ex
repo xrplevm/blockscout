@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Scroll.Batch do
   @moduledoc """
   The module for scanning L1 RPC node for the `CommitBatch` and `FinalizeBatch` events
@@ -24,14 +25,14 @@ defmodule Indexer.Fetcher.Scroll.Batch do
   alias ABI.{FunctionSelector, TypeDecoder}
   alias Ecto.Multi
   alias EthereumJSONRPC.Logs
-  alias Explorer.Chain.Block.Range, as: BlockRange
-  alias Explorer.Chain.RollupReorgMonitorQueue
-  alias Explorer.Chain.Scroll.{Batch, BatchBundle, Reader}
   alias Explorer.{Chain, Repo}
+  alias Explorer.Chain.Block.Range, as: BlockRange
+  alias Explorer.Chain.Scroll.{Batch, BatchBundle, Reader}
   alias Indexer.Fetcher.RollupL1ReorgMonitor
   alias Indexer.Fetcher.Scroll.Helper, as: ScrollHelper
   alias Indexer.Helper
   alias Indexer.Prometheus.Instrumenter
+  alias Indexer.RollupReorgMonitorQueue
 
   # 32-byte signature of the event CommitBatch(uint256 indexed batchIndex, bytes32 indexed batchHash)
   @commit_batch_event "0x2c32d4ae151744d0bf0b9464a3e897a1d17ed2f1af71f7c9a75f12ce0d28238f"
@@ -245,7 +246,7 @@ defmodule Indexer.Fetcher.Scroll.Batch do
           )
         end
 
-        reorg_block = RollupReorgMonitorQueue.reorg_block_pop(__MODULE__)
+        reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
 
         if !is_nil(reorg_block) && reorg_block > 0 do
           reorg_handle(reorg_block)

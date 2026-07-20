@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.NovesFi do
   @moduledoc """
   Module for Noves.Fi API integration https://blockscout.noves.fi/swagger/index.html
@@ -5,7 +6,7 @@ defmodule Explorer.ThirdPartyIntegrations.NovesFi do
 
   require Logger
 
-  alias Explorer.Helper
+  alias Explorer.{Helper, HttpClient}
   alias Explorer.Utility.Microservice
 
   @recv_timeout 60_000
@@ -31,8 +32,8 @@ defmodule Explorer.ThirdPartyIntegrations.NovesFi do
       conn.query_params
       |> Map.drop(["hashes"])
 
-    case HTTPoison.post(url, Jason.encode!(hashes), headers, recv_timeout: @recv_timeout, params: prepared_params) do
-      {:ok, %HTTPoison.Response{status_code: status, body: body}} ->
+    case HttpClient.post(url, Jason.encode!(hashes), headers, recv_timeout: @recv_timeout, params: prepared_params) do
+      {:ok, %{status_code: status, body: body}} ->
         {Helper.decode_json(body), status}
 
       {:error, reason} ->
@@ -49,8 +50,8 @@ defmodule Explorer.ThirdPartyIntegrations.NovesFi do
 
     url_with_params = url <> "?" <> conn.query_string
 
-    case HTTPoison.get(url_with_params, headers, recv_timeout: @recv_timeout) do
-      {:ok, %HTTPoison.Response{status_code: status, body: body}} ->
+    case HttpClient.get(url_with_params, headers, recv_timeout: @recv_timeout) do
+      {:ok, %{status_code: status, body: body}} ->
         {Helper.decode_json(body), status}
 
       {:error, reason} ->

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.SanitizeIncorrectWETHTokenTransfersTest do
   use Explorer.DataCase, async: false
 
@@ -145,6 +146,7 @@ defmodule Explorer.Migrator.SanitizeIncorrectWETHTokenTransfersTest do
 
       token_address_hash = token_address.hash
       whitelisted_token_address_hash = whitelisted_token_address.hash
+      transfers = Repo.all(TokenTransfer, order_by: [asc: :block_number, asc: :log_index])
 
       assert [
                %{token_contract_address_hash: ^token_address_hash},
@@ -152,7 +154,7 @@ defmodule Explorer.Migrator.SanitizeIncorrectWETHTokenTransfersTest do
                %{token_contract_address_hash: ^whitelisted_token_address_hash},
                %{token_contract_address_hash: ^whitelisted_token_address_hash},
                %{token_contract_address_hash: ^whitelisted_token_address_hash}
-             ] = transfers = Repo.all(TokenTransfer, order_by: [asc: :block_number, asc: :log_index])
+             ] = transfers
 
       withdrawal = Enum.at(transfers, 1)
       deposit = Enum.at(transfers, 2)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.NethermindTest do
   use ExUnit.Case, async: true
   use EthereumJSONRPC.Case
@@ -96,7 +97,7 @@ defmodule EthereumJSONRPC.NethermindTest do
                    trace_address: trace_address,
                    transaction_hash: transaction_hash,
                    type: type,
-                   value: value,
+                   value: nil,
                    transaction_index: transaction_index
                  }
                ]
@@ -190,10 +191,11 @@ defmodule EthereumJSONRPC.NethermindTest do
                      trace_address: trace_address,
                      transaction_hash: transaction_hash,
                      type: type,
-                     value: value,
+                     value: nil,
                      transaction_index: transaction_index
                    },
                    block_hash: block_hash,
+                   block_number: block_number,
                    json_rpc_named_arguments: [
                      transport: EthereumJSONRPC.Mox,
                      transport_options: [],
