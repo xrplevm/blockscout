@@ -99,7 +99,12 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
     |> Enum.group_by(fn %{address_hash: address_hash} -> address_hash end)
     |> Map.values()
     |> Stream.map(&Enum.max_by(&1, fn %{block_number: block_number} -> block_number end))
-    |> Enum.map(fn %{address_hash: address_hash, block_number: block_number, value: value, value_fetched_at: value_fetched_at} ->
+    |> Enum.map(fn %{
+                     address_hash: address_hash,
+                     block_number: block_number,
+                     value: value,
+                     value_fetched_at: value_fetched_at
+                   } ->
       %{
         address_hash: address_hash,
         block_number: block_number,
@@ -108,7 +113,7 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
         value_fetched_at: value_fetched_at,
         token_type: "ERC-20",
         token_id: nil,
-        retries_count: 0,
+        retries_count: 0
       }
     end)
   end
@@ -118,7 +123,12 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
     |> Enum.group_by(fn %{address_hash: address_hash} -> address_hash end)
     |> Map.values()
     |> Stream.map(&Enum.max_by(&1, fn %{block_number: block_number} -> block_number end))
-    |> Enum.map(fn %{address_hash: address_hash, block_number: block_number, value: value, value_fetched_at: value_fetched_at} ->
+    |> Enum.map(fn %{
+                     address_hash: address_hash,
+                     block_number: block_number,
+                     value: value,
+                     value_fetched_at: value_fetched_at
+                   } ->
       %{
         address_hash: address_hash,
         block_number: block_number,
@@ -126,7 +136,7 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
         value: value,
         value_fetched_at: value_fetched_at,
         token_type: "ERC-20",
-        token_id: nil,
+        token_id: nil
       }
     end)
   end
@@ -144,7 +154,8 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
 
     address_token_balances_params = balances_params_to_address_token_balances_params(importable_balances_params)
 
-    address_current_token_balances_params = balances_params_to_address_current_token_balances_params(importable_balances_params)
+    address_current_token_balances_params =
+      balances_params_to_address_current_token_balances_params(importable_balances_params)
 
     token_balances = TokenBalances.to_address_current_token_balances(address_current_token_balances_params)
 
@@ -156,7 +167,7 @@ defmodule Indexer.Fetcher.CoinBalance.Helper do
       address_token_balances: %{params: address_token_balances_params},
       address_current_token_balances: %{
         params: token_balances
-      },
+      }
     })
   end
 

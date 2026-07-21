@@ -8,7 +8,7 @@ Blockscout is currently pre-configured for **XRPL EVM Testnet**.
 
 ### XRPL EVM Testnet Details
 
-- **Chain ID**: `1449000` (0x161778)
+- **Chain ID**: `1449000` (0x161c28)
 - **Native Currency**: XRP (18 decimals)
 - **Public RPC Endpoint**: `https://rpc.testnet.xrplevm.org`
 - **Full History RPC**: `https://full-history-bb325630.testnet.xrplevm.org`
@@ -66,6 +66,22 @@ As per [XRPL EVM Public APIs](https://docs.xrplevm.org/pages/developers/resource
 2. **Edit Backend Configuration**: `docker-compose/envs/common-blockscout.env`
 3. **Edit Frontend Configuration**: `docker-compose/envs/common-frontend.env`
 4. **Start the services**: `cd docker-compose && docker compose up -d`
+
+## Production Deployment (GitHub Actions Image Build)
+
+The docker-compose flow above is for local/manual setups. The actual deployment route used by the org is the GitHub Actions workflow:
+
+- **Workflow**: `.github/workflows/publish-docker-image-for-xrplevm.yml`
+- **Trigger**: manual (`workflow_dispatch`) with a `version` input (e.g. `0.0.0`)
+- **Output**: builds `docker/Dockerfile` and pushes the multi-arch image (`linux/amd64`, `linux/arm64/v8`) to `ghcr.io/xrplevm/blockscout-xrplevm:<version>`
+
+The `version` input is only the Docker image tag (and part of the displayed `BLOCKSCOUT_VERSION`) — it does not need to match anything else.
+
+### The `RELEASE_VERSION` build arg (critical)
+
+The `RELEASE_VERSION` build arg **must exactly match the `version` in `mix.exs`** (currently `11.2.2`). The Dockerfile uses it as a filesystem path — it copies `config_helper.exs` into `/app/releases/${RELEASE_VERSION}/`, and the Elixir release only reads from the directory named after the `mix.exs` version. A mismatched value produces an image that **builds successfully but crashes at boot** with an ENOENT error when it fails to find its release files.
+
+The workflow derives `RELEASE_VERSION` from `mix.exs` automatically, so no manual input is needed for it. If you ever modify the workflow or build the image by hand (`docker build --build-arg RELEASE_VERSION=...`), make sure the value matches `mix.exs` — and remember to keep them in sync when bumping the Blockscout version during upstream merges.
 
 ## Essential Configuration Parameters
 
@@ -377,6 +393,26 @@ CHAIN_TYPE=
 # METADATA_CONTRACT=
 # VALIDATORS_CONTRACT=
 ```
+
+## Native XRP Sentinel Token (Manual Database Step Required)
+
+This fork's main customization surfaces **native XRP as a pseudo-ERC-20 token** at the sentinel address:
+
+```
+0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+```
+
+### How it works
+
+- The coin balance fetcher (`apps/indexer/lib/indexer/fetcher/coin_balance/helper.ex`) writes fetched native coin balances not only to the usual coin balance tables, but **also** to `address_token_balances` and `address_current_token_balances`, using the sentinel address as `token_contract_address_hash` with `token_type` `ERC-20`. This makes native XRP appear in address token balance lists alongside real ERC-20 tokens. Note this applies to `import_fetched_balances/2`; the daily-balance path (`import_fetched_daily_balances/2`) is not customized and writes no sentinel rows, so the sentinel balance can transiently lag the address's coin balance.
+- The token balance fetcher (`apps/indexer/lib/indexer/fetcher/token_balance/helper.ex`) special-cases the sentinel address in the opposite direction: balances recorded against it also update the address's `fetched_coin_balance`.
+- The separate React frontend special-cases this exact address to render the XRP logo for it.
+
+### The manual step
+
+For the sentinel to actually render as a token in the UI/API, **a row must exist in the `tokens` table for that address**. Nothing in this repository seeds it — there is no migration, seed script, or indexer code that inserts it. It must be created manually (out-of-band) in the database after initial setup, otherwise the balance rows reference a token that does not exist and native XRP will not display as a token.
+
+Per the schema in `apps/explorer/lib/explorer/chain/token.ex`, the `tokens` table is keyed by `contract_address_hash`, requires a `type` (use `ERC-20` to match what the indexer writes), and has optional `name`, `symbol`, and `decimals` columns (for XRP: name `XRP`, symbol `XRP`, decimals `18`). Before inserting, confirm the exact column list and NOT NULL constraints (e.g. timestamp columns) against that schema file and the migrations in `apps/explorer/priv/repo/migrations/` — do not assume defaults.
 
 ### For PoA (Proof of Authority) Chains
 
