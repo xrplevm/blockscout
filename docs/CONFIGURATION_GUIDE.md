@@ -12,7 +12,7 @@ Blockscout is currently pre-configured for **XRPL EVM Testnet**.
 - **Native Currency**: XRP (18 decimals)
 - **Public RPC Endpoint**: `https://rpc.testnet.xrplevm.org`
 - **Full History RPC**: `https://full-history-bb325630.testnet.xrplevm.org`
-- **WebSocket**: `wss://full-history-bb325630.testnet.xrplevm.org`
+- **WebSocket**: `wss://ws.testnet.xrplevm.org`
 - **Official Explorer**: [explorer.testnet.xrplevm.org](https://explorer.testnet.xrplevm.org)
 - **First Block**: `2162539`
 - **Trace First Block**: `4900000`
@@ -22,7 +22,7 @@ Blockscout is currently pre-configured for **XRPL EVM Testnet**.
 The configuration includes:
 - **Primary RPC**: `https://rpc.testnet.xrplevm.org`
 - **Fallback RPC / Full History**: `https://full-history-bb325630.testnet.xrplevm.org`
-- **WebSocket**: `wss://full-history-bb325630.testnet.xrplevm.org`
+- **WebSocket**: `wss://ws.testnet.xrplevm.org`
 
 ---
 
@@ -316,10 +316,10 @@ The configuration files are currently set up for XRPL EVM Testnet:
 ```bash
 ETHEREUM_JSONRPC_HTTP_URL=https://rpc.testnet.xrplevm.org
 ETHEREUM_JSONRPC_TRACE_URL=https://rpc.testnet.xrplevm.org
-ETHEREUM_JSONRPC_WS_URL=wss://full-history-bb325630.testnet.xrplevm.org
+ETHEREUM_JSONRPC_WS_URL=wss://ws.testnet.xrplevm.org
 ETHEREUM_JSONRPC_FALLBACK_HTTP_URL=https://full-history-bb325630.testnet.xrplevm.org
 ETHEREUM_JSONRPC_FALLBACK_TRACE_URL=https://full-history-bb325630.testnet.xrplevm.org
-ETHEREUM_JSONRPC_FALLBACK_WS_URL=wss://full-history-bb325630.testnet.xrplevm.org
+# ETHEREUM_JSONRPC_FALLBACK_WS_URL=  (none — full-history is HTTP-RPC-only)
 CHAIN_ID=1449000
 COIN_NAME=XRP
 COIN=XRP
