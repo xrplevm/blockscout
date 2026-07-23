@@ -1,0 +1,61 @@
+name: XRPL EVM Publish Docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Docker release version (0.0.0)"
+        required: true
+
+jobs:
+  push_to_registry:
+    name: Push Docker image to GitHub Container Registry
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_CHAIN_NAME: xrplevm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add SHORT_SHA env property with commit short sha
+        shell: bash
+        run: echo "SHORT_SHA=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
+      # RELEASE_VERSION must exactly match the version in mix.exs: the Dockerfile uses it as a
+      # filesystem path (/app/releases/${RELEASE_VERSION}/config_helper.exs) and the Elixir release
+      # only reads from the directory named after the mix.exs version. A mismatch builds fine but
+      # crashes at boot with ENOENT. Do NOT replace this with the workflow input.
+      - name: Read release version from mix.exs
+        id: mix_version
+        shell: bash
+        run: |
+          # -m1: stop at the first match, so a second `version:` line in mix.exs can never
+          # produce a multi-line value that silently ships the wrong version.
+          # `|| true`: without it, grep's non-zero exit on no-match trips `bash -e` and the
+          # step dies before the check below, so the error message would never be printed.
+          version="$(grep -oPm1 'version: "\K[^"]+' mix.exs || true)"
+          if [ -z "$version" ]; then
+            echo "Failed to extract version from mix.exs" >&2
+            exit 1
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub 👤
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          tags:  ghcr.io/xrplevm/blockscout-${{ env.DOCKER_CHAIN_NAME }}:${{ github.event.inputs.version }}
+          platforms: |
+            linux/amd64
+          build-args: |
+            BLOCKSCOUT_VERSION=v${{ github.event.inputs.version }}.+commit.${{ env.SHORT_SHA }}
+            RELEASE_VERSION=${{ steps.mix_version.outputs.version }}
+            CHAIN_TYPE=ethereum
