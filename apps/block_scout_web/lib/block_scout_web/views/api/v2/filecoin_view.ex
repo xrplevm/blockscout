@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.FilecoinView do
   @moduledoc """
   View functions for rendering Filecoin-related data in JSON format.
@@ -5,9 +6,8 @@ defmodule BlockScoutWeb.API.V2.FilecoinView do
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   if @chain_type == :filecoin do
-    # TODO: remove when https://github.com/elixir-lang/elixir/issues/13975 comes to elixir release
-    alias Explorer.Chain, warn: false
-    alias Explorer.Chain.Address, warn: false
+    alias Explorer.Chain
+    alias Explorer.Chain.Address
 
     @api_true [api?: true]
 
@@ -34,9 +34,16 @@ defmodule BlockScoutWeb.API.V2.FilecoinView do
           }) ::
             map()
     def preload_and_put_filecoin_robust_address(result, %{address_hash: address_hash} = params) do
-      address = address_hash && Address.get(address_hash, @api_true)
+      address =
+        case address_hash do
+          hash when is_binary(hash) and hash != "" -> Address.get(hash, @api_true)
+          _ -> nil
+        end
 
-      put_filecoin_robust_address(result, Map.put(params, :address, address))
+      params
+      |> Map.put_new(:field_prefix, nil)
+      |> Map.put(:address, address)
+      |> then(&put_filecoin_robust_address(result, &1))
     end
 
     def preload_and_put_filecoin_robust_address(result, _params) do

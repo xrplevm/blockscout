@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.UniversalProxyTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case
 
   import Mox
 
@@ -221,7 +222,47 @@ defmodule Explorer.ThirdPartyIntegrations.UniversalProxyTest do
                }).url
     end
 
-    test "correctly parsing chain_id - dependent param in the path" do
+    test "correctly parsing chain_id - dependent param in the path when chain id is NOT present as param" do
+      Tesla.Test.expect_tesla_call(
+        times: 1,
+        returns: %Tesla.Env{
+          status: 200,
+          body:
+            Jason.encode!(%{
+              "platforms" => %{
+                "test_platform" => %{
+                  "base_url" => "https://api.test.com",
+                  "endpoints" => %{
+                    "base" => %{
+                      "path" => "/test/:endpoint_platform_id",
+                      "method" => "get",
+                      "params" => [
+                        %{
+                          "location" => "path",
+                          "type" => "chain_id_dependent",
+                          "name" => "endpoint_platform_id",
+                          "mapping" => %{
+                            "1" => "first_endpoint_platform_id",
+                            "100500" => "another_endpoint_platform_id"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            })
+        }
+      )
+
+      assert "https://api.test.com/test/another_endpoint_platform_id" =
+               UniversalProxy.parse_proxy_params(%{
+                 "platform_id" => "test_platform",
+                 "chain_id" => "100500"
+               }).url
+    end
+
+    test "correctly parsing chain_id - dependent param in the path when chain id is present as param as well" do
       Tesla.Test.expect_tesla_call(
         times: 1,
         returns: %Tesla.Env{
@@ -532,5 +573,46 @@ defmodule Explorer.ThirdPartyIntegrations.UniversalProxyTest do
           })
       }
     )
+  end
+
+  describe "config from env (UNIVERSAL_PROXY_CONFIG)" do
+    test "parse_proxy_params uses inline env config without HTTP fetch" do
+      inline_config = %{
+        "platforms" => %{
+          "test_platform" => %{
+            "base_url" => "https://api.test.com",
+            "endpoints" => %{
+              "base" => %{
+                "path" => "/test",
+                "method" => "get",
+                "params" => []
+              }
+            },
+            "api_key" => %{
+              "location" => "header",
+              "param_name" => "Authorization",
+              "prefix" => "Bearer"
+            }
+          }
+        }
+      }
+
+      Application.put_env(
+        :explorer,
+        Explorer.ThirdPartyIntegrations.UniversalProxy,
+        config_json: Jason.encode!(inline_config),
+        config_url: nil
+      )
+
+      on_exit(fn ->
+        Application.delete_env(:explorer, Explorer.ThirdPartyIntegrations.UniversalProxy)
+      end)
+
+      proxy_params = UniversalProxy.parse_proxy_params(%{"platform_id" => "test_platform"})
+
+      assert proxy_params.url == "https://api.test.com/test"
+      assert proxy_params.method == :get
+      assert proxy_params.headers == [{"Authorization", "Bearer test_api_key"}]
+    end
   end
 end

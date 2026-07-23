@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.Notifier.SummaryTest do
   use Explorer.DataCase
 
@@ -444,6 +445,66 @@ defmodule Explorer.Account.Notifier.SummaryTest do
                  transaction_hash: transaction.hash,
                  transaction_fee: fee,
                  type: "ERC-404"
+               }
+             ]
+    end
+
+    test "ERC-7984 Confidential Token transfer" do
+      token = insert(:token, type: "ERC-7984", name: "Confidential Token")
+
+      transaction =
+        %Transaction{
+          from_address: transaction_from_address,
+          to_address: transaction_to_address,
+          block_number: block_number,
+          hash: transaction_hash
+        } = with_block(insert(:transaction))
+
+      transaction_amount = Wei.to(transaction.value, :ether)
+
+      %TokenTransfer{
+        block_number: _block_number,
+        from_address: from_address,
+        to_address: to_address
+      } =
+        :token_transfer
+        |> insert(
+          transaction: transaction,
+          token_type: "ERC-7984",
+          amount: nil,
+          token_ids: nil,
+          token_contract_address: token.contract_address,
+          token: token,
+          block: transaction.block,
+          block_number: transaction.block_number
+        )
+
+      {_, fee} = Transaction.fee(transaction, :gwei)
+
+      assert Summary.process(transaction) == [
+               %Summary{
+                 amount: transaction_amount,
+                 block_number: block_number,
+                 from_address_hash: transaction_from_address.hash,
+                 method: "transfer",
+                 name: "ETH",
+                 subject: "Coin transaction",
+                 to_address_hash: transaction_to_address.hash,
+                 transaction_hash: transaction_hash,
+                 transaction_fee: fee,
+                 type: "COIN"
+               },
+               %Summary{
+                 amount: Decimal.new(0),
+                 block_number: block_number,
+                 from_address_hash: from_address.hash,
+                 method: "transfer",
+                 name: "Confidential Token",
+                 subject: "Confidential transfer",
+                 to_address_hash: to_address.hash,
+                 transaction_hash: transaction.hash,
+                 transaction_fee: fee,
+                 type: "ERC-7984"
                }
              ]
     end

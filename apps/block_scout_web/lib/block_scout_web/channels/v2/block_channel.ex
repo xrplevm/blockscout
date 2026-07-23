@@ -1,10 +1,12 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.V2.BlockChannel do
   @moduledoc """
   Establishes pub/sub channel for live updates of block events for API V2.
   """
   use BlockScoutWeb, :channel
 
-  def join("blocks:new_block", _params, socket) do
+  def join("blocks:" <> common, _params, socket)
+      when common in ["new_block", "indexing", "indexing_internal_transactions"] do
     {:ok, %{}, socket}
   end
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.TokenTest do
   use Explorer.DataCase
 
@@ -146,6 +147,90 @@ defmodule Explorer.Chain.TokenTest do
       }
 
       assert {:ok, _updated_token} = Token.update(token, update_params)
+    end
+  end
+
+  describe "list_top/2" do
+    test "returns market data with enabled token fetcher" do
+      old_source_env = Application.get_env(:explorer, Explorer.Market.Source)
+      old_fetcher_env = Application.get_env(:explorer, Explorer.Market.Fetcher.Token)
+
+      Application.put_env(
+        :explorer,
+        Explorer.Market.Source,
+        Keyword.merge(old_source_env, tokens_source: Explorer.Market.Source.OneCoinSource)
+      )
+
+      Application.put_env(:explorer, Explorer.Market.Fetcher.Token, Keyword.merge(old_fetcher_env, enabled: true))
+
+      on_exit(fn ->
+        Application.put_env(:explorer, Explorer.Market.Source, old_source_env)
+        Application.put_env(:explorer, Explorer.Market.Fetcher.Token, old_fetcher_env)
+      end)
+
+      start_supervised!(Explorer.Market.Fetcher.Token)
+      start_supervised!(Explorer.Market)
+
+      insert_list(10, :token)
+
+      market_data = Token.list_top(nil)
+
+      assert Enum.all?(market_data, fn token -> not is_nil(token.fiat_value) end)
+    end
+
+    test "ignores market data with disabled token fetcher" do
+      insert_list(10, :token)
+
+      start_supervised!(Explorer.Market)
+
+      market_data = Token.list_top(nil)
+
+      assert Enum.all?(market_data, fn token -> is_nil(token.fiat_value) end)
+    end
+
+    test "finds token by contract address hash" do
+      token = insert(:token, name: "Token that we search for", symbol: "ATK")
+      insert(:token)
+      insert(:token)
+      insert(:token)
+
+      address_hash_string = to_string(token.contract_address_hash)
+
+      results = Token.list_top(address_hash_string)
+
+      assert [%{name: "Token that we search for"}] = results
+    end
+
+    test "finds token by contract address hash when given mixed-case address" do
+      contract_address = insert(:contract_address, hash: "0xdAC17F958D2ee523a2206206994597C13D831ec7")
+      insert(:token, contract_address: contract_address, name: "Token that we search for", symbol: "ATK")
+      insert(:token)
+      insert(:token)
+      insert(:token)
+
+      results = Token.list_top("0xDAC17F958D2EE523A2206206994597C13D831EC7")
+
+      assert [%{name: "Token that we search for"}] = results
+    end
+
+    test "returns empty when searching with a valid address hash format that has no token" do
+      insert(:token, name: "Some Token", symbol: "STK")
+      non_existent_hash = "0xf000000000000000000000000000000000000000"
+
+      results = Token.list_top(non_existent_hash)
+
+      assert Enum.empty?(results)
+    end
+
+    test "falls back to full-text search for invalid address hash format" do
+      insert(:token, name: "0xINVALID_HEX Token", symbol: "IHT")
+      insert(:token)
+      insert(:token)
+      insert(:token)
+
+      results = Token.list_top("0xINVALID_HEX")
+
+      assert [%{name: "0xINVALID_HEX Token"}] = results
     end
   end
 end

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.ImportTest do
   use Explorer.DataCase
 
@@ -77,7 +78,7 @@ defmodule Explorer.Chain.ImportTest do
           },
           %{
             block_number: 37,
-            transaction_index: 1,
+            transaction_index: 0,
             transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5",
             index: 2,
             trace_address: [0],
@@ -268,21 +269,11 @@ defmodule Explorer.Chain.ImportTest do
                 internal_transactions: [
                   %{
                     index: 1,
-                    transaction_hash: %Hash{
-                      byte_count: 32,
-                      bytes:
-                        <<83, 189, 136, 72, 114, 222, 62, 72, 134, 146, 136, 27, 174, 236, 38, 46, 123, 149, 35, 77, 57,
-                          101, 36, 140, 57, 254, 153, 47, 255, 212, 51, 229>>
-                    }
+                    transaction_index: 0
                   },
                   %{
                     index: 2,
-                    transaction_hash: %Hash{
-                      byte_count: 32,
-                      bytes:
-                        <<83, 189, 136, 72, 114, 222, 62, 72, 134, 146, 136, 27, 174, 236, 38, 46, 123, 149, 35, 77, 57,
-                          101, 36, 140, 57, 254, 153, 47, 255, 212, 51, 229>>
-                    }
+                    transaction_index: 0
                   }
                 ],
                 logs: [
@@ -491,7 +482,14 @@ defmodule Explorer.Chain.ImportTest do
         }
       }
 
-      Import.all(params)
+      ctb_chunk_size = Application.get_env(:explorer, :token_balances_import_chunk_size)
+      Application.put_env(:explorer, :token_balances_import_chunk_size, 1)
+
+      on_exit(fn ->
+        Application.put_env(:explorer, :token_balances_import_chunk_size, ctb_chunk_size)
+      end)
+
+      assert {:ok, %{address_current_token_balances: [_, _]}} = Import.all(params)
 
       count =
         CurrentTokenBalance
@@ -502,7 +500,7 @@ defmodule Explorer.Chain.ImportTest do
     end
 
     test "with empty map" do
-      assert {:ok, %{}} == Import.all(%{})
+      assert {:ok, %{set_statement_timeout: :done}} == Import.all(%{})
     end
 
     test "with invalid data" do
@@ -510,7 +508,7 @@ defmodule Explorer.Chain.ImportTest do
         update_in(@import_data, [:internal_transactions, :params, Access.at(0)], &Map.delete(&1, :call_type))
 
       assert {:error, [changeset]} = Import.all(invalid_import_data)
-      assert changeset_errors(changeset)[:call_type] == ["can't be blank"]
+      assert changeset_errors(changeset)[:call_type_enum] == ["can't be blank"]
     end
 
     test "publishes addresses with updated fetched_coin_balance data to subscribers on insert" do
@@ -992,7 +990,7 @@ defmodule Explorer.Chain.ImportTest do
                        type: "create",
                        value: 0,
                        block_number: 37,
-                       transaction_index: 1
+                       transaction_index: 0
                      }
                    ],
                    timeout: 5,
@@ -1637,7 +1635,12 @@ defmodule Explorer.Chain.ImportTest do
                  },
                  blocks: %{
                    params: [
-                     params_for(:block, hash: block_hash, consensus: true, miner_hash: miner_hash, number: block_number),
+                     params_for(:block,
+                       hash: block_hash,
+                       consensus: true,
+                       miner_hash: miner_hash,
+                       number: block_number
+                     ),
                      params_for(:block,
                        hash: uncle_hash,
                        consensus: false,
@@ -1852,7 +1855,7 @@ defmodule Explorer.Chain.ImportTest do
                blocks: %{
                  params: []
                }
-             }) == {:ok, %{}}
+             }) == {:ok, %{set_statement_timeout: :done}}
     end
 
     # https://github.com/poanetwork/blockscout/issues/868 regression test

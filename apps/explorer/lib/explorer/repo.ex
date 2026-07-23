@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo do
   use Ecto.Repo,
     otp_app: :explorer,
@@ -134,6 +135,7 @@ defmodule Explorer.Repo do
         Explorer.Repo.Account,
         Explorer.Repo.BridgedTokens,
         Explorer.Repo.ShrunkInternalTransactions,
+        Explorer.Repo.EventNotifications,
 
         # Chain-type dependent repos
         Explorer.Repo.Arbitrum,
@@ -144,7 +146,6 @@ defmodule Explorer.Repo do
         Explorer.Repo.Mud,
         Explorer.Repo.Optimism,
         Explorer.Repo.PolygonEdge,
-        Explorer.Repo.PolygonZkevm,
         Explorer.Repo.RSK,
         Explorer.Repo.Scroll,
         Explorer.Repo.Shibarium,

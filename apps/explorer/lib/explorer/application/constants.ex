@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Application.Constants do
   @moduledoc """
     Tracks some kv info
@@ -9,6 +10,7 @@ defmodule Explorer.Application.Constants do
 
   @keys_manager_contract_address_key "keys_manager_contract_address"
   @last_processed_erc_721_token "token_instance_sanitizer_last_processed_erc_721_token"
+  @current_backend_version_key "current_backend_version"
 
   @primary_key false
   typed_schema "constants" do
@@ -100,6 +102,31 @@ defmodule Explorer.Application.Constants do
   """
   @spec get_last_processed_token_address_hash(keyword()) :: nil | Explorer.Chain.Hash.t()
   def get_last_processed_token_address_hash(options \\ []) do
-    @last_processed_erc_721_token |> get_constant_by_key(options) |> Chain.string_to_address_hash_or_nil()
+    @last_processed_erc_721_token |> get_constant_value(options) |> Chain.string_to_address_hash_or_nil()
+  end
+
+  @doc """
+  Inserts the current running backend version into constants storage.
+
+  ## Parameters
+  - `version`: Backend version string to persist.
+
+  ## Returns
+  - The inserted or updated `%Explorer.Application.Constants{}` record.
+  """
+  @spec insert_current_backend_version(String.t()) :: Ecto.Schema.t()
+  def insert_current_backend_version(version) do
+    set_constant_value(@current_backend_version_key, version)
+  end
+
+  @doc """
+  Fetches the current running backend version from constants storage.
+
+  ## Returns
+  - Current backend version.
+  """
+  @spec get_current_backend_version() :: nil | String.t()
+  def get_current_backend_version do
+    get_constant_value(@current_backend_version_key)
   end
 end

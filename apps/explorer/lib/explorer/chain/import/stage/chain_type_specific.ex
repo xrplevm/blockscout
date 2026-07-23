@@ -1,7 +1,12 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Stage.ChainTypeSpecific do
   @moduledoc """
   Imports any chain type specific tables.
   """
+
+  use Utils.RuntimeEnvHelper,
+    chain_type: [:explorer, :chain_type],
+    chain_identity: [:explorer, :chain_identity]
 
   alias Explorer.Chain.Import.{Runner, Stage}
 
@@ -19,19 +24,6 @@ defmodule Explorer.Chain.Import.Stage.ChainTypeSpecific do
       Runner.Optimism.WithdrawalEvents,
       Runner.Optimism.EIP1559ConfigUpdates,
       Runner.Optimism.InteropMessages
-    ],
-    polygon_edge: [
-      Runner.PolygonEdge.Deposits,
-      Runner.PolygonEdge.DepositExecutes,
-      Runner.PolygonEdge.Withdrawals,
-      Runner.PolygonEdge.WithdrawalExits
-    ],
-    polygon_zkevm: [
-      Runner.PolygonZkevm.LifecycleTransactions,
-      Runner.PolygonZkevm.TransactionBatches,
-      Runner.PolygonZkevm.BatchTransactions,
-      Runner.PolygonZkevm.BridgeL1Tokens,
-      Runner.PolygonZkevm.BridgeOperations
     ],
     zksync: [
       Runner.ZkSync.LifecycleTransactions,
@@ -61,29 +53,50 @@ defmodule Explorer.Chain.Import.Stage.ChainTypeSpecific do
       Runner.Scroll.BridgeOperations,
       Runner.Scroll.L1FeeParams
     ],
-    celo: [
-      Runner.Celo.ValidatorGroupVotes,
-      Runner.Celo.ElectionRewards,
-      Runner.Celo.EpochRewards
-    ],
     zilliqa: [
       Runner.Zilliqa.AggregateQuorumCertificates,
       Runner.Zilliqa.NestedQuorumCertificates,
-      Runner.Zilliqa.QuorumCertificates
+      Runner.Zilliqa.QuorumCertificates,
+      Runner.Zilliqa.Zrc2.TokenAdapters,
+      Runner.Zilliqa.Zrc2.TokenTransfers
+    ],
+    stability: [
+      Runner.Stability.Validators
+    ]
+  }
+
+  @runners_by_chain_identity %{
+    {:optimism, :celo} => [
+      Runner.Celo.PendingAccountOperations,
+      Runner.Celo.Accounts,
+      Runner.Celo.ValidatorGroupVotes,
+      Runner.Celo.Epochs,
+      Runner.Celo.ElectionRewards,
+      Runner.Celo.EpochRewards,
+      Runner.Celo.AggregatedElectionRewards
     ]
   }
 
   @impl Stage
   def runners do
-    chain_type = Application.get_env(:explorer, :chain_type)
-    Map.get(@runners_by_chain_type, chain_type, [])
+    chain_type_runners = Map.get(@runners_by_chain_type, chain_type(), [])
+    chain_identity_runners = Map.get(@runners_by_chain_identity, chain_identity(), [])
+    chain_type_runners ++ chain_identity_runners
   end
 
   @impl Stage
   def all_runners do
-    @runners_by_chain_type
-    |> Map.values()
-    |> Enum.concat()
+    chain_type_runners =
+      @runners_by_chain_type
+      |> Map.values()
+      |> Enum.concat()
+
+    chain_identity_runners =
+      @runners_by_chain_identity
+      |> Map.values()
+      |> Enum.concat()
+
+    chain_type_runners ++ chain_identity_runners
   end
 
   @impl Stage

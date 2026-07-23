@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Tokens.HolderView do
   use BlockScoutWeb, :view
 
@@ -66,6 +67,10 @@ defmodule BlockScoutWeb.Tokens.HolderView do
     format_according_to_decimals(value, decimals)
   end
 
+  def format_token_balance_value(value, _id, %Token{type: "ZRC-2", decimals: decimals}) do
+    format_according_to_decimals(value, decimals)
+  end
+
   def format_token_balance_value(value, id, %Token{type: "ERC-1155", decimals: decimals}) do
     to_string(format_according_to_decimals(value, decimals)) <> " TokenID " <> to_string(id)
   end
@@ -78,6 +83,10 @@ defmodule BlockScoutWeb.Tokens.HolderView do
     else
       base
     end
+  end
+
+  def format_token_balance_value(_value, _id, %Token{type: "ERC-7984"}) do
+    "*confidential*"
   end
 
   def format_token_balance_value(value, _id, _token) do

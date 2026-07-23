@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.TransactionView do
   use BlockScoutWeb, :view
 
@@ -5,8 +6,8 @@ defmodule BlockScoutWeb.TransactionView do
   alias BlockScoutWeb.Account.AuthController
   alias BlockScoutWeb.Cldr.Number
   alias Explorer.{Chain, CustomContractsHelper, Repo}
-  alias Explorer.Chain.Block.Reward
   alias Explorer.Chain.{Address, Block, InternalTransaction, Transaction, Wei}
+  alias Explorer.Chain.Block.Reward
   alias Explorer.Chain.Cache.Counters.AverageBlockTime
   alias Explorer.Market.Token
   alias Timex.Duration
@@ -62,10 +63,6 @@ defmodule BlockScoutWeb.TransactionView do
 
     type = Chain.transaction_token_transfer_type(transaction)
     if type, do: {type, transaction_with_transfers_filtered}, else: {nil, transaction_with_transfers_filtered}
-  end
-
-  def transaction_actions(transaction) do
-    Repo.preload(transaction, :transaction_actions)
   end
 
   def aggregate_token_transfers(token_transfers) do
@@ -224,6 +221,8 @@ defmodule BlockScoutWeb.TransactionView do
       :erc721 -> gettext("ERC-721 ")
       :erc1155 -> gettext("ERC-1155 ")
       :erc404 -> gettext("ERC-404 ")
+      :zrc2 -> gettext("ZRC-2 ")
+      :erc7984 -> gettext("ERC-7984 ")
       _ -> ""
     end
   end

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Utility.MissingBalanceOfToken do
   @moduledoc """
   Module is responsible for keeping address hashes of tokens that does not support the balanceOf function
@@ -55,6 +56,25 @@ defmodule Explorer.Utility.MissingBalanceOfToken do
   end
 
   @doc """
+  Filters provided token balances query by presence of record with the same `token_contract_address_hash`
+  and above or equal `block_number` in `missing_balance_of_tokens`.
+  """
+  @spec filter_token_balances_query(Ecto.Query.t()) :: Ecto.Query.t()
+  def filter_token_balances_query(query) do
+    query
+    |> join(:left, [tb], mbot in __MODULE__,
+      on: tb.token_contract_address_hash == mbot.token_contract_address_hash,
+      as: :mbot
+    )
+    |> where(
+      [tb],
+      is_nil(as(:mbot).token_contract_address_hash) or
+        (as(:mbot).currently_implemented == true and tb.block_number > as(:mbot).block_number) or
+        tb.block_number > as(:mbot).block_number + ^missing_balance_of_window()
+    )
+  end
+
+  @doc """
   Filters provided token balances params by presence of record with the same `token_contract_address_hash`
   and above or equal `block_number` in `missing_balance_of_tokens`.
   """
@@ -89,7 +109,7 @@ defmodule Explorer.Utility.MissingBalanceOfToken do
 
     params =
       token_balance_params
-      |> Enum.reject(&(&1.token_type == "ERC-404"))
+      |> Enum.reject(&(&1.token_type in ["ERC-404", "ERC-7984"]))
       |> Enum.group_by(& &1.token_contract_address_hash, & &1.block_number)
       |> Enum.map(fn {token_contract_address_hash, block_numbers} ->
         {:ok, token_contract_address_hash_casted} = Hash.Address.cast(token_contract_address_hash)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Blocks do
   @moduledoc """
   Blocks format as returned by [`eth_getBlockByHash`](https://github.com/ethereum/wiki/wiki/JSON-RPC/e8e0771b9f3677693649d945956bc60e886ceb2b#eth_getblockbyhash)
@@ -550,5 +551,39 @@ defmodule EthereumJSONRPC.Blocks do
   @spec to_elixir([Block.t()]) :: elixir
   def to_elixir(blocks) when is_list(blocks) do
     Enum.map(blocks, &Block.to_elixir/1)
+  end
+
+  @doc """
+  Filters out all data related to provided block numbers
+  """
+  @spec reject_data_by_block_numbers(t(), [non_neg_integer()]) :: t()
+  def reject_data_by_block_numbers(blocks_data, []), do: blocks_data
+
+  def reject_data_by_block_numbers(%{blocks_params: blocks_params} = blocks_data, block_numbers) do
+    {filtered_blocks_params_reversed, block_hashes} =
+      Enum.reduce(blocks_params, {[], []}, fn block_params, {params_acc, hashes_acc} ->
+        if block_params.number in block_numbers do
+          {params_acc, [block_params.hash | hashes_acc]}
+        else
+          {[block_params | params_acc], hashes_acc}
+        end
+      end)
+
+    filtered_blocks_params = Enum.reverse(filtered_blocks_params_reversed)
+
+    keep? = fn
+      %{block_number: block_number} -> block_number not in block_numbers
+      %{block_hash: block_hash} -> block_hash not in block_hashes
+      _ -> true
+    end
+
+    filtered_data =
+      blocks_data
+      |> Map.from_struct()
+      |> Map.drop([:errors, :blocks_params])
+      |> Map.new(fn {data_type, data_list} -> {data_type, Enum.filter(data_list, keep?)} end)
+      |> Map.put(:blocks_params, filtered_blocks_params)
+
+    Map.merge(blocks_data, filtered_data)
   end
 end

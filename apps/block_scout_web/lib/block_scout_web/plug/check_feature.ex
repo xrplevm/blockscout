@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Plug.CheckFeature do
   @moduledoc """
   A configurable plug that conditionally allows access to an endpoint based on
@@ -42,7 +43,7 @@ defmodule BlockScoutWeb.Plug.CheckFeature do
   @doc false
   @spec init(Keyword.t()) :: Keyword.t()
   def init(opts) do
-    unless Keyword.has_key?(opts, :feature_check) do
+    if !Keyword.has_key?(opts, :feature_check) do
       raise ArgumentError, "CheckFeature plug requires :feature_check option"
     end
 

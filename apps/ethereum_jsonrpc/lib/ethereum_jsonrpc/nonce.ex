@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Nonce do
   @moduledoc """
   A single code fetched from `eth_getTransactionCount`.
@@ -7,6 +8,7 @@ defmodule EthereumJSONRPC.Nonce do
   alias EthereumJSONRPC.FetchedCode
 
   @type params :: %{address: EthereumJSONRPC.address(), block_number: non_neg_integer(), nonce: non_neg_integer()}
+  @type error :: FetchedCode.error()
 
   @doc """
     Converts a JSON-RPC response of `eth_getTransactionCount` to code params or an annotated error.
@@ -53,7 +55,7 @@ defmodule EthereumJSONRPC.Nonce do
 
   @spec from_response(%{id: EthereumJSONRPC.request_id(), error: %{code: integer(), message: String.t()}}, %{
           non_neg_integer() => %{block_quantity: String.t(), address: String.t()}
-        }) :: {:error, FetchedCode.error()}
+        }) :: {:error, error()}
   def from_response(%{id: _id, error: %{code: code, message: message}} = response, id_to_params)
       when is_integer(code) and is_binary(message) and is_map(id_to_params) do
     FetchedCode.from_response(response, id_to_params)

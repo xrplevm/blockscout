@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Addresses do
   @moduledoc """
   Extract Addresses from data fetched from the Blockchain and structured as Blocks, InternalTransactions,
@@ -48,8 +49,6 @@ defmodule Indexer.Transform.Addresses do
       }
   """
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
-
-  alias Indexer.Helper
 
   @entity_to_address_map %{
     address_coin_balances: [
@@ -137,6 +136,28 @@ defmodule Indexer.Transform.Addresses do
         %{from: :token_contract_address_hash, to: :hash}
       ]
     ],
+    zilliqa_zrc2_token_transfers: [
+      [
+        %{from: :block_number, to: :fetched_coin_balance_block_number},
+        %{from: :from_address_hash, to: :hash}
+      ],
+      [
+        %{from: :block_number, to: :fetched_coin_balance_block_number},
+        %{from: :to_address_hash, to: :hash}
+      ],
+      [
+        %{from: :block_number, to: :fetched_coin_balance_block_number},
+        %{from: :zrc2_address_hash, to: :hash}
+      ]
+    ],
+    zilliqa_zrc2_token_adapters: [
+      [
+        %{from: :zrc2_address_hash, to: :hash}
+      ],
+      [
+        %{from: :adapter_address_hash, to: :hash}
+      ]
+    ],
     mint_transfers: [
       [
         %{from: :block_number, to: :fetched_coin_balance_block_number},
@@ -159,11 +180,6 @@ defmodule Indexer.Transform.Addresses do
         %{from: :address_hash, to: :hash}
       ]
     ],
-    polygon_zkevm_bridge_operations: [
-      [
-        %{from: :l2_token_address, to: :hash}
-      ]
-    ],
     celo_election_rewards: [
       [
         %{from: :account_address_hash, to: :hash}
@@ -175,6 +191,26 @@ defmodule Indexer.Transform.Addresses do
       ],
       [
         %{from: :group_address_hash, to: :hash}
+      ]
+    ],
+    celo_accounts: [
+      [
+        %{from: :address_hash, to: :hash}
+      ],
+      [
+        %{from: :vote_signer_address_hash, to: :hash}
+      ],
+      [
+        %{from: :validator_signer_address_hash, to: :hash}
+      ],
+      [
+        %{from: :attestation_signer_address_hash, to: :hash}
+      ]
+    ],
+    celo_pending_account_operations: [
+      [
+        %{from: :block_number, to: :fetched_coin_balance_block_number},
+        %{from: :address_hash, to: :hash}
       ]
     ]
   }
@@ -460,9 +496,18 @@ defmodule Indexer.Transform.Addresses do
               required(:block_number) => non_neg_integer()
             }
           ],
-          optional(:transaction_actions) => [
+          optional(:zilliqa_zrc2_token_transfers) => [
             %{
-              required(:data) => map()
+              required(:from_address_hash) => String.t(),
+              required(:to_address_hash) => String.t(),
+              required(:zrc2_address_hash) => String.t(),
+              required(:block_number) => non_neg_integer()
+            }
+          ],
+          optional(:zilliqa_zrc2_token_adapters) => [
+            %{
+              required(:zrc2_address_hash) => String.t(),
+              required(:adapter_address_hash) => String.t()
             }
           ],
           optional(:mint_transfers) => [
@@ -484,11 +529,6 @@ defmodule Indexer.Transform.Addresses do
               required(:block_number) => non_neg_integer()
             }
           ],
-          optional(:polygon_zkevm_bridge_operations) => [
-            %{
-              optional(:l2_token_address) => String.t()
-            }
-          ],
           optional(:celo_election_rewards) => [
             %{
               required(:account_address_hash) => String.t()
@@ -498,6 +538,19 @@ defmodule Indexer.Transform.Addresses do
             %{
               required(:account_address_hash) => String.t(),
               required(:group_address_hash) => String.t()
+            }
+          ],
+          optional(:celo_accounts) => [
+            %{
+              optional(:address_hash) => String.t() | nil,
+              optional(:vote_signer_address_hash) => String.t() | nil,
+              optional(:validator_signer_address_hash) => String.t() | nil,
+              optional(:attestation_signer_address_hash) => String.t() | nil
+            }
+          ],
+          optional(:celo_pending_account_operations) => [
+            %{
+              required(:address_hash) => String.t()
             }
           ]
         }) :: [params]
@@ -509,18 +562,7 @@ defmodule Indexer.Transform.Addresses do
           (entity_items = Map.get(fetched_data, entity_key)) != nil,
           do: extract_addresses_from_collection(entity_items, entity_fields, state)
 
-    transaction_actions_addresses =
-      fetched_data
-      |> Map.get(:transaction_actions, [])
-      |> Enum.map(fn transaction_action ->
-        transaction_action.data
-        |> Map.get(:block_number)
-        |> find_transaction_action_addresses(transaction_action.data)
-      end)
-      |> List.flatten()
-
     addresses
-    |> Enum.concat(transaction_actions_addresses)
     |> List.flatten()
     |> merge_addresses()
   end
@@ -529,25 +571,6 @@ defmodule Indexer.Transform.Addresses do
     do: Enum.flat_map(items, &extract_addresses_from_item(&1, fields, state))
 
   def extract_addresses_from_item(item, fields, state), do: Enum.flat_map(fields, &extract_fields(&1, item, state))
-
-  defp find_transaction_action_addresses(block_number, data, accumulator \\ [])
-
-  defp find_transaction_action_addresses(block_number, data, accumulator) when is_map(data) or is_list(data) do
-    Enum.reduce(data, accumulator, fn
-      {_, value}, acc -> find_transaction_action_addresses(block_number, value, acc)
-      value, acc -> find_transaction_action_addresses(block_number, value, acc)
-    end)
-  end
-
-  defp find_transaction_action_addresses(block_number, value, accumulator) when is_binary(value) do
-    if Helper.address_correct?(value) do
-      [%{:fetched_coin_balance_block_number => block_number, :hash => value} | accumulator]
-    else
-      accumulator
-    end
-  end
-
-  defp find_transaction_action_addresses(_block_number, _value, accumulator), do: accumulator
 
   def merge_addresses(addresses) when is_list(addresses) do
     addresses

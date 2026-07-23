@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.SmartContractTest do
   use Explorer.DataCase, async: false
 
@@ -33,8 +34,6 @@ defmodule Explorer.Chain.SmartContractTest do
         created_contract_address: created_contract_address,
         created_contract_code: smart_contract_bytecode,
         block_number: transaction.block_number,
-        block_hash: transaction.block_hash,
-        block_index: 0,
         transaction_index: transaction.index
       )
 
@@ -135,8 +134,6 @@ defmodule Explorer.Chain.SmartContractTest do
         created_contract_address: created_contract_address,
         created_contract_code: smart_contract_bytecode,
         block_number: transaction.block_number,
-        block_hash: transaction.block_hash,
-        block_index: 0,
         transaction_index: transaction.index
       )
 

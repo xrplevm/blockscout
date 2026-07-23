@@ -5,21 +5,26 @@ on:
     inputs:
       number:
         type: number
+        description: Number of pre-release alpha iteration
         required: true
 
+permissions:
+  contents: read
+  packages: write
+
 env:
-  OTP_VERSION: ${{ vars.OTP_VERSION }}
-  ELIXIR_VERSION: ${{ vars.ELIXIR_VERSION }}
+  OTP_VERSION: '27.3.4.6'
+  ELIXIR_VERSION: '1.19.4'
 
 jobs:
   push_to_registry:
     name: Push Docker image to GitHub Container Registry
-    runs-on: ubuntu-latest
+    runs-on: build
     env:
-      RELEASE_VERSION: 8.0.2
+      RELEASE_VERSION: 11.2.2
       API_GRAPHQL_MAX_COMPLEXITY: 10400
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup repo
         uses: ./.github/actions/setup-repo
         id: setup
@@ -35,7 +40,7 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           push: true
-          tags: ghcr.io/blockscout/blockscout-celo:${{ env.RELEASE_VERSION }}-alpha.${{ inputs.number }}
+          tags: ghcr.io/blockscout/blockscout-celo-private:${{ env.RELEASE_VERSION }}-alpha.${{ inputs.number }}
           labels: ${{ steps.setup.outputs.docker-labels }}
           platforms: |
             linux/amd64
@@ -43,7 +48,7 @@ jobs:
           build-args: |
             BLOCKSCOUT_VERSION=v${{ env.RELEASE_VERSION }}-alpha.${{ inputs.number }}
             RELEASE_VERSION=${{ env.RELEASE_VERSION }}
-            CHAIN_TYPE=celo
+            CHAIN_TYPE=optimism-celo
 
       - name: Build and push Docker image for CELO (indexer)
         uses: docker/build-push-action@v6
@@ -51,7 +56,7 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           push: true
-          tags: ghcr.io/blockscout/blockscout-celo:${{ env.RELEASE_VERSION }}-alpha.${{ inputs.number }}-indexer
+          tags: ghcr.io/blockscout/blockscout-celo-private:${{ env.RELEASE_VERSION }}-alpha.${{ inputs.number }}-indexer
           labels: ${{ steps.setup.outputs.docker-labels }}
           platforms: |
             linux/amd64
@@ -60,4 +65,4 @@ jobs:
             DISABLE_API=true
             BLOCKSCOUT_VERSION=v${{ env.RELEASE_VERSION }}-alpha.${{ inputs.number }}
             RELEASE_VERSION=${{ env.RELEASE_VERSION }}
-            CHAIN_TYPE=celo
+            CHAIN_TYPE=optimism-celo

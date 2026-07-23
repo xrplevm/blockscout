@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Fetcher.CoinTest do
   use Explorer.DataCase
 
@@ -7,7 +8,6 @@ defmodule Explorer.Market.Fetcher.CoinTest do
   alias Explorer.Market.Token
   alias Explorer.Market.Fetcher.Coin
   alias Explorer.Market.Source.TestSource
-  alias Plug.Conn
 
   @moduletag :capture_log
 
@@ -78,7 +78,8 @@ defmodule Explorer.Market.Fetcher.CoinTest do
         symbol: "test_symbol",
         fiat_value: Decimal.new("1.0"),
         volume_24h: Decimal.new("1000.0"),
-        image_url: nil
+        image_url: nil,
+        circulating_supply: nil
       }
 
       assert {:noreply, ^state} = Coin.handle_info({nil, {{:ok, expected_token}, false}}, state)

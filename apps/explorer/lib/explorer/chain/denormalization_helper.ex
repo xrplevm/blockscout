@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.DenormalizationHelper do
   @moduledoc """
   Helper functions for dynamic logic based on denormalization migration completeness
@@ -11,20 +12,6 @@ defmodule Explorer.Chain.DenormalizationHelper do
       opts
     else
       Keyword.update(opts, :necessity_by_association, %{:block => necessity}, &Map.put(&1, :block, necessity))
-    end
-  end
-
-  @spec extend_transaction_block_necessity(keyword(), :optional | :required) :: keyword()
-  def extend_transaction_block_necessity(opts, necessity \\ :optional) do
-    if transactions_denormalization_finished?() do
-      opts
-    else
-      Keyword.update(
-        opts,
-        :necessity_by_association,
-        %{[transaction: :block] => necessity},
-        &(&1 |> Map.delete(:transaction) |> Map.put([transaction: :block], necessity))
-      )
     end
   end
 

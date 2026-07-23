@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 import Config
 
 # For production, we often load configuration from external
@@ -20,18 +21,15 @@ config :block_scout_web, BlockScoutWeb.Endpoint,
 config :block_scout_web, BlockScoutWeb.Tracer, env: "production", disabled?: true
 
 config :logger, :block_scout_web,
-  level: :info,
   path: Path.absname("logs/prod/block_scout_web.log"),
   rotate: %{max_bytes: 52_428_800, keep: 19}
 
 config :logger, :api,
-  level: :debug,
   path: Path.absname("logs/prod/api.log"),
   metadata_filter: [application: :api],
   rotate: %{max_bytes: 52_428_800, keep: 19}
 
 config :logger, :api_v2,
-  level: :debug,
   path: Path.absname("logs/prod/api_v2.log"),
   metadata_filter: [application: :api_v2],
   rotate: %{max_bytes: 52_428_800, keep: 19}

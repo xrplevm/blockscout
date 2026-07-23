@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
   @moduledoc """
   A module to monitor and catch L1 reorgs and make queue of the reorg blocks
@@ -14,8 +15,8 @@ defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
   require Logger
 
   alias Explorer.Chain.Cache.LatestL1BlockNumber
-  alias Explorer.Chain.RollupReorgMonitorQueue
   alias Indexer.Helper
+  alias Indexer.RollupReorgMonitorQueue
 
   @fetcher_name :rollup_l1_reorg_monitor
   @start_recheck_period_seconds 3
@@ -30,17 +31,6 @@ defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
           Indexer.Fetcher.Optimism.OutputRoot,
           Indexer.Fetcher.Optimism.TransactionBatch,
           Indexer.Fetcher.Optimism.WithdrawalEvent
-        ]
-
-      :polygon_edge ->
-        [
-          Indexer.Fetcher.PolygonEdge.Deposit,
-          Indexer.Fetcher.PolygonEdge.WithdrawalExit
-        ]
-
-      :polygon_zkevm ->
-        [
-          Indexer.Fetcher.PolygonZkevm.BridgeL1
         ]
 
       :scroll ->
@@ -106,6 +96,9 @@ defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
   def handle_continue(:ok, _state) do
     Logger.metadata(fetcher: @fetcher_name)
 
+    # two seconds pause needed to avoid exceeding Supervisor restart intensity when RPC issues
+    :timer.sleep(2000)
+
     modules_using_reorg_monitor =
       modules_can_use_reorg_monitor()
       |> Enum.filter(& &1.requires_l1_reorg_monitor?())
@@ -166,7 +159,7 @@ defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
 
     if latest < prev_latest do
       Logger.warning("Reorg detected: previous latest block ##{prev_latest}, current latest block ##{latest}.")
-      Enum.each(modules, &RollupReorgMonitorQueue.reorg_block_push(latest, &1))
+      Enum.each(modules, &RollupReorgMonitorQueue.push(latest, &1))
     end
 
     Process.send_after(self(), :reorg_monitor, block_check_interval)

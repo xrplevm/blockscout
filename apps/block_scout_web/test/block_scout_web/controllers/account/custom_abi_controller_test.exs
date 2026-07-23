@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Account.CustomABIControllerTest do
   use BlockScoutWeb.ConnCase
 
@@ -8,6 +9,12 @@ defmodule BlockScoutWeb.Account.CustomABIControllerTest do
 
   setup %{conn: conn} do
     auth = build(:auth)
+
+    on_exit(fn ->
+      Application.put_env(:tesla, :adapter, Explorer.Mock.TeslaAdapter)
+    end)
+
+    Application.put_env(:tesla, :adapter, Tesla.Adapter.Mint)
 
     {:ok, user} = Identity.find_or_create(auth)
 
@@ -165,7 +172,8 @@ defmodule BlockScoutWeb.Account.CustomABIControllerTest do
           "[{\"type\":\"function\",\"outputs\":[{\"type\":\"string\",\"name\":\"\"}],\"name\":\"name\",\"inputs\":[],\"constant\":true},{\"type\":\"function\",\"outputs\":[{\"type\":\"bool\",\"name\":\"success\"}],\"name\":\"approve\",\"inputs\":[{\"type\":\"address\",\"name\":\"_spender\"},{\"type\":\"uint256\",\"name\":\"_value\"}],\"constant\":false}]"
       }
 
-      TestHelper.get_all_proxies_implementation_zero_addresses()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       result_conn =
         conn

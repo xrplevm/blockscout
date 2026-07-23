@@ -61,6 +61,7 @@ dump.rdb
 .cursorignore
 .cursorrules
 .elixir_ls
+.claude/settings.local.json
 
 **.dec**
 
@@ -75,3 +76,5 @@ tasks_in_progress
 /dets
 
 /temp
+
+openapi.yaml

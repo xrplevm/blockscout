@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Address.Name do
   @moduledoc """
   Represents a name for an Address.
@@ -20,11 +21,17 @@ defmodule Explorer.Chain.Address.Name do
   """
   @primary_key false
   typed_schema "address_names" do
-    field(:id, :integer, autogenerate: false, primary_key: true, null: false)
-    field(:name, :string, null: false)
+    field(:name, :string, null: false, primary_key: true)
     field(:primary, :boolean)
     field(:metadata, :map)
-    belongs_to(:address, Address, foreign_key: :address_hash, references: :hash, type: Hash.Address, null: false)
+
+    belongs_to(:address, Address,
+      foreign_key: :address_hash,
+      references: :hash,
+      type: Hash.Address,
+      null: false,
+      primary_key: true
+    )
 
     timestamps()
   end

@@ -1,9 +1,91 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.TokenTransferControllerTest do
   use BlockScoutWeb.ConnCase
 
   alias Explorer.Chain.{Address, TokenTransfer}
 
   describe "/token-transfers" do
+    test "get token-transfers with ok reputation", %{conn: conn} do
+      init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
+      Application.put_env(:block_scout_web, :hide_scam_addresses, true)
+      on_exit(fn -> Application.put_env(:block_scout_web, :hide_scam_addresses, init_value) end)
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      insert(:token_transfer, transaction: transaction)
+
+      request = conn |> put_req_cookie("show_scam_tokens", "true") |> get("/api/v2/token-transfers")
+      response = json_response(request, 200)
+
+      assert List.first(response["items"])["token"]["reputation"] == "ok"
+
+      assert response == conn |> get("/api/v2/token-transfers") |> json_response(200)
+    end
+
+    test "get smart-contract with scam reputation", %{conn: conn} do
+      init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
+      Application.put_env(:block_scout_web, :hide_scam_addresses, true)
+      on_exit(fn -> Application.put_env(:block_scout_web, :hide_scam_addresses, init_value) end)
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      tt = insert(:token_transfer, transaction: transaction)
+      insert(:scam_badge_to_address, address_hash: tt.token_contract_address_hash)
+
+      request = conn |> put_req_cookie("show_scam_tokens", "true") |> get("/api/v2/token-transfers")
+      response = json_response(request, 200)
+
+      assert List.first(response["items"])["token"]["reputation"] == "scam"
+
+      request = conn |> get("/api/v2/token-transfers")
+      response = json_response(request, 200)
+
+      assert response["items"] == []
+    end
+
+    test "get token-transfers with ok reputation with hide_scam_addresses=false", %{conn: conn} do
+      init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
+      Application.put_env(:block_scout_web, :hide_scam_addresses, false)
+      on_exit(fn -> Application.put_env(:block_scout_web, :hide_scam_addresses, init_value) end)
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      insert(:token_transfer, transaction: transaction)
+
+      request = conn |> get("/api/v2/token-transfers")
+      response = json_response(request, 200)
+
+      assert List.first(response["items"])["token"]["reputation"] == "ok"
+    end
+
+    test "get token-transfers with scam reputation with hide_scam_addresses=false", %{conn: conn} do
+      init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
+      Application.put_env(:block_scout_web, :hide_scam_addresses, false)
+      on_exit(fn -> Application.put_env(:block_scout_web, :hide_scam_addresses, init_value) end)
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      tt = insert(:token_transfer, transaction: transaction)
+      insert(:scam_badge_to_address, address_hash: tt.token_contract_address_hash)
+
+      request = conn |> get("/api/v2/token-transfers")
+      response = json_response(request, 200)
+
+      assert List.first(response["items"])["token"]["reputation"] == "ok"
+    end
+
     test "empty list", %{conn: conn} do
       request = get(conn, "/api/v2/token-transfers")
 
@@ -46,6 +128,39 @@ defmodule BlockScoutWeb.API.V2.TokenTransferControllerTest do
       assert response = json_response(request, 200)
       assert Enum.count(response["items"]) == 0
       assert response["next_page_params"] == nil
+    end
+
+    test "filters by ERC-7984 type", %{conn: conn} do
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      erc7984_token = insert(:token, type: "ERC-7984")
+
+      insert(:token_transfer,
+        transaction: transaction,
+        token: erc7984_token,
+        token_contract_address: erc7984_token.contract_address,
+        token_type: "ERC-7984",
+        amount: nil
+      )
+
+      erc20_token = insert(:token, type: "ERC-20")
+
+      insert(:token_transfer,
+        transaction: transaction,
+        token: erc20_token,
+        token_contract_address: erc20_token.contract_address,
+        token_type: "ERC-20"
+      )
+
+      request = get(conn, "/api/v2/token-transfers?type=ERC-7984")
+
+      assert response = json_response(request, 200)
+      assert Enum.count(response["items"]) == 1
+      assert response["next_page_params"] == nil
+      assert List.first(response["items"])["token_type"] == "ERC-7984"
     end
 
     test "returns all transfers if filter is incorrect", %{conn: conn} do

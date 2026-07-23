@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Account.API.V2.EmailController do
   use BlockScoutWeb, :controller
   use Utils.CompileTimeEnvHelper, invalid_session_key: [:block_scout_web, :invalid_session_key]
@@ -6,8 +7,8 @@ defmodule BlockScoutWeb.Account.API.V2.EmailController do
 
   alias BlockScoutWeb.AccessHelper
   alias BlockScoutWeb.Account.API.V2.AuthenticateController
-  alias Explorer.Account.Identity
-  alias Explorer.{Helper, Repo}
+  alias Explorer.Account.{Authentication, Identity}
+  alias Explorer.{Helper, HttpClient, Repo}
   alias Explorer.ThirdPartyIntegrations.Auth0
 
   require Logger
@@ -17,7 +18,8 @@ defmodule BlockScoutWeb.Account.API.V2.EmailController do
   plug(:fetch_cookies, signed: [@invalid_session_key])
 
   def resend_email(conn, _params) do
-    with user <- conn.cookies[@invalid_session_key],
+    with {:enabled, true} <- {:enabled, Auth0.enabled?()},
+         user <- conn.cookies[@invalid_session_key],
          {:auth, false} <- {:auth, is_nil(user)},
          {:email_verified, false} <- {:email_verified, user[:email_verified]},
          {:identity, %Identity{} = identity} <- {:identity, Identity.find_identity(user[:id])},
@@ -36,8 +38,8 @@ defmodule BlockScoutWeb.Account.API.V2.EmailController do
         "user_id" => user.uid
       }
 
-      case HTTPoison.post(url, Jason.encode!(body), headers, []) do
-        {:ok, %HTTPoison.Response{body: _body, status_code: 201}} ->
+      case HttpClient.post(url, Jason.encode!(body), headers) do
+        {:ok, %{body: _body, status_code: 201}} ->
           identity
           |> Identity.changeset(%{verification_email_sent_at: DateTime.utc_now()})
           |> Repo.account_repo().update()
@@ -97,7 +99,7 @@ defmodule BlockScoutWeb.Account.API.V2.EmailController do
           | Plug.Conn.t()
   def link_email(conn, %{"email" => email, "otp" => otp}) do
     with {:auth, %{} = user} <- {:auth, current_user(conn)},
-         {:ok, auth} <- Auth0.link_email(user, email, otp, AccessHelper.conn_to_ip_string(conn)) do
+         {:ok, auth} <- Authentication.link_email(user, email, otp, AccessHelper.conn_to_ip_string(conn)) do
       AuthenticateController.put_auth_to_session(conn, auth)
     end
   end

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.Helper do
   @moduledoc """
   SmartContract helper functions
@@ -9,7 +10,6 @@ defmodule Explorer.SmartContract.Helper do
   alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
   alias Explorer.Helper, as: ExplorerHelper
   alias Explorer.SmartContract.{Reader, Writer}
-  alias Phoenix.HTML
 
   @api_true [api?: true]
 
@@ -67,7 +67,11 @@ defmodule Explorer.SmartContract.Helper do
 
   def add_contract_code_md5(attrs), do: attrs
 
-  def contract_code_md5(bytes) do
+  @doc """
+  Calculates MD5 hash of given binary.
+  """
+  @spec md5(binary()) :: String.t()
+  def md5(bytes) do
     :md5
     |> :crypto.hash(bytes)
     |> Base.encode16(case: :lower)
@@ -75,7 +79,7 @@ defmodule Explorer.SmartContract.Helper do
 
   defp attrs_extend_with_contract_code_md5(attrs, address) do
     if address.contract_code do
-      contract_code_md5 = contract_code_md5(address.contract_code.bytes)
+      contract_code_md5 = md5(address.contract_code.bytes)
 
       attrs
       |> Map.put_new(:contract_code_md5, contract_code_md5)
@@ -84,14 +88,17 @@ defmodule Explorer.SmartContract.Helper do
     end
   end
 
-  def sanitize_input(nil), do: nil
-
-  def sanitize_input(input) do
+  @doc """
+  Escapes only < and > symbols
+  """
+  @spec escape_minimal(any()) :: any()
+  def escape_minimal(input) when is_binary(input) do
     input
-    |> HTML.html_escape()
-    |> HTML.safe_to_string()
-    |> String.trim()
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
   end
+
+  def escape_minimal(other), do: other
 
   def sol_file?(filename) do
     case List.last(String.split(String.downcase(filename), ".")) do
@@ -184,8 +191,8 @@ defmodule Explorer.SmartContract.Helper do
     Metadata will be sent to a verifier microservice
   """
   @spec fetch_data_for_verification(binary() | Hash.t()) :: {binary() | nil, binary(), map()}
-  def fetch_data_for_verification(address_hash) do
-    deployed_bytecode = Chain.smart_contract_bytecode(address_hash)
+  def fetch_data_for_verification(address_hash, deployed_bytecode \\ nil) do
+    deployed_bytecode = deployed_bytecode || Chain.smart_contract_bytecode(address_hash)
 
     metadata = %{
       "contractAddress" => to_string(address_hash),
@@ -223,7 +230,7 @@ defmodule Explorer.SmartContract.Helper do
   defp internal_transaction_to_metadata(internal_transaction, init) do
     %{
       "blockNumber" => to_string(internal_transaction.block_number),
-      "transactionHash" => to_string(internal_transaction.transaction_hash),
+      "transactionHash" => to_string(internal_transaction.transaction.hash),
       "transactionIndex" => to_string(internal_transaction.transaction_index),
       "deployer" => to_string(internal_transaction.from_address_hash),
       "creationCode" => to_string(init)
@@ -239,6 +246,23 @@ defmodule Explorer.SmartContract.Helper do
 
   def prepare_license_type(binary) when is_binary(binary), do: Helper.parse_integer(binary) || binary
   def prepare_license_type(_), do: nil
+
+  @doc """
+  Parses contract language for the Solidity verification flow.
+
+  Accepts `"language"` or `:language` set to `"yul"` or `:yul` and returns
+  `:yul`. For all other values, defaults to `:solidity`.
+  """
+  @spec parse_solidity_verification_language(map()) :: :solidity | :yul
+  def parse_solidity_verification_language(params) do
+    language = params["language"] || params[:language]
+
+    if language in ["yul", :yul] do
+      :yul
+    else
+      :solidity
+    end
+  end
 
   @doc """
   Pre-fetches implementation for unverified smart-contract or verified proxy smart-contract
@@ -309,6 +333,7 @@ defmodule Explorer.SmartContract.Helper do
           nil
       end
 
+    # todo: Dangerous, fix with https://github.com/blockscout/blockscout/issues/12544
     ExplorerHelper.add_0x_prefix(binary_hash)
   end
 end

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.WatchlistNotification do
   @moduledoc """
     Stored notification about event
@@ -10,8 +11,8 @@ defmodule Explorer.Account.WatchlistNotification do
   import Explorer.Chain, only: [hash_to_lower_case_string: 1]
 
   alias Ecto.Multi
-  alias Explorer.Repo
   alias Explorer.Account.{Watchlist, WatchlistAddress}
+  alias Explorer.Repo
 
   typed_schema "account_watchlist_notifications" do
     field(:amount, :decimal, null: false)

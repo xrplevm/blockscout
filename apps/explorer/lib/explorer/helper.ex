@@ -1,14 +1,18 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Helper do
   @moduledoc """
   Auxiliary common functions.
   """
 
+  import Ecto.Query
+  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
+
   alias ABI.TypeDecoder
   alias Explorer.Chain
-  alias Explorer.Chain.{Data, Hash}
+  alias Explorer.Chain.{Address.Reputation, Address.ScamBadgeToAddress, Data, Hash, Wei}
+  alias Redix.URI, as: RedixURI
 
-  import Ecto.Query, only: [where: 3]
-  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
+  require Logger
 
   @max_safe_integer round(:math.pow(2, 63)) - 1
 
@@ -39,7 +43,7 @@ defmodule Explorer.Helper do
   address.
 
   ## Parameters
-  - `address_hash` (`EthereumJSONRPC.hash()` | `nil`): The full address hash to
+  - `address_hash` (`EthereumJSONRPC.hash()` | `Hash.t()` | `nil`): The full address hash to
     be truncated, or `nil`.
 
   ## Returns
@@ -51,11 +55,20 @@ defmodule Explorer.Helper do
       iex> truncate_address_hash("0x000000000000000000000000abcdef1234567890abcdef1234567890abcdef")
       "0xabcdef1234567890abcdef1234567890abcdef"
 
+      iex> truncate_address_hash(%Explorer.Chain.Hash{byte_count: 32, bytes: <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 66, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7>>})
+      "0x4200000000000000000000000000000000000007"
+
       iex> truncate_address_hash(nil)
       "0x0000000000000000000000000000000000000000"
   """
-  @spec truncate_address_hash(EthereumJSONRPC.hash() | nil) :: EthereumJSONRPC.address()
+  @spec truncate_address_hash(EthereumJSONRPC.hash() | Hash.t() | nil) :: EthereumJSONRPC.address()
   def truncate_address_hash(address_hash)
+
+  def truncate_address_hash(%Hash{} = address_hash) do
+    address_hash
+    |> Hash.to_string()
+    |> truncate_address_hash()
+  end
 
   def truncate_address_hash(nil), do: burn_address_hash_string()
 
@@ -133,11 +146,13 @@ defmodule Explorer.Helper do
         iex> safe_parse_non_negative_integer("27606393966689717254124294199939478533331961967491413693980084341759630764504")
         {:error, :too_big_integer}
   """
-  def safe_parse_non_negative_integer(string) do
+  @spec safe_parse_non_negative_integer(String.t(), integer()) ::
+          {:ok, integer()} | {:error, :negative_integer | :too_big_integer | :invalid_integer}
+  def safe_parse_non_negative_integer(string, max_safe_integer \\ @max_safe_integer) do
     case Integer.parse(string) do
       {num, ""} ->
         case num do
-          _ when num > @max_safe_integer -> {:error, :too_big_integer}
+          _ when num > max_safe_integer -> {:error, :too_big_integer}
           _ when num < 0 -> {:error, :negative_integer}
           _ -> {:ok, num}
         end
@@ -154,12 +169,21 @@ defmodule Explorer.Helper do
     Results will be placed to `preload_field`
   """
   @spec custom_preload(list(map()), keyword(), atom(), atom(), atom(), atom()) :: list()
-  def custom_preload(list, options, struct, foreign_key_field, references_field, preload_field) do
+  def custom_preload(
+        list,
+        options,
+        struct,
+        foreign_key_field,
+        references_field,
+        preload_field,
+        preload_field_association \\ []
+      ) do
     to_fetch_from_db = list |> Enum.map(& &1[foreign_key_field]) |> Enum.uniq()
 
     associated_elements =
       struct
       |> where([t], field(t, ^references_field) in ^to_fetch_from_db)
+      |> preload(^preload_field_association)
       |> Chain.select_repo(options).all()
       |> Enum.reduce(%{}, fn el, acc -> Map.put(acc, Map.from_struct(el)[references_field], el) end)
 
@@ -205,18 +229,6 @@ defmodule Explorer.Helper do
   def validate_url(_), do: :error
 
   @doc """
-    Validate url
-  """
-  @spec valid_url?(String.t()) :: boolean()
-  def valid_url?(string) when is_binary(string) do
-    uri = URI.parse(string)
-
-    !is_nil(uri.scheme) && !is_nil(uri.host)
-  end
-
-  def valid_url?(_), do: false
-
-  @doc """
   Compare two values and returns either :lt, :eq or :gt.
 
   Please be careful: this function compares arguments using `<` and `>`,
@@ -243,24 +255,167 @@ defmodule Explorer.Helper do
 
   The modified query with scam addresses hidden, if applicable.
   """
-  @spec maybe_hide_scam_addresses(nil | Ecto.Query.t(), atom(), [
+  @spec maybe_hide_scam_addresses_with_select(nil | Ecto.Query.t(), atom(), [
           Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()
-        ]) :: Ecto.Query.t()
+        ]) :: Ecto.Query.t() | nil
+  def maybe_hide_scam_addresses_with_select(nil, _address_hash_key, _options), do: nil
+
+  def maybe_hide_scam_addresses_with_select(query, address_hash_key, options) do
+    cond do
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && !options[:show_scam_tokens?] ->
+        query
+        |> join(:left, [q], sabm in ScamBadgeToAddress, as: :sabm, on: sabm.address_hash == field(q, ^address_hash_key))
+        |> where([sabm: sabm], is_nil(sabm.address_hash))
+        |> select_merge([q], %{reputation: %Reputation{reputation: "ok"}})
+
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && options[:show_scam_tokens?] ->
+        query
+        |> join(:left, [q], sabm in ScamBadgeToAddress, as: :sabm, on: sabm.address_hash == field(q, ^address_hash_key))
+        |> select_merge([q, sabm: sabm], %{
+          reputation: %Reputation{
+            reputation: fragment("CASE WHEN ? THEN ? ELSE ? END", is_nil(sabm.address_hash), "ok", "scam")
+          }
+        })
+
+      true ->
+        query
+        |> select_merge([q], %{reputation: %Reputation{reputation: "ok"}})
+    end
+  end
+
+  @doc """
+  Conditionally hides scam addresses in the given query, does not select the reputation field.
+
+  Accepts two forms for the address hash locator:
+  - `atom()` — a field key on the query's root binding, e.g. `:to_address_hash`.
+  - `{binding, field}` tuple — a named binding already present in the query plus its hash
+    field, e.g. `{:to_address, :hash}`. Use this form when the addresses table is already
+    joined; it lets the query planner use the binding's join statistics for better index
+    selection.
+  """
+  @spec maybe_hide_scam_addresses(
+          nil | Ecto.Query.t(),
+          atom() | {atom(), atom()},
+          [Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()]
+        ) :: Ecto.Query.t() | nil
   def maybe_hide_scam_addresses(nil, _address_hash_key, _options), do: nil
 
-  def maybe_hide_scam_addresses(query, address_hash_key, options) do
-    if Application.get_env(:block_scout_web, :hide_scam_addresses) && !options[:show_scam_tokens?] do
-      query
-      |> where(
-        [q],
-        fragment(
-          "NOT EXISTS (SELECT 1 FROM scam_address_badge_mappings sabm WHERE sabm.address_hash=?)",
-          field(q, ^address_hash_key)
-        )
-      )
-    else
-      query
+  def maybe_hide_scam_addresses(query, address_hash_key, options) when is_atom(address_hash_key) do
+    cond do
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && !options[:show_scam_tokens?] ->
+        query
+        |> join(:left, [q], sabm in ScamBadgeToAddress, as: :sabm, on: sabm.address_hash == field(q, ^address_hash_key))
+        |> where([sabm: sabm], is_nil(sabm.address_hash))
+
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && options[:show_scam_tokens?] ->
+        query
+
+      true ->
+        query
     end
+  end
+
+  def maybe_hide_scam_addresses(query, {named_binding, hash_field}, options) do
+    cond do
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && !options[:show_scam_tokens?] ->
+        query
+        |> join(:left, [{^named_binding, address}], sabm in ScamBadgeToAddress,
+          as: :sabm,
+          on: sabm.address_hash == field(address, ^hash_field)
+        )
+        |> where([sabm: sabm], is_nil(sabm.address_hash))
+
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && options[:show_scam_tokens?] ->
+        query
+
+      true ->
+        query
+    end
+  end
+
+  @doc """
+  Conditionally hides scam addresses in the given query for token transfers.
+  If query already has a named binding :token, it MUST be an inner join with the token table.
+
+  Rationale of inner join with token table:
+
+  PostgreSQL query planner misestimates anti-join selectivity when
+  scam_address_badge_mappings has more unique addresses (50k) than
+  token_transfers.token_contract_address_hash n_distinct (10k).
+  The planner assumes nearly all contracts are covered by the scam table,
+  estimates rows=1 after anti-join, and chooses a full sequential scan
+  instead of using the (block_number DESC, log_index DESC) index with
+  early LIMIT termination.
+
+  Workaround: adding an INNER JOIN to the tokens table changes the
+  intermediate n_distinct estimate — the join with tokens produces a much
+  higher row/distinct estimate, making the planner correctly recognize that
+  the anti-join will filter out only a small fraction. This allows it to
+  choose Nested Loop Anti Join + Index Scan with early termination (~5ms
+  instead of ~1500s).
+  """
+  @spec maybe_hide_scam_addresses_for_token_transfers(nil | Ecto.Query.t(), [
+          Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()
+        ]) :: Ecto.Query.t() | nil
+  def maybe_hide_scam_addresses_for_token_transfers(nil, _options), do: nil
+
+  def maybe_hide_scam_addresses_for_token_transfers(query, options) do
+    cond do
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && !options[:show_scam_tokens?] ->
+        query
+        |> maybe_join_token_table()
+        |> join(:left, [token: token], sabm in ScamBadgeToAddress,
+          as: :sabm,
+          on: sabm.address_hash == token.contract_address_hash
+        )
+        |> where([sabm: sabm], is_nil(sabm.address_hash))
+
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && options[:show_scam_tokens?] ->
+        query
+
+      true ->
+        query
+    end
+  end
+
+  defp maybe_join_token_table(query) do
+    if has_named_binding?(query, :token) do
+      query
+    else
+      join(query, :inner, [tt], token in assoc(tt, :token), as: :token)
+    end
+  end
+
+  @doc """
+  Conditionally hides scam addresses in the given query, does not select the reputation field.
+  """
+  @spec maybe_hide_scam_addresses_for_search(nil | Ecto.Query.t(), atom(), [
+          Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()
+        ]) :: Ecto.Query.t() | nil
+  def maybe_hide_scam_addresses_for_search(nil, _address_hash_key, _options), do: nil
+
+  def maybe_hide_scam_addresses_for_search(query, address_hash_key, options) do
+    cond do
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && !options[:show_scam_tokens?] ->
+        query
+        |> join(:left, [q], sabm in ScamBadgeToAddress, as: :sabm, on: sabm.address_hash == field(q, ^address_hash_key))
+        |> where([sabm: sabm], is_nil(sabm.address_hash))
+
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && options[:show_scam_tokens?] ->
+        query
+        |> join(:left, [q], sabm in ScamBadgeToAddress, as: :sabm, on: sabm.address_hash == field(q, ^address_hash_key))
+
+      true ->
+        query
+    end
+  end
+
+  @doc """
+  Function used for identify cases when user explicitly requests to show scam addresses and there are enabled scam addresses in the application.
+  """
+  @spec force_show_scam_addresses?(keyword()) :: boolean()
+  def force_show_scam_addresses?(options) do
+    Application.get_env(:block_scout_web, :hide_scam_addresses) && options[:show_scam_tokens?]
   end
 
   @doc """
@@ -353,7 +508,7 @@ defmodule Explorer.Helper do
   end
 
   def add_0x_prefix(binary_hash) when is_binary(binary_hash) do
-    if String.starts_with?(binary_hash, "0x") do
+    if String.starts_with?(binary_hash, "0x") and String.printable?(binary_hash) do
       binary_hash
     else
       "0x" <> Base.encode16(binary_hash, case: :lower)
@@ -484,5 +639,217 @@ defmodule Explorer.Helper do
     unix_timestamp
     |> DateTime.from_unix!(unit)
     |> DateTime.to_date()
+  end
+
+  @doc """
+  Extracts the method ID from an ABI specification.
+
+  ## Parameters
+  - `method` ([map()] | map()): The ABI specification, either as a single map
+    or a list containing one map.
+
+  ## Returns
+  - `binary()`: The method ID extracted from the ABI specification.
+
+  ## Examples
+
+      iex> Indexer.Fetcher.Celo.Helper.abi_to_method_id([%{"name" => "transfer", "type" => "function", "inputs" => [%{"name" => "to", "type" => "address"}]}])
+      <<26, 105, 82, 48>>
+
+  """
+  @spec abi_to_method_id([map()] | map()) :: binary()
+  def abi_to_method_id([method]), do: abi_to_method_id(method)
+
+  def abi_to_method_id(method) when is_map(method) do
+    [parsed_method] = ABI.parse_specification([method])
+    parsed_method.method_id
+  end
+
+  @doc """
+  Adds `inserted_at` and `updated_at` timestamps to a list of maps.
+
+  This function takes a list of maps (`params`) and adds the current UTC
+  timestamp (`DateTime.utc_now/0`) as the values for the `:inserted_at` and
+  `:updated_at` keys in each map.
+
+  ## Parameters
+
+    - `params` - A list of maps to which the timestamps will be added.
+
+  ## Returns
+
+    - A list of maps, each containing the original keys and values along with
+      the `:inserted_at` and `:updated_at` keys set to the current UTC timestamp.
+  """
+  @spec add_timestamps([map()]) :: [map()]
+  def add_timestamps(params) do
+    now = DateTime.utc_now()
+
+    Enum.map(params, &Map.merge(&1, %{inserted_at: now, updated_at: now}))
+  end
+
+  @doc """
+  Converts various value types to a Decimal type.
+
+  This function handles multiple input types and ensures they are properly
+  converted to a Decimal representation.
+
+  ## Parameters
+  - `value`: The value to convert, which can be:
+    - `nil`: Converted to Decimal 0
+    - `%Wei{}`: The Decimal value is extracted from the struct
+    - `float`: Converted using Decimal.from_float/1
+    - `String.t()` or `integer()`: Converted using Decimal.new/1
+    - `Decimal.t()`: Returned unchanged
+
+  ## Returns
+  - A Decimal representation of the input value
+  """
+  @spec number_to_decimal(nil | Wei.t() | integer() | float() | String.t() | Decimal.t()) :: Decimal.t()
+  def number_to_decimal(nil), do: Decimal.new(0)
+  def number_to_decimal(%Wei{value: value}), do: value
+  def number_to_decimal(value) when is_float(value), do: Decimal.from_float(value)
+  def number_to_decimal(value) when is_binary(value) or is_integer(value), do: Decimal.new(value)
+  def number_to_decimal(%Decimal{} = value), do: value
+
+  @doc """
+  Determines whether the specified node is configured to run indexer operations.
+
+  This function checks if the node's `:explorer` application mode is set to
+  either `:all` or `:indexer`. It performs a remote procedure call to retrieve
+  the application environment configuration from the target node. If the RPC
+  call fails or the mode is set to a different value, the function returns
+  `false`.
+
+  ## Parameters
+  - `node`: The node to check for indexer configuration.
+
+  ## Returns
+  - `true` if the node's mode is `:all` or `:indexer`
+  - `false` if the node's mode is any other value, not set, or if the RPC call
+    fails
+  """
+  @spec indexer_node?(Node.t()) :: boolean()
+  def indexer_node?(node) do
+    (node |> :rpc.call(Explorer, :mode, []) |> process_rpc_response(node, nil)) in [
+      :all,
+      :indexer
+    ]
+  end
+
+  @doc """
+  Processes the response from a remote procedure call, handling errors gracefully.
+
+  This function examines the RPC response and returns either the successful
+  result or a fallback value if the RPC call failed. When a `{:badrpc, reason}`
+  error tuple is encountered, it logs an error message including the node name
+  and error details, then returns the provided fallback value. For successful
+  responses, the original response is returned unchanged.
+
+  ## Parameters
+  - `response`: The result from an RPC call, either a successful value or a
+    `{:badrpc, reason}` error tuple
+  - `node`: The node that was called via RPC, used for error logging
+  - `fallback`: The value to return if the RPC call failed
+
+  ## Returns
+  - The original response if the RPC call succeeded
+  - The fallback value if the RPC call failed with a `{:badrpc, reason}` error
+  """
+  @spec process_rpc_response(res | {:badrpc, reason}, Node.t(), fallback) :: res | fallback
+        when res: any(), reason: any(), fallback: any()
+  def process_rpc_response({:badrpc, _reason} = error, node, fallback) do
+    Logger.error("Received an error from #{node}: #{inspect(error)}")
+    fallback
+  end
+
+  def process_rpc_response(response, _node, _fallback), do: response
+
+  @doc """
+  Generates a key from chain_id and a given string for storing in Redis.
+
+  This function combines the chain_id (if available) with the provided string to
+  create a unique key for Redis storage.
+
+  ## Parameters
+  - `string`: The string to be combined with the chain_id
+
+  ## Returns
+  - `String.t()` representing the generated key
+  """
+  @spec redis_key(String.t()) :: String.t()
+  def redis_key(key) do
+    chain_id = Application.get_env(:block_scout_web, :chain_id)
+
+    if chain_id do
+      chain_id <> "_" <> key
+    else
+      key
+    end
+  end
+
+  @doc """
+  Returns a keyword list with a timeout option if a timeout is provided.
+
+  This helper is needed for Repo calls, since passing `timeout: nil` is not supported.
+  If `timeout` is `nil`, returns an empty keyword list. Otherwise, returns
+  a keyword list with the `:timeout` key set to the given value.
+
+  ## Parameters
+
+    - timeout: The timeout value to use, or `nil`.
+
+  ## Returns
+
+    - A keyword list with the `:timeout` key, or an empty keyword list.
+  """
+  @spec maybe_timeout(timeout() | nil) :: keyword()
+  def maybe_timeout(nil), do: []
+  def maybe_timeout(timeout), do: [timeout: timeout]
+
+  @doc """
+  Builds Redix connection options for either direct Redis URL or Redis Sentinel configuration.
+
+  This function supports two connection modes:
+  - **Direct connection**: When `sentinel_urls` is `nil` or empty, parses the
+    provided Redis URL into Redix start options.
+  - **Sentinel connection**: When `sentinel_urls` is provided, configures Redix
+    to connect through Redis Sentinel for high availability. In this mode, the
+    `sentinel_master_name` is required.
+
+  ## Parameters
+  - `url`: Redis connection URL (e.g., `redis://host:port/db`). Used only in
+    direct connection mode.
+  - `use_ssl?`: When `true`, adds SSL options with certificate verification
+    disabled.
+  - `sentinel_urls`: Comma-separated list of Sentinel node URLs. When provided,
+    enables Sentinel connection mode.
+  - `sentinel_master_name`: The name of the master group monitored by Sentinel.
+    Required when `sentinel_urls` is provided.
+
+  ## Returns
+  - A keyword list of Redix connection options.
+
+  ## Raises
+  - `RuntimeError` if `sentinel_urls` is provided but `sentinel_master_name` is
+    `nil` or empty.
+  """
+  @spec redix_opts(String.t() | nil, boolean(), String.t() | nil, String.t() | nil) :: keyword()
+  def redix_opts(url, use_ssl?, sentinel_urls, sentinel_master_name) do
+    ssl_opts = if use_ssl?, do: [ssl: true, socket_opts: [verify: :verify_none]], else: []
+
+    case sentinel_urls do
+      sentinel_urls when sentinel_urls in [nil, ""] ->
+        url |> RedixURI.to_start_options() |> Keyword.merge(ssl_opts)
+
+      sentinel_urls_str ->
+        sentinel_urls = String.split(sentinel_urls_str, ",")
+
+        if sentinel_master_name in [nil, ""] do
+          raise "sentinel_master_name is required when sentinel_urls is set"
+        end
+
+        [sentinel: [sentinels: sentinel_urls, group: sentinel_master_name]] |> Keyword.merge(ssl_opts)
+    end
   end
 end

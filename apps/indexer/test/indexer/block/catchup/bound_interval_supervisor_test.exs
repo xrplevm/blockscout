@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Catchup.BoundIntervalSupervisorTest do
   # `async: false` due to use of named GenServer
   use EthereumJSONRPC.Case, async: false
@@ -12,13 +13,14 @@ defmodule Indexer.Block.Catchup.BoundIntervalSupervisorTest do
   alias Indexer.Block.Catchup
   alias Indexer.Block.Catchup.MissingRangesCollector
   alias Indexer.Fetcher.CoinBalance.Catchup, as: CoinBalanceCatchup
+  alias Indexer.Fetcher.TokenBalance.Current, as: TokenBalanceCurrent
+  alias Indexer.Fetcher.TokenBalance.Historical, as: TokenBalanceHistorical
 
   alias Indexer.Fetcher.{
     ContractCode,
     InternalTransaction,
     ReplacedTransaction,
     Token,
-    TokenBalance,
     UncleBlock
   }
 
@@ -234,15 +236,22 @@ defmodule Indexer.Block.Catchup.BoundIntervalSupervisorTest do
       InternalTransaction.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       ContractCode.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       Token.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
-      TokenBalance.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      TokenBalanceHistorical.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      TokenBalanceCurrent.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       ReplacedTransaction.Supervisor.Case.start_supervised!()
 
       UncleBlock.Supervisor.Case.start_supervised!(
-        block_fetcher: %Indexer.Block.Fetcher{json_rpc_named_arguments: json_rpc_named_arguments}
+        block_fetcher: %Indexer.Block.Fetcher{
+          json_rpc_named_arguments: json_rpc_named_arguments,
+          task_supervisor: Indexer.Block.Catchup.TaskSupervisor
+        }
       )
 
       Catchup.Supervisor.Case.start_supervised!(%{
-        block_fetcher: %Indexer.Block.Fetcher{json_rpc_named_arguments: json_rpc_named_arguments}
+        block_fetcher: %Indexer.Block.Fetcher{
+          json_rpc_named_arguments: json_rpc_named_arguments,
+          task_supervisor: Indexer.Block.Catchup.TaskSupervisor
+        }
       })
 
       first_catchup_block_number = latest_block_number - 1
@@ -434,13 +443,17 @@ defmodule Indexer.Block.Catchup.BoundIntervalSupervisorTest do
       insert(:block, number: 0)
       insert(:block, number: 1)
 
+      stub(EthereumJSONRPC.Mox, :json_rpc, fn _, _ ->
+        {:ok, []}
+      end)
+
       MissingRangesCollector.start_link([])
-      start_supervised!({Task.Supervisor, name: Indexer.Block.Catchup.TaskSupervisor})
       CoinBalanceCatchup.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       ContractCode.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       InternalTransaction.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       Token.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
-      TokenBalance.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      TokenBalanceHistorical.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      TokenBalanceCurrent.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       ReplacedTransaction.Supervisor.Case.start_supervised!()
 
       # from `setup :state`
@@ -527,16 +540,19 @@ defmodule Indexer.Block.Catchup.BoundIntervalSupervisorTest do
 
       Application.put_env(:indexer, :block_ranges, "0..0")
       MissingRangesCollector.start_link([])
-      start_supervised({Task.Supervisor, name: Indexer.Block.Catchup.TaskSupervisor})
       CoinBalanceCatchup.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       InternalTransaction.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       ContractCode.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       Token.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
-      TokenBalance.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      TokenBalanceHistorical.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      TokenBalanceCurrent.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       ReplacedTransaction.Supervisor.Case.start_supervised!()
 
       UncleBlock.Supervisor.Case.start_supervised!(
-        block_fetcher: %Indexer.Block.Fetcher{json_rpc_named_arguments: json_rpc_named_arguments}
+        block_fetcher: %Indexer.Block.Fetcher{
+          json_rpc_named_arguments: json_rpc_named_arguments,
+          task_supervisor: Indexer.Block.Catchup.TaskSupervisor
+        }
       )
 
       # from `setup :state`
@@ -578,9 +594,14 @@ defmodule Indexer.Block.Catchup.BoundIntervalSupervisorTest do
   end
 
   defp state(%{json_rpc_named_arguments: json_rpc_named_arguments}) do
+    start_supervised!({Task.Supervisor, name: Indexer.Block.Catchup.TaskSupervisor})
+
     {:ok, state} =
       Catchup.BoundIntervalSupervisor.init(%{
-        block_fetcher: %Indexer.Block.Fetcher{json_rpc_named_arguments: json_rpc_named_arguments}
+        block_fetcher: %Indexer.Block.Fetcher{
+          json_rpc_named_arguments: json_rpc_named_arguments,
+          task_supervisor: Indexer.Block.Catchup.TaskSupervisor
+        }
       })
 
     %{state: state}
@@ -592,7 +613,14 @@ defmodule Indexer.Block.Catchup.BoundIntervalSupervisorTest do
     pid =
       start_supervised!(
         {Catchup.BoundIntervalSupervisor,
-         [%{block_fetcher: %Indexer.Block.Fetcher{json_rpc_named_arguments: json_rpc_named_arguments}}]}
+         [
+           %{
+             block_fetcher: %Indexer.Block.Fetcher{
+               json_rpc_named_arguments: json_rpc_named_arguments,
+               task_supervisor: Indexer.Block.Catchup.TaskSupervisor
+             }
+           }
+         ]}
       )
 
     {:ok, %{pid: pid}}

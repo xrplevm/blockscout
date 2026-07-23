@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.RootstockData do
   @moduledoc """
   Refetch `minimum_gas_price`, `bitcoin_merged_mining_header`, `bitcoin_merged_mining_coinbase_transaction`,
@@ -48,7 +49,7 @@ defmodule Indexer.Fetcher.RootstockData do
 
     json_rpc_named_arguments = opts[:json_rpc_named_arguments]
 
-    unless json_rpc_named_arguments do
+    if !json_rpc_named_arguments do
       raise ArgumentError,
             ":json_rpc_named_arguments must be provided to `#{__MODULE__}.init to allow for json_rpc calls when running."
     end

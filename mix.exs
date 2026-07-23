@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScout.Mixfile do
   use Mix.Project
 
@@ -7,15 +8,11 @@ defmodule BlockScout.Mixfile do
     [
       # app: :block_scout,
       # aliases: aliases(config_env()),
-      version: "8.0.2",
+      version: "11.2.2",
       apps_path: "apps",
       deps: deps(),
       dialyzer: dialyzer(),
-      elixir: "~> 1.17",
-      preferred_cli_env: [
-        credo: :test,
-        dialyzer: :test
-      ],
+      elixir: "~> 1.19",
       # start_permanent: config_env() == :prod,
       releases: [
         blockscout: [
@@ -34,11 +31,20 @@ defmodule BlockScout.Mixfile do
     ]
   end
 
+  def cli do
+    [preferred_envs: [credo: :test, dialyzer: :test]]
+  end
+
   ## Private Functions
 
   defp copy_prod_runtime_config(%Mix.Release{path: path} = release) do
     File.mkdir_p!(Path.join([path, "config", "runtime"]))
-    File.cp!(Path.join(["config", "runtime", "prod.exs"]), Path.join([path, "config", "runtime", "prod.exs"]))
+
+    File.cp!(
+      Path.join(["config", "runtime", "prod.exs"]),
+      Path.join([path, "config", "runtime", "prod.exs"])
+    )
+
     File.mkdir_p!(Path.join([path, "apps", "explorer", "config", "prod"]))
 
     File.cp_r!(
@@ -47,7 +53,11 @@ defmodule BlockScout.Mixfile do
     )
 
     File.mkdir_p!(Path.join([path, "apps", "indexer", "config", "prod"]))
-    File.cp_r!(Path.join(["apps", "indexer", "config", "prod"]), Path.join([path, "apps", "indexer", "config", "prod"]))
+
+    File.cp_r!(
+      Path.join(["apps", "indexer", "config", "prod"]),
+      Path.join([path, "apps", "indexer", "config", "prod"])
+    )
 
     release
   end
@@ -94,12 +104,12 @@ defmodule BlockScout.Mixfile do
   # and cannot be accessed from applications inside the apps folder
   defp deps do
     [
-      {:prometheus_ex, git: "https://github.com/lanodan/prometheus.ex", branch: "fix/elixir-1.14", override: true},
+      {:prometheus_ex, "~> 5.1.0", override: true},
       {:absinthe_plug, git: "https://github.com/blockscout/absinthe_plug.git", tag: "1.5.8", override: true},
-      {:tesla, "~> 1.14.1"},
-      {:mint, "~> 1.7.1"},
+      {:tesla, "~> 1.20.0"},
+      {:mint, "~> 1.9.0"},
       # Documentation
-      {:ex_doc, "~> 0.37.2", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.40.1", only: :dev, runtime: false},
       {:number, "~> 1.0.3"}
     ]
   end

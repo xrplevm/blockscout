@@ -1,11 +1,12 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.V2.ExchangeRateChannelTest do
   use BlockScoutWeb.ChannelCase
 
   import Mox
 
   alias BlockScoutWeb.Notifier
-  alias Explorer.Market.Fetcher.{Coin, History}
-  alias Explorer.Market.{MarketHistory, Token}
+  alias Explorer.Market.Fetcher.Coin
+  alias Explorer.Market.{MarketHistory, MarketHistoryCache, Token}
   alias Explorer.Market.Source.OneCoinSource
   alias Explorer.Market
 
@@ -31,7 +32,8 @@ defmodule BlockScoutWeb.V2.ExchangeRateChannelTest do
       symbol: Explorer.coin(),
       fiat_value: Decimal.new(1),
       volume_24h: Decimal.new(1),
-      image_url: nil
+      image_url: nil,
+      circulating_supply: nil
     }
 
     on_exit(fn ->
@@ -64,7 +66,31 @@ defmodule BlockScoutWeb.V2.ExchangeRateChannelTest do
     end
 
     test "subscribed user is notified with market history", %{token: token} do
-      Coin.handle_info({nil, {{:ok, token}, false}}, %{})
+      initial_market_history_fetcher_enabled_value = :persistent_term.get(:market_history_fetcher_enabled, false)
+      :persistent_term.put(:market_history_fetcher_enabled, true)
+      Supervisor.terminate_child(Explorer.Supervisor, {ConCache, MarketHistoryCache.cache_name()})
+      Supervisor.restart_child(Explorer.Supervisor, {ConCache, MarketHistoryCache.cache_name()})
+
+      source_configuration = Application.get_env(:explorer, Explorer.Market.Source)
+      fetcher_configuration = Application.get_env(:explorer, Coin)
+
+      Application.put_env(:explorer, Explorer.Market.Source,
+        native_coin_source: OneCoinSource,
+        secondary_coin_source: OneCoinSource
+      )
+
+      Application.put_env(:explorer, Coin, Keyword.merge(fetcher_configuration, table_name: :rates, enabled: true))
+
+      on_exit(fn ->
+        Application.put_env(:explorer, Explorer.Market.Source, source_configuration)
+        Application.put_env(:explorer, Coin, fetcher_configuration)
+        Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.Blocks.child_id())
+        Supervisor.restart_child(Explorer.Supervisor, Explorer.Chain.Cache.Blocks.child_id())
+        :persistent_term.put(:market_history_fetcher_enabled, initial_market_history_fetcher_enabled_value)
+      end)
+
+      {:ok, state} = Coin.init([])
+      Coin.handle_info({nil, {{:ok, token}, false}}, state)
       Supervisor.terminate_child(Explorer.Supervisor, {ConCache, Explorer.Market.MarketHistoryCache.cache_name()})
       Supervisor.restart_child(Explorer.Supervisor, {ConCache, Explorer.Market.MarketHistoryCache.cache_name()})
 
@@ -94,7 +120,7 @@ defmodule BlockScoutWeb.V2.ExchangeRateChannelTest do
           assert payload.exchange_rate == token.fiat_value
           assert payload.chart_data == records
       after
-        :timer.seconds(5) ->
+        :timer.seconds(10) ->
           assert false, "Expected message received nothing."
       end
     end

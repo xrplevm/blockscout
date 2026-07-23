@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Etherscan.Addresses do
   @moduledoc """
   This module contains functions for working with addresses, as they pertain to the
@@ -13,6 +14,9 @@ defmodule Explorer.Etherscan.Addresses do
   alias Explorer.Chain.Address
   alias Explorer.Repo
 
+  @doc """
+  Lists addresses ordered by insertion time and hash, with pagination.
+  """
   @spec list_ordered_addresses(non_neg_integer(), non_neg_integer()) :: [Address.t()]
   def list_ordered_addresses(offset, limit) do
     query =

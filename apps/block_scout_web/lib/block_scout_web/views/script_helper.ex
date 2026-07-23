@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Views.ScriptHelper do
   @moduledoc """
   Helper for rendering view specific script tags.
   """
+  use Phoenix.LiveView
 
-  import Phoenix.LiveView.Helpers, only: [sigil_H: 2]
   import BlockScoutWeb.Router.Helpers, only: [static_path: 2]
 
   alias Phoenix.HTML.Safe

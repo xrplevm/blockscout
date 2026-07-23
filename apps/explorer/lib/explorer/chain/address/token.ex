@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Address.Token do
   @moduledoc """
   A projection that represents the relation between a Token and a specific Address.
@@ -43,7 +44,7 @@ defmodule Explorer.Chain.Address.Token do
   defp filter_and_group(query) do
     from(
       [token, balance] in query,
-      where: balance.value > 0,
+      where: balance.value > 0 or token.type == "ERC-7984",
       select: %Address.Token{
         contract_address_hash: token.contract_address_hash,
         inserted_at: max(token.inserted_at),

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressLogsController do
   @moduledoc """
   Manages events logs tab.
@@ -12,6 +13,7 @@ defmodule BlockScoutWeb.AddressLogsController do
   alias BlockScoutWeb.{AccessHelper, AddressLogsView, Controller}
   alias Explorer.{Chain, Market}
   alias Explorer.Chain.Address
+  alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
   alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
   alias Phoenix.View
 
@@ -21,7 +23,17 @@ defmodule BlockScoutWeb.AddressLogsController do
     with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
          :ok <- Address.check_address_exists(address_hash),
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params) do
-      logs_plus_one = Chain.address_to_logs(address_hash, false, paging_options(params))
+      options =
+        params
+        |> paging_options()
+        |> Keyword.merge(
+          necessity_by_association: %{
+            [address: [:smart_contract, Implementation.proxy_implementations_smart_contracts_association()]] =>
+              :optional
+          }
+        )
+
+      logs_plus_one = Chain.address_to_logs(address_hash, false, options)
       {results, next_page} = split_list_by_page(logs_plus_one)
 
       next_page_url =
@@ -86,7 +98,18 @@ defmodule BlockScoutWeb.AddressLogsController do
 
       formatted_topic = if String.starts_with?(topic, "0x"), do: topic, else: "0x" <> topic
 
-      logs_plus_one = Chain.address_to_logs(address_hash, false, topic: formatted_topic)
+      options =
+        params
+        |> paging_options()
+        |> Keyword.merge(
+          necessity_by_association: %{
+            [address: [:smart_contract, Implementation.proxy_implementations_smart_contracts_association()]] =>
+              :optional
+          }
+        )
+        |> Keyword.merge(topic: formatted_topic)
+
+      logs_plus_one = Chain.address_to_logs(address_hash, false, options)
 
       {results, next_page} = split_list_by_page(logs_plus_one)
 

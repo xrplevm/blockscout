@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 import Config
 
 config :block_scout_web, :sql_sandbox, true
@@ -13,9 +14,7 @@ config :block_scout_web, BlockScoutWeb.Endpoint,
 
 config :block_scout_web, BlockScoutWeb.Tracer, disabled?: false
 
-config :logger, :block_scout_web,
-  level: :warn,
-  path: Path.absname("logs/test/block_scout_web.log")
+config :logger, :block_scout_web, path: Path.absname("logs/test/block_scout_web.log")
 
 # Configure wallaby
 config :wallaby, screenshot_on_failure: true, driver: Wallaby.Chrome, js_errors: false
@@ -23,6 +22,10 @@ config :wallaby, screenshot_on_failure: true, driver: Wallaby.Chrome, js_errors:
 config :block_scout_web, BlockScoutWeb.Counters.BlocksIndexedCounter, enabled: false
 
 config :block_scout_web, BlockScoutWeb.Counters.InternalTransactionsIndexedCounter, enabled: false
+
+config :oauth2, adapter: Explorer.Mock.TeslaAdapter
+
+config :tesla, adapter: Explorer.Mock.TeslaAdapter
 
 config :ueberauth, Ueberauth,
   providers: [

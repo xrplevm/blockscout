@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Block.Reward do
   @moduledoc """
   Represents the total reward given to an address in a block.
@@ -7,8 +8,8 @@ defmodule Explorer.Chain.Block.Reward do
 
   alias Explorer.Application.Constants
   alias Explorer.{Chain, PagingOptions, Repo}
-  alias Explorer.Chain.Block.Reward.AddressType
   alias Explorer.Chain.{Address, Block, Hash, Validator, Wei}
+  alias Explorer.Chain.Block.Reward.AddressType
   alias Explorer.Chain.Fetcher.FetchValidatorInfoOnDemand
   alias Explorer.Chain.SmartContract
   alias Explorer.SmartContract.Reader

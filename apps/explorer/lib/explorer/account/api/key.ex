@@ -1,12 +1,13 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.Api.Key do
   @moduledoc """
     Module is responsible for schema for API keys, keys is used to track number of requests to the API endpoints
   """
   use Explorer.Schema
 
+  alias Ecto.{Changeset, UUID}
   alias Ecto.Multi
   alias Explorer.Account.Identity
-  alias Ecto.{Changeset, UUID}
   alias Explorer.Repo
 
   import Ecto.Changeset

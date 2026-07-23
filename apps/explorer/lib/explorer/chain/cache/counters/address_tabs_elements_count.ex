@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.AddressTabsElementsCount do
   @moduledoc """
     Cache for tabs counters on address
@@ -19,6 +20,7 @@ defmodule Explorer.Chain.Cache.Counters.AddressTabsElementsCount do
            | :logs
            | :withdrawals
            | :internal_transactions
+           | :beacon_deposits
   @typep response_status :: :limit_value | :stale | :up_to_date
 
   @spec get_counter(counter_type, String.t()) :: {DateTime.t(), non_neg_integer(), response_status} | nil

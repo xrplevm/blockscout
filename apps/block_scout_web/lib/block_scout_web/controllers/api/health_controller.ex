@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.HealthController do
   use Phoenix.Controller, namespace: BlockScoutWeb
 
@@ -8,7 +9,7 @@ defmodule BlockScoutWeb.API.HealthController do
 
   @ok_message "OK"
   @backfill_multichain_search_db_migration_name "backfill_multichain_search_db"
-  @rollups [:arbitrum, :zksync, :optimism, :polygon_zkevm, :scroll]
+  @rollups [:arbitrum, :zksync, :optimism, :scroll]
 
   @doc """
   Handles health checks for the application.
@@ -37,10 +38,7 @@ defmodule BlockScoutWeb.API.HealthController do
     base_health_status =
       %{
         metadata: %{
-          # todo: this key is left for backward compatibility
-          # and should be removed after 8.0.0 release in favour of the new health check logic based on multiple modules
-          latest_block: indexing_status.blocks.old,
-          blocks: indexing_status.blocks.new
+          blocks: indexing_status.blocks
         }
       }
 
@@ -53,14 +51,13 @@ defmodule BlockScoutWeb.API.HealthController do
         base_health_status
         |> put_in([:metadata, :batches], batches_indexing_status)
         # todo: return this when "latest block" metric starts remain non-empty all time
-        # |> Map.put(:healthy, indexing_status.blocks.new.healthy and batches_indexing_status.healthy)
-        |> Map.put(:healthy, indexing_status.blocks.new.healthy)
+        # |> Map.put(:healthy, indexing_status.blocks.healthy and batches_indexing_status.healthy)
+        |> Map.put(:healthy, indexing_status.blocks.healthy)
       else
         base_health_status
-        |> Map.put(:healthy, indexing_status.blocks.new.healthy)
+        |> Map.put(:healthy, indexing_status.blocks.healthy)
       end
 
-    # todo: this should be removed after 8.0.0. It is left for backward compatibility - it is artefact of the old response format.
     blocks_property = Map.get(Map.get(health_status, :metadata), :blocks)
 
     health_status_with_error =
@@ -136,7 +133,7 @@ defmodule BlockScoutWeb.API.HealthController do
   """
   @spec readiness(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def readiness(conn, _) do
-    unless Application.get_env(:nft_media_handler, :standalone_media_worker?) do
+    if !Application.get_env(:nft_media_handler, :standalone_media_worker?) do
       HealthHelper.last_db_block_status()
     end
 
@@ -186,12 +183,11 @@ defmodule BlockScoutWeb.API.HealthController do
   def get_indexing_status do
     health_status = HealthHelper.get_indexing_health_data()
 
-    blocks_old = old_blocks_indexing_status(health_status)
-    blocks_new = new_blocks_indexing_status(health_status)
+    blocks = blocks_indexing_status(health_status)
 
     common_status =
       %{
-        blocks: %{old: blocks_old, new: blocks_new}
+        blocks: blocks
       }
 
     status =
@@ -207,41 +203,7 @@ defmodule BlockScoutWeb.API.HealthController do
     status
   end
 
-  # todo: it should be removed after 8.0.0 release in favour of the new health check logic based on multiple modules
-  defp old_blocks_indexing_status(health_status) do
-    latest_block_timestamp_from_db =
-      if is_nil(health_status[:health_latest_block_timestamp_from_db]) do
-        nil
-      else
-        {:ok, latest_block_timestamp_from_db} =
-          DateTime.from_unix(Decimal.to_integer(health_status[:health_latest_block_timestamp_from_db]))
-
-        latest_block_timestamp_from_db
-      end
-
-    latest_block_timestamp_from_cache =
-      if is_nil(health_status[:health_latest_block_timestamp_from_cache]) do
-        nil
-      else
-        {:ok, latest_block_timestamp_from_cache} =
-          DateTime.from_unix(Decimal.to_integer(health_status[:health_latest_block_timestamp_from_cache]))
-
-        latest_block_timestamp_from_cache
-      end
-
-    %{
-      db: %{
-        number: to_string(health_status[:health_latest_block_number_from_db]),
-        timestamp: to_string(latest_block_timestamp_from_db)
-      },
-      cache: %{
-        number: to_string(health_status[:health_latest_block_number_from_cache]),
-        timestamp: to_string(latest_block_timestamp_from_cache)
-      }
-    }
-  end
-
-  defp new_blocks_indexing_status(health_status) do
+  defp blocks_indexing_status(health_status) do
     latest_block_timestamp_from_db =
       if is_nil(health_status[:health_latest_block_timestamp_from_db]) do
         nil

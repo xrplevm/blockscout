@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.OnDemand.TokenTotalSupply do
   @moduledoc """
     Ensures that we have a reasonably up to date token supply.
@@ -9,7 +10,6 @@ defmodule Indexer.Fetcher.OnDemand.TokenTotalSupply do
   alias Explorer.Chain.Cache.BlockNumber
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.{Hash, Token}
-  alias Explorer.Helper, as: ExplorerHelper
   alias Explorer.Repo
   alias Explorer.Token.MetadataRetriever
   alias Explorer.Utility.RateLimiter
@@ -47,11 +47,12 @@ defmodule Indexer.Fetcher.OnDemand.TokenTotalSupply do
   ## Implementation
 
   defp do_fetch(address_hash) when not is_nil(address_hash) do
-    token = Repo.get_by(Token, contract_address_hash: address_hash)
+    token = Repo.replica().get_by(Token, contract_address_hash: address_hash)
 
     if (token && !token.skip_metadata && is_nil(token.total_supply_updated_at_block)) or
-         BlockNumber.get_max() - token.total_supply_updated_at_block > @ttl_in_blocks do
-      token_address_hash_string = ExplorerHelper.add_0x_prefix(address_hash)
+         (token && !is_nil(token.total_supply_updated_at_block) &&
+            BlockNumber.get_max() - token.total_supply_updated_at_block > @ttl_in_blocks) do
+      token_address_hash_string = to_string(address_hash)
 
       token_params = MetadataRetriever.get_total_supply_of(token_address_hash_string)
 

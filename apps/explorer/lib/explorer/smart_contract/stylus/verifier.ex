@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.Stylus.Verifier do
   @moduledoc """
     Verifies Stylus smart contracts by comparing their source code against deployed bytecode.
@@ -100,7 +101,7 @@ defmodule Explorer.SmartContract.Stylus.Verifier do
         transaction.hash
 
       %{internal_transaction: internal_transaction} ->
-        internal_transaction.transaction_hash
+        internal_transaction.transaction.hash
 
       _ ->
         nil

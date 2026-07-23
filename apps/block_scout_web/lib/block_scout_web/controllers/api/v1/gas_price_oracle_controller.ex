@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V1.GasPriceOracleController do
   use BlockScoutWeb, :controller
 
@@ -36,7 +37,9 @@ defmodule BlockScoutWeb.API.V1.GasPriceOracleController do
   end
 
   def error({:error, error}) do
-    Logger.error(fn -> ["Something went wrong while estimates gas prices in the gas price oracle: ", inspect(error)] end)
+    Logger.error(fn ->
+      ["Something went wrong while estimates gas prices in the gas price oracle: ", inspect(error)]
+    end)
 
     %{
       "error_code" => 6001,

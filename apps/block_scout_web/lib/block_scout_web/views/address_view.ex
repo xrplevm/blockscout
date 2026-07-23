@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressView do
   use BlockScoutWeb, :view
 
@@ -5,10 +6,11 @@ defmodule BlockScoutWeb.AddressView do
 
   alias BlockScoutWeb.{AccessHelper, LayoutView}
   alias BlockScoutWeb.API.V2.Helper, as: APIV2Helper
+  alias BlockScoutWeb.API.V2.TransactionView, as: APIV2TransactionView
   alias Explorer.Account.CustomABI
   alias Explorer.{Chain, CustomContractsHelper, Repo}
-  alias Explorer.Chain.Address.Counters
   alias Explorer.Chain.{Address, Hash, InternalTransaction, Log, SmartContract, Token, TokenTransfer, Transaction, Wei}
+  alias Explorer.Chain.Address.Counters
   alias Explorer.Chain.Block.Reward
   alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
   alias Explorer.Market.Token, as: TokenExchangeRate
@@ -274,7 +276,7 @@ defmodule BlockScoutWeb.AddressView do
   end
 
   def transaction_hash(%Address{contract_creation_internal_transaction: %InternalTransaction{}} = address) do
-    address.contract_creation_internal_transaction.transaction_hash
+    InternalTransaction.preload_transaction(address.contract_creation_internal_transaction).transaction_hash
   end
 
   def transaction_hash(%Address{contract_creation_transaction: %Transaction{}} = address) do
@@ -475,7 +477,12 @@ defmodule BlockScoutWeb.AddressView do
           | {:error, atom(), list()}
           | {{:error, :contract_not_verified, list()}, any()}
   def decode(log, transaction) do
-    {result, _full_abi_per_address_hash_contracts_acc, _events_acc} = Log.decode(log, transaction, [], true, false)
+    full_abi =
+      (APIV2TransactionView.extract_implementations_abi(log.address.proxy_implementations) ++
+         APIV2TransactionView.try_to_get_abi(log.address.smart_contract))
+      |> Enum.uniq()
+
+    {result, _events_acc} = Log.decode(log, transaction, [], true, false, full_abi)
     result
   end
 end

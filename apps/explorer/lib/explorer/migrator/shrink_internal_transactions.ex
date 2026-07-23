@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.ShrinkInternalTransactions do
   @moduledoc """
   Removes the content of output field and leaves first 4 bytes signature in input field in internal transactions.
@@ -8,7 +9,7 @@ defmodule Explorer.Migrator.ShrinkInternalTransactions do
 
   import Ecto.Query
 
-  alias Explorer.Chain.{Block, InternalTransaction}
+  alias Explorer.Chain.InternalTransaction
   alias Explorer.Migrator.FillingMigration
   alias Explorer.Repo
 
@@ -47,11 +48,9 @@ defmodule Explorer.Migrator.ShrinkInternalTransactions do
 
   @impl FillingMigration
   def update_batch(block_numbers) do
-    block_hashes_query = from(b in Block, where: b.number in ^block_numbers, select: b.hash)
-
     query =
       from(it in InternalTransaction,
-        where: it.block_hash in subquery(block_hashes_query),
+        where: it.block_number in ^block_numbers,
         update: [set: [input: fragment("substring(? FOR 4)", it.input), output: nil]]
       )
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Celo.TransactionTokenTransfers do
   @moduledoc """
   Helper functions for generating ERC20 token transfers from native Celo coin
@@ -11,13 +12,16 @@ defmodule Indexer.Transform.Celo.TransactionTokenTransfers do
   """
   require Logger
 
+  use Utils.RuntimeEnvHelper,
+    chain_identity: [:explorer, :chain_identity]
+
   import Indexer.Transform.TokenTransfers,
     only: [
       filter_tokens_for_supply_update: 1
     ]
 
   alias Explorer.Chain.Cache.CeloCoreContracts
-  alias Explorer.Chain.Hash
+  alias Explorer.Chain.{Hash, InternalTransaction}
   alias Indexer.Fetcher.TokenTotalSupplyUpdater
   @token_type "ERC-20"
   @transaction_buffer_size 20_000
@@ -47,7 +51,7 @@ defmodule Indexer.Transform.Celo.TransactionTokenTransfers do
         }
   def parse_transactions(transactions) do
     token_transfers =
-      if Application.get_env(:explorer, :chain_type) == :celo do
+      if chain_identity() == {:optimism, :celo} do
         transactions
         |> Enum.filter(fn transaction -> transaction.value > 0 end)
         |> Enum.map(fn transaction ->
@@ -89,11 +93,12 @@ defmodule Indexer.Transform.Celo.TransactionTokenTransfers do
     token_transfers =
       internal_transactions
       |> Enum.filter(fn internal_transaction ->
-        internal_transaction.value > 0 &&
+        not is_nil(internal_transaction.value) && internal_transaction.value > 0 &&
           internal_transaction.index > 0 &&
           not Map.has_key?(internal_transaction, :error) &&
           (not Map.has_key?(internal_transaction, :call_type) || internal_transaction.call_type != "delegatecall")
       end)
+      |> InternalTransaction.preload_transaction()
       |> Enum.map(fn internal_transaction ->
         to_address_hash =
           Map.get(internal_transaction, :to_address_hash) ||
@@ -114,7 +119,7 @@ defmodule Indexer.Transform.Celo.TransactionTokenTransfers do
           token_contract_address_hash: celo_token_address,
           token_ids: nil,
           token_type: @token_type,
-          transaction_hash: internal_transaction.transaction_hash
+          transaction_hash: internal_transaction.transaction.hash
         }
       end)
 

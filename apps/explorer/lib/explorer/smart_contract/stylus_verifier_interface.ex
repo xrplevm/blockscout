@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.StylusVerifierInterface do
   @moduledoc """
     Provides an interface for verifying Stylus smart contracts by interacting with a verification
@@ -6,7 +7,7 @@ defmodule Explorer.SmartContract.StylusVerifierInterface do
     Handles verification requests for Stylus contracts deployed from GitHub repositories by
     communicating with an external verification service.
   """
-  alias HTTPoison.Response
+  alias Explorer.HttpClient
   require Logger
 
   @post_timeout :timer.minutes(5)
@@ -55,8 +56,8 @@ defmodule Explorer.SmartContract.StylusVerifierInterface do
   defp http_post_request(url, body) do
     headers = [{"Content-Type", "application/json"}]
 
-    case HTTPoison.post(url, Jason.encode!(body), headers, recv_timeout: @post_timeout) do
-      {:ok, %Response{body: body, status_code: _}} ->
+    case HttpClient.post(url, Jason.encode!(body), headers, recv_timeout: @post_timeout) do
+      {:ok, %{body: body, status_code: _}} ->
         process_verifier_response(body)
 
       {:error, error} ->
@@ -73,11 +74,11 @@ defmodule Explorer.SmartContract.StylusVerifierInterface do
 
   @spec http_get_request(String.t()) :: {:ok, [String.t()]} | {:error, any()}
   defp http_get_request(url) do
-    case HTTPoison.get(url) do
-      {:ok, %Response{body: body, status_code: 200}} ->
+    case HttpClient.get(url) do
+      {:ok, %{body: body, status_code: 200}} ->
         process_verifier_response(body)
 
-      {:ok, %Response{body: body, status_code: _}} ->
+      {:ok, %{body: body, status_code: _}} ->
         {:error, body}
 
       {:error, error} ->

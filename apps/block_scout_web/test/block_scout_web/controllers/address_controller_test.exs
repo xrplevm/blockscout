@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressControllerTest do
   use BlockScoutWeb.ConnCase,
     # ETS tables are shared in `Explorer.Counters.*`
@@ -25,7 +26,7 @@ defmodule BlockScoutWeb.AddressControllerTest do
 
     test "returns top addresses", %{conn: conn} do
       address_hashes =
-        4..1
+        4..1//-1
         |> Enum.map(&insert(:address, fetched_coin_balance: &1))
         |> Enum.map(& &1.hash)
 

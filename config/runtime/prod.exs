@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 import Config
 
 alias EthereumJSONRPC.Variant
@@ -39,41 +40,75 @@ config :block_scout_web, BlockScoutWeb.HealthEndpoint,
 
 pool_size = ConfigHelper.parse_integer_env_var("POOL_SIZE", 50)
 queue_target = ConfigHelper.parse_integer_env_var("DATABASE_QUEUE_TARGET", 50)
+database_url = ConfigHelper.parse_url_env_var("DATABASE_URL")
 
 # Configures the database
-config :explorer, Explorer.Repo,
-  url: System.get_env("DATABASE_URL"),
-  listener_url: System.get_env("DATABASE_EVENT_URL"),
-  pool_size: pool_size,
-  ssl: ExplorerConfigHelper.ssl_enabled?(),
-  queue_target: queue_target
+config :explorer,
+       Explorer.Repo,
+       [
+         url: database_url,
+         pool_size: pool_size,
+         queue_target: queue_target
+       ]
+       |> Keyword.merge(ExplorerConfigHelper.ssl_options(database_url))
+
+api_db_url = ExplorerConfigHelper.get_api_db_url()
 
 # Configures API the database
-config :explorer, Explorer.Repo.Replica1,
-  url: ExplorerConfigHelper.get_api_db_url(),
-  pool_size: ConfigHelper.parse_integer_env_var("POOL_SIZE_API", 50),
-  ssl: ExplorerConfigHelper.ssl_enabled?(),
-  queue_target: queue_target
+config :explorer,
+       Explorer.Repo.Replica1,
+       [
+         url: api_db_url,
+         pool_size: ConfigHelper.parse_integer_env_var("POOL_SIZE_API", 50),
+         queue_target: queue_target
+       ]
+       |> Keyword.merge(ExplorerConfigHelper.ssl_options(api_db_url))
+
+account_db_url = ExplorerConfigHelper.get_account_db_url()
 
 # Configures Account database
-config :explorer, Explorer.Repo.Account,
-  url: ExplorerConfigHelper.get_account_db_url(),
-  pool_size: ConfigHelper.parse_integer_env_var("ACCOUNT_POOL_SIZE", 50),
-  ssl: ExplorerConfigHelper.ssl_enabled?(),
-  queue_target: queue_target
+config :explorer,
+       Explorer.Repo.Account,
+       [
+         url: account_db_url,
+         pool_size: ConfigHelper.parse_integer_env_var("ACCOUNT_POOL_SIZE", 50),
+         queue_target: queue_target
+       ]
+       |> Keyword.merge(ExplorerConfigHelper.ssl_options(account_db_url))
+
+mud_db_url = ExplorerConfigHelper.get_mud_db_url()
 
 # Configures Mud database
-config :explorer, Explorer.Repo.Mud,
-  url: ExplorerConfigHelper.get_mud_db_url(),
-  pool_size: ConfigHelper.parse_integer_env_var("MUD_POOL_SIZE", 50),
-  ssl: ExplorerConfigHelper.ssl_enabled?(),
-  queue_target: queue_target
+config :explorer,
+       Explorer.Repo.Mud,
+       [
+         url: mud_db_url,
+         pool_size: ConfigHelper.parse_integer_env_var("MUD_POOL_SIZE", 50),
+         queue_target: queue_target
+       ]
+       |> Keyword.merge(ExplorerConfigHelper.ssl_options(mud_db_url))
+
+suave_db_url = ExplorerConfigHelper.get_suave_db_url()
 
 # Configures Suave database
-config :explorer, Explorer.Repo.Suave,
-  url: ExplorerConfigHelper.get_suave_db_url(),
-  pool_size: 1,
-  ssl: ExplorerConfigHelper.ssl_enabled?()
+config :explorer,
+       Explorer.Repo.Suave,
+       [
+         url: suave_db_url,
+         pool_size: 1
+       ]
+       |> Keyword.merge(ExplorerConfigHelper.ssl_options(suave_db_url))
+
+event_notification_db_url = ExplorerConfigHelper.get_event_notification_db_url()
+
+config :explorer,
+       Explorer.Repo.EventNotifications,
+       [
+         url: event_notification_db_url,
+         pool_size: ConfigHelper.parse_integer_env_var("DATABASE_EVENT_POOL_SIZE", 10),
+         queue_target: queue_target
+       ]
+       |> Keyword.merge(ExplorerConfigHelper.ssl_options(event_notification_db_url))
 
 # Actually the following repos are not started, and its pool size remains
 # unused. Separating repos for different chain type or feature flag is
@@ -92,7 +127,6 @@ for repo <- [
       Explorer.Repo.Filecoin,
       Explorer.Repo.Optimism,
       Explorer.Repo.PolygonEdge,
-      Explorer.Repo.PolygonZkevm,
       Explorer.Repo.RSK,
       Explorer.Repo.Scroll,
       Explorer.Repo.Shibarium,
@@ -101,10 +135,13 @@ for repo <- [
       Explorer.Repo.ZkSync,
       Explorer.Repo.Neon
     ] do
-  config :explorer, repo,
-    url: System.get_env("DATABASE_URL"),
-    pool_size: 1,
-    ssl: ExplorerConfigHelper.ssl_enabled?()
+  config :explorer,
+         repo,
+         [
+           url: database_url,
+           pool_size: 1
+         ]
+         |> Keyword.merge(ExplorerConfigHelper.ssl_options(database_url))
 end
 
 variant = Variant.get()

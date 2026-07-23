@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Temporary.UncatalogedTokenTransfersTest do
   use Explorer.DataCase
 
@@ -46,6 +47,7 @@ defmodule Indexer.Temporary.UncatalogedTokenTransfersTest do
         insert(:token_transfer_log,
           transaction: transaction,
           address_hash: address.hash,
+          address: address,
           block: block
         )
 

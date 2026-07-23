@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.BufferedTask do
   @moduledoc """
   Provides a behaviour for batched task running with retries and memory-aware buffering.
@@ -315,6 +316,7 @@ defmodule Indexer.BufferedTask do
     :max_batch_size
   ]
   defstruct init_task: nil,
+            init_task_delay: 0,
             flush_timer: nil,
             callback_module: nil,
             callback_module_state: nil,
@@ -332,8 +334,10 @@ defmodule Indexer.BufferedTask do
   @typedoc """
   BufferedTask struct:
   * `init_task` - reference to the initial streaming task. This field holds the
-    `Task.t()` for the initial data population process. It's used to track the
+    `reference()` for the initial data population process. It's used to track the
     completion of the initial data streaming.
+  * `init_task_delay` - delay between running init tasks.
+    It increases if the last init task added nothing to queue and resets to 0 otherwise.
   * `flush_timer` - reference to the timer for periodic buffer flushing. This
     field stores the timer reference returned by `Process.send_after/3`, which
     is scheduled using the `flush_interval`. When the timer triggers, it sends
@@ -385,7 +389,8 @@ defmodule Indexer.BufferedTask do
     results and retries.
   """
   @type t :: %__MODULE__{
-          init_task: Task.t() | :complete | nil,
+          init_task: reference() | :complete | :delay | nil,
+          init_task_delay: non_neg_integer(),
           flush_timer: reference() | nil,
           callback_module: module(),
           callback_module_state: term(),
@@ -557,13 +562,16 @@ defmodule Indexer.BufferedTask do
 
     ## Parameters
     - `server`: The name or PID of the BufferedTask process.
+    - `current_front_buffer?`: If `true`, includes entries in the front buffer
+      in the total count; if `false`, only includes entries in the regular buffer
+      and the processing queue.
 
     ## Returns
     A map with keys `:buffer` (total entries count) and `:tasks` (active tasks count).
   """
-  @spec debug_count(GenServer.name()) :: %{buffer: non_neg_integer(), tasks: non_neg_integer()}
-  def debug_count(server) do
-    GenServer.call(server, :debug_count)
+  @spec debug_count(GenServer.name(), boolean()) :: %{buffer: non_neg_integer(), tasks: non_neg_integer()}
+  def debug_count(server, current_front_buffer? \\ true) do
+    GenServer.call(server, {:debug_count, current_front_buffer?})
   end
 
   @doc """
@@ -693,6 +701,13 @@ defmodule Indexer.BufferedTask do
     {:noreply, flush(state)}
   end
 
+  # Handles graceful shutdown. A fetcher implementing BufferedTask behaviour
+  # can invoke `Process.send(__MODULE__, :shutdown, [])` to shutdown itself.
+  # Its `restart` configuration must be set to `:transient`.
+  def handle_info(:shutdown, state) do
+    {:stop, :shutdown, state}
+  end
+
   # Handles the successful completion of the initial streaming task.
   def handle_info({ref, :ok}, %__MODULE__{init_task: ref} = state) do
     {:noreply, state}
@@ -708,7 +723,7 @@ defmodule Indexer.BufferedTask do
   # Handles the successful completion of a task processing queue data, updated the
   # callback module state, removes the reference to the task, and triggers processing
   # of the next batch if queue contains data.
-  def handle_info({ref, {:ok, new_callback_module_state}}, state) do
+  def handle_info({ref, {:ok, new_callback_module_state}}, %__MODULE__{} = state) do
     {:noreply, drop_task(%__MODULE__{state | callback_module_state: new_callback_module_state}, ref)}
   end
 
@@ -716,6 +731,7 @@ defmodule Indexer.BufferedTask do
   # is added back to the queue and processing of the next batch is triggered.
   # Useful when all data from the batch needs to be reprocessed.
   def handle_info({ref, :retry}, state) do
+    Logger.debug("Retrying batch with ref #{inspect(ref)}")
     {:noreply, drop_task_and_retry(state, ref)}
   end
 
@@ -724,6 +740,7 @@ defmodule Indexer.BufferedTask do
   # the next batch is triggered. Useful when only part of the original batch
   # needs to be reprocessed.
   def handle_info({ref, {:retry, retryable_entries}}, state) do
+    Logger.debug("Retrying batch with ref #{inspect(ref)} and specific entries #{inspect(retryable_entries)}")
     {:noreply, drop_task_and_retry(state, ref, retryable_entries)}
   end
 
@@ -733,14 +750,25 @@ defmodule Indexer.BufferedTask do
   # the next batch is triggered.
   # If all entries are needed to be retried, the `retryable_entries` should
   # be `nil`.
-  def handle_info({ref, {:retry, retryable_entries, new_callback_module_state}}, state) do
+  def handle_info({ref, {:retry, retryable_entries, new_callback_module_state}}, %__MODULE__{} = state) do
+    Logger.debug("Retrying batch with ref #{inspect(ref)} and specific entries #{inspect(retryable_entries)}")
+
     {:noreply,
      drop_task_and_retry(%__MODULE__{state | callback_module_state: new_callback_module_state}, ref, retryable_entries)}
   end
 
   # Handles the normal termination of the initial streaming task, marking it as complete.
-  def handle_info({:DOWN, ref, :process, _pid, :normal}, %__MODULE__{init_task: ref} = state) do
-    {:noreply, %__MODULE__{state | init_task: :complete}}
+  def handle_info(
+        {:DOWN, ref, :process, _pid, :normal},
+        %__MODULE__{init_task: ref, bound_queue: %{size: size}} = state
+      ) do
+    init_task_delay =
+      case size do
+        0 -> increased_delay()
+        _ -> 0
+      end
+
+    {:noreply, %__MODULE__{state | init_task: :complete, init_task_delay: init_task_delay}}
   end
 
   # Handles the normal termination of a non-initial task, no action needed.
@@ -751,6 +779,7 @@ defmodule Indexer.BufferedTask do
   # Handles abnormal termination of a task processing queue data. The task's batch
   # is re-added to the queue and processing of the next batch is triggered.
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    Logger.debug("Task crashed, retrying batch with ref #{inspect(ref)}")
     {:noreply, drop_task_and_retry(state, ref)}
   end
 
@@ -772,7 +801,7 @@ defmodule Indexer.BufferedTask do
   # Returns a count of entries in buffers and queue, and the number of active tasks.
   # This is useful for monitoring and debugging the BufferedTask's internal state.
   def handle_call(
-        :debug_count,
+        {:debug_count, current_front_buffer?},
         _from,
         %__MODULE__{
           current_buffer: current_buffer,
@@ -782,7 +811,14 @@ defmodule Indexer.BufferedTask do
           task_ref_to_batch: task_ref_to_batch
         } = state
       ) do
-    count = length(current_buffer) + length(current_front_buffer) + Enum.count(bound_queue) * max_batch_size
+    current_front_buffer_count =
+      if current_front_buffer? do
+        length(current_front_buffer)
+      else
+        0
+      end
+
+    count = length(current_buffer) + current_front_buffer_count + Enum.count(bound_queue) * max_batch_size
 
     {:reply, %{buffer: count, tasks: Enum.count(task_ref_to_batch)}, state}
   end
@@ -863,7 +899,7 @@ defmodule Indexer.BufferedTask do
   # Updated state after removing the task and potentially spawning a new data
   # portion for processing.
   @spec drop_task(t(), reference()) :: t()
-  defp drop_task(state, ref) do
+  defp drop_task(%__MODULE__{} = state, ref) do
     spawn_next_batch(%__MODULE__{state | task_ref_to_batch: Map.delete(state.task_ref_to_batch, ref)})
   end
 
@@ -920,12 +956,12 @@ defmodule Indexer.BufferedTask do
   defp buffer_entries(state, [], _front?), do: state
 
   @spec buffer_entries(t(), nonempty_list(), true) :: t()
-  defp buffer_entries(state, entries, true) do
+  defp buffer_entries(%__MODULE__{} = state, entries, true) do
     %__MODULE__{state | current_front_buffer: [entries | state.current_front_buffer]}
   end
 
   @spec buffer_entries(t(), nonempty_list(), false) :: t()
-  defp buffer_entries(state, entries, false) do
+  defp buffer_entries(%__MODULE__{} = state, entries, false) do
     %__MODULE__{state | current_buffer: [entries | state.current_buffer]}
   end
 
@@ -951,7 +987,7 @@ defmodule Indexer.BufferedTask do
   # ## Returns
   # - Updated `state` with the new `init_task` reference and scheduled buffer flush.
   @spec do_initial_stream(%__MODULE__{
-          init_task: Task.t() | :complete | nil,
+          init_task: reference() | :complete | :delay | nil,
           callback_module: module(),
           max_batch_size: pos_integer(),
           task_supervisor: GenServer.name(),
@@ -1217,9 +1253,13 @@ defmodule Indexer.BufferedTask do
           bound_queue: BoundQueue.t(term()),
           task_ref_to_batch: %{reference() => [term(), ...]}
         }) :: t()
-  defp schedule_next(%__MODULE__{poll: true, bound_queue: %BoundQueue{size: 0}, task_ref_to_batch: tasks} = state)
-       when tasks == %{} do
-    do_initial_stream(state)
+  defp schedule_next(
+         %__MODULE__{poll: true, init_task: init_task, bound_queue: %BoundQueue{size: 0}, task_ref_to_batch: tasks} =
+           state
+       )
+       when tasks == %{} and init_task in [:complete, nil] do
+    Process.send_after(self(), :initial_stream, state.init_task_delay)
+    schedule_next_buffer_flush(%{state | init_task: :delay})
   end
 
   defp schedule_next(%__MODULE__{} = state) do
@@ -1239,7 +1279,7 @@ defmodule Indexer.BufferedTask do
   # - The updated state with the new flush_timer if a flush was scheduled,
   #   or the unchanged state if flush_interval is :infinity.
   @spec schedule_next_buffer_flush(%__MODULE__{flush_interval: timeout() | :infinity}) :: t()
-  defp schedule_next_buffer_flush(state) do
+  defp schedule_next_buffer_flush(%__MODULE__{} = state) do
     if state.flush_interval == :infinity do
       state
     else
@@ -1389,4 +1429,6 @@ defmodule Indexer.BufferedTask do
     |> push_front(front_entries)
     |> flush()
   end
+
+  defp increased_delay, do: Application.get_env(:indexer, :fetcher_init_delay)
 end

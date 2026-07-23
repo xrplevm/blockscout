@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation.Helper do
   @moduledoc """
   Common functions for Explorer.Migrator.HeavyDbIndexOperation.* modules
@@ -106,9 +107,9 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation.Helper do
   Creates DB index with the given name and table name atom, if it doesn't exist.
   """
   @spec create_db_index(String.t(), atom(), list()) :: :ok | :error
-  def create_db_index(raw_index_name, table_name_atom, table_columns) do
+  def create_db_index(raw_index_name, table_name_atom, table_columns, unique? \\ false) do
     index_name = sanitize_index_name(raw_index_name)
-    query = create_index_query_string(index_name, table_name_atom, table_columns)
+    query = create_index_query_string(index_name, table_name_atom, table_columns, unique?)
     run_create_db_index_query(query)
   end
 
@@ -153,9 +154,9 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation.Helper do
       "CREATE INDEX CONCURRENTLY IF NOT EXISTS \"my_index\" on my_table (column1, column2);"
 
   """
-  @spec create_index_query_string(String.t(), atom(), list()) :: String.t()
-  def create_index_query_string(index_name, table_name_atom, table_columns) do
-    "CREATE INDEX #{add_concurrently_flag?()} IF NOT EXISTS \"#{index_name}\" on #{to_string(table_name_atom)} (#{Enum.join(table_columns, ", ")});"
+  @spec create_index_query_string(String.t(), atom(), list(), boolean()) :: String.t()
+  def create_index_query_string(index_name, table_name_atom, table_columns, unique? \\ false) do
+    "CREATE #{(unique? && "UNIQUE") || ""} INDEX #{add_concurrently_flag?()} IF NOT EXISTS \"#{index_name}\" on #{to_string(table_name_atom)} (#{Enum.join(table_columns, ", ")});"
   end
 
   @doc """
@@ -172,6 +173,24 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation.Helper do
 
       {:error, error} ->
         Logger.error("Failed to drop DB index '#{index_name}': #{inspect(error)}")
+        :error
+    end
+  end
+
+  @doc """
+  Cancels currently active index creating query.
+  """
+  @spec cancel_index_creating_query(String.t()) :: :ok | :error
+  # sobelow_skip ["SQL"]
+  def cancel_index_creating_query(raw_index_name) do
+    index_name = sanitize_index_name(raw_index_name)
+
+    case SQL.query(Repo, cancel_index_query_string(index_name), [], timeout: :infinity) do
+      {:ok, _} ->
+        :ok
+
+      {:error, error} ->
+        Logger.error("Failed to cancel creating DB index '#{index_name}': #{inspect(error)}")
         :error
     end
   end
@@ -212,6 +231,23 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation.Helper do
   def drop_index_query_string(raw_index_name) do
     index_name = sanitize_index_name(raw_index_name)
     "DROP INDEX #{add_concurrently_flag?()} IF EXISTS \"#{index_name}\";"
+  end
+
+  @doc """
+  Generates a SQL query string to cancel a currently active `CREATE INDEX` query.
+  """
+  @spec cancel_index_query_string(String.t()) :: String.t()
+  def cancel_index_query_string(raw_index_name) do
+    index_name = sanitize_index_name(raw_index_name)
+
+    """
+    SELECT pg_cancel_backend(pid)
+    FROM pg_stat_activity
+    WHERE pid <> pg_backend_pid()
+      AND query ILIKE '%create%index%'
+      AND query ILIKE '%#{index_name}%'
+      AND state = 'active';
+    """
   end
 
   @doc """

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Application do
   @moduledoc """
   Supervises `BlockScoutWeb.Endpoint` in order to serve Web UI.
@@ -6,19 +7,51 @@ defmodule BlockScoutWeb.Application do
   use Application
   use Utils.CompileTimeEnvHelper, disable_api?: [:block_scout_web, :disable_api?]
 
-  alias BlockScoutWeb.{Endpoint, HealthEndpoint}
+  alias BlockScoutWeb.{Endpoint, HealthEndpoint, RateLimit.Hammer}
+  alias BlockScoutWeb.Utility.RateLimitConfigHelper
+  alias Explorer
 
-  def start(_type, _args) do
-    opts = [strategy: :one_for_one, name: BlockScoutWeb.Supervisor, max_restarts: 1_000]
+  if @disable_api? do
+    def start(_type, _args) do
+      opts = [strategy: :one_for_one, name: BlockScoutWeb.Supervisor, max_restarts: 1_000]
 
-    if Application.get_env(:nft_media_handler, :standalone_media_worker?) do
-      Supervisor.start_link([Supervisor.child_spec(HealthEndpoint, [])], opts)
-    else
-      base_children = [Supervisor.child_spec(Endpoint, [])]
-      api_children = setup_and_define_children()
-      all_children = base_children ++ api_children
+      if Application.get_env(:nft_media_handler, :standalone_media_worker?) do
+        Supervisor.start_link([Supervisor.child_spec(HealthEndpoint, [])], opts)
+      else
+        # Endpoint must be the last child in the supervision tree
+        # since it must be started after all of the other processes
+        # (to be sure that application is ready to handle traffic)
+        # and stopped before them for the same reason.
+        # However, some processes may depend on Endpoint
+        # so they need to be started after.
+        base_children = [Supervisor.child_spec(Endpoint, [])]
+        {first_api_children, last_api_children} = setup_and_define_children()
+        all_children = first_api_children ++ base_children ++ last_api_children
 
-      Supervisor.start_link(all_children, opts)
+        Supervisor.start_link(all_children, opts)
+      end
+    end
+  else
+    def start(_type, _args) do
+      opts = [strategy: :one_for_one, name: BlockScoutWeb.Supervisor, max_restarts: 1_000]
+
+      RateLimitConfigHelper.store_rate_limit_config()
+
+      if Application.get_env(:nft_media_handler, :standalone_media_worker?) do
+        Supervisor.start_link([Supervisor.child_spec(HealthEndpoint, [])], opts)
+      else
+        # Endpoint must be the last child in the supervision tree
+        # since it must be started after all of the other processes
+        # (to be sure that application is ready to handle traffic)
+        # and stopped before them for the same reason.
+        # However, some processes may depend on Endpoint
+        # so they need to be started after.
+        base_children = [Supervisor.child_spec(Endpoint, [])]
+        {first_api_children, last_api_children} = setup_and_define_children()
+        all_children = first_api_children ++ base_children ++ last_api_children
+
+        Supervisor.start_link(all_children, opts)
+      end
     end
   end
 
@@ -29,27 +62,40 @@ defmodule BlockScoutWeb.Application do
     :ok
   end
 
+  alias Indexer.Prometheus.Metrics, as: IndexerMetrics
+  alias Indexer.Prometheus.RealtimeMetrics, as: IndexerRealtimeMetrics
+
+  defp indexer_metric_worker do
+    if Explorer.mode() in [:indexer, :all] do
+      [{IndexerMetrics, []}, {IndexerRealtimeMetrics, []}]
+    else
+      []
+    end
+  end
+
   if @disable_api? do
     defp setup_and_define_children do
       BlockScoutWeb.Prometheus.Exporter.setup()
-      []
+      {indexer_metric_worker(), []}
     end
   else
     defp setup_and_define_children do
       alias BlockScoutWeb.API.APILogger
       alias BlockScoutWeb.Counters.{BlocksIndexedCounter, InternalTransactionsIndexedCounter}
-      alias BlockScoutWeb.Prometheus.{Exporter, PhoenixInstrumenter, PublicExporter}
-      alias BlockScoutWeb.{MainPageRealtimeEventHandler, RealtimeEventHandler, SmartContractRealtimeEventHandler}
-      alias BlockScoutWeb.Utility.EventHandlersMetrics
-      alias Explorer.Chain.Metrics, as: ChainMetrics
+      alias BlockScoutWeb.Prometheus.{Exporter, PublicExporter}
 
-      PhoenixInstrumenter.setup()
+      alias BlockScoutWeb.RealtimeEventHandlers.{
+        Main,
+        MainPage,
+        SmartContract,
+        TokenTransfer
+      }
+
+      alias BlockScoutWeb.Utility.EventHandlersMetrics
+      alias Explorer.Chain.Metrics.PublicMetrics, as: PublicChainMetrics
+
       Exporter.setup()
       PublicExporter.setup()
-
-      APILogger.message(
-        "Current global API rate limit #{inspect(Application.get_env(:block_scout_web, :api_rate_limit)[:global_limit])} reqs/sec"
-      )
 
       APILogger.message(
         "Current API rate limit by key #{inspect(Application.get_env(:block_scout_web, :api_rate_limit)[:limit_by_key])} reqs/sec"
@@ -59,19 +105,26 @@ defmodule BlockScoutWeb.Application do
         "Current API rate limit by IP #{inspect(Application.get_env(:block_scout_web, :api_rate_limit)[:limit_by_ip])} reqs/sec"
       )
 
-      # Define workers and child supervisors to be supervised
-      [
-        # Start the endpoint when the application starts
+      base_workers = [
         {Phoenix.PubSub, name: BlockScoutWeb.PubSub},
-        {Absinthe.Subscription, Endpoint},
-        {MainPageRealtimeEventHandler, name: MainPageRealtimeEventHandler},
-        {RealtimeEventHandler, name: RealtimeEventHandler},
-        {SmartContractRealtimeEventHandler, name: SmartContractRealtimeEventHandler},
+        {MainPage, name: MainPage},
+        {Main, name: Main},
+        {SmartContract, name: SmartContract},
+        {TokenTransfer, name: TokenTransfer},
         {BlocksIndexedCounter, name: BlocksIndexedCounter},
         {InternalTransactionsIndexedCounter, name: InternalTransactionsIndexedCounter},
         {EventHandlersMetrics, []},
-        {ChainMetrics, []}
+        {PublicChainMetrics, []},
+        Hammer.child_for_supervisor()
       ]
+
+      # Define workers and child supervisors to be supervised
+      {
+        base_workers ++ indexer_metric_worker(),
+        [
+          {Absinthe.Subscription, Endpoint}
+        ]
+      }
     end
   end
 end

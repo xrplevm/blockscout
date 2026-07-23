@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Realtime.Fetcher do
   @moduledoc """
   Fetches and indexes block ranges from latest block forward using a WebSocket.
@@ -16,13 +17,15 @@ defmodule Indexer.Block.Realtime.Fetcher do
       async_import_blobs: 2,
       async_import_block_rewards: 2,
       async_import_celo_epoch_block_operations: 2,
+      async_import_celo_accounts: 2,
       async_import_created_contract_codes: 2,
       async_import_filecoin_addresses_info: 2,
       async_import_internal_transactions: 2,
-      async_import_polygon_zkevm_bridge_l1_tokens: 1,
       async_import_realtime_coin_balances: 1,
       async_import_replaced_transactions: 2,
+      async_import_signed_authorizations_statuses: 2,
       async_import_token_balances: 2,
+      async_import_current_token_balances: 2,
       async_import_token_instances: 1,
       async_import_tokens: 2,
       async_import_uncles: 2,
@@ -34,7 +37,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
   alias Explorer.Chain
   alias Explorer.Chain.Cache.Counters.AverageBlockTime
   alias Explorer.Chain.Events.Publisher
-  alias Explorer.Utility.MissingRangesManipulator
+  alias Explorer.Utility.MissingBlockRange
   alias Indexer.{Block, Tracer}
   alias Indexer.Block.Realtime.TaskSupervisor
   alias Indexer.Fetcher.OnDemand.ContractCreator, as: ContractCreatorOnDemand
@@ -59,13 +62,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
             last_realtime_blocks: %{}
 
   @type t :: %__MODULE__{
-          block_fetcher: %Block.Fetcher{
-            broadcast: term(),
-            callback_module: __MODULE__,
-            json_rpc_named_arguments: EthereumJSONRPC.json_rpc_named_arguments(),
-            receipts_batch_size: pos_integer(),
-            receipts_concurrency: pos_integer()
-          },
+          block_fetcher: Block.Fetcher.t(__MODULE__),
           subscription: Subscription.t(),
           previous_number: pos_integer() | nil,
           timer: reference(),
@@ -397,21 +394,6 @@ defmodule Indexer.Block.Realtime.Fetcher do
     Indexer.Fetcher.Optimism.Withdrawal.remove(reorg_block_number)
   end
 
-  # Removes all rows from `polygon_edge_withdrawals` and `polygon_edge_deposit_executes` tables
-  # previously written starting from the reorg block number
-  defp do_remove_assets_by_number(:polygon_edge, reorg_block) do
-    # credo:disable-for-lines:2 Credo.Check.Design.AliasUsage
-    Indexer.Fetcher.PolygonEdge.Withdrawal.remove(reorg_block)
-    Indexer.Fetcher.PolygonEdge.DepositExecute.remove(reorg_block)
-  end
-
-  # Removes all rows from `polygon_zkevm_bridge` table
-  # previously written starting from the reorg block number
-  defp do_remove_assets_by_number(:polygon_zkevm, reorg_block) do
-    # credo:disable-for-next-line Credo.Check.Design.AliasUsage
-    Indexer.Fetcher.PolygonZkevm.BridgeL2.reorg_handle(reorg_block)
-  end
-
   # Removes all rows from `shibarium_bridge` table
   # previously written starting from the reorg block number
   defp do_remove_assets_by_number(:shibarium, reorg_block) do
@@ -436,12 +418,12 @@ defmodule Indexer.Block.Realtime.Fetcher do
     {fetch_duration, result} =
       :timer.tc(fn -> fetch_and_import_range(block_fetcher, block_number_to_fetch..block_number_to_fetch) end)
 
-    Prometheus.Instrumenter.block_full_process(fetch_duration, __MODULE__)
+    Prometheus.Instrumenter.set_block_full_process(fetch_duration, __MODULE__)
 
     case result do
       {:ok, %{inserted: inserted, errors: []}} ->
         log_import_timings(inserted, fetch_duration, time_before)
-        MissingRangesManipulator.clear_batch([block_number_to_fetch..block_number_to_fetch])
+        MissingBlockRange.clear_batch([block_number_to_fetch..block_number_to_fetch])
         Logger.debug("Fetched and imported.")
 
       {:ok, %{inserted: _, errors: [_ | _] = errors}} ->
@@ -454,7 +436,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
         end)
 
       {:error, {:import = step, [%Changeset{} | _] = changesets}} ->
-        Prometheus.Instrumenter.import_errors()
+        Prometheus.Instrumenter.set_import_errors_count()
 
         params = %{
           changesets: changesets,
@@ -479,7 +461,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
         end
 
       {:error, {:import = step, reason}} ->
-        Prometheus.Instrumenter.import_errors()
+        Prometheus.Instrumenter.set_import_errors_count()
         Logger.error(fn -> inspect(reason) end, step: step)
 
       {:error, {step, reason}} ->
@@ -510,7 +492,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
 
   defp log_import_timings(%{blocks: [%{number: number, timestamp: timestamp}]}, fetch_duration, time_before) do
     node_delay = Timex.diff(time_before, timestamp, :seconds)
-    Prometheus.Instrumenter.node_delay(node_delay)
+    Prometheus.Instrumenter.set_json_rpc_node_delay(node_delay)
 
     Logger.debug("Block #{number} fetching duration: #{fetch_duration / 1_000_000}s. Node delay: #{node_delay}s.",
       fetcher: :block_import_timings
@@ -552,12 +534,14 @@ defmodule Indexer.Block.Realtime.Fetcher do
     async_import_internal_transactions(imported, realtime?)
     async_import_tokens(imported, realtime?)
     async_import_token_balances(imported, realtime?)
+    async_import_current_token_balances(imported, realtime?)
     async_import_token_instances(imported)
     async_import_uncles(imported, realtime?)
     async_import_replaced_transactions(imported, realtime?)
     async_import_blobs(imported, realtime?)
-    async_import_polygon_zkevm_bridge_l1_tokens(imported)
     async_import_celo_epoch_block_operations(imported, realtime?)
+    async_import_celo_accounts(imported, realtime?)
     async_import_filecoin_addresses_info(imported, realtime?)
+    async_import_signed_authorizations_statuses(imported, realtime?)
   end
 end

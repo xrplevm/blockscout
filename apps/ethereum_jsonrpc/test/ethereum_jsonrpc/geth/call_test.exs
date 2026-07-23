@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Geth.CallTest do
   use ExUnit.Case, async: true
 
@@ -41,7 +42,7 @@ defmodule EthereumJSONRPC.Geth.CallTest do
                transaction_hash: "0xbc38745b826f058ed2f6c93fa5b145323857f06bbb5230b6a6a50e09e0915857",
                transaction_index: 0,
                type: "call",
-               value: 0,
+               value: nil,
                error: "execution reverted"
              }
     end

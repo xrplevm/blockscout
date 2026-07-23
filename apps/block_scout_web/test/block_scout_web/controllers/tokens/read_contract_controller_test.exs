@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Tokens.ContractControllerTest do
   use BlockScoutWeb.ConnCase, async: false
 
@@ -57,7 +58,8 @@ defmodule BlockScoutWeb.Tokens.ContractControllerTest do
         token: token
       )
 
-      TestHelper.get_all_proxies_implementation_zero_addresses()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       conn = get(conn, token_read_contract_path(BlockScoutWeb.Endpoint, :index, token.contract_address_hash))
 

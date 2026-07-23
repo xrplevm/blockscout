@@ -1,8 +1,11 @@
-if Application.compile_env(:explorer, :chain_type) !== :zksync do
-  defmodule Explorer.SmartContract.Solidity.VerifierTest do
-    use ExUnit.Case, async: true
-    use Explorer.DataCase
+# SPDX-License-Identifier: LicenseRef-Blockscout
+defmodule Explorer.SmartContract.Solidity.VerifierTest do
+  use ExUnit.Case, async: true
+  use Explorer.DataCase
 
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
+
+  if @chain_type == :default do
     @moduletag timeout: :infinity
 
     doctest Explorer.SmartContract.Solidity.Verifier
@@ -67,9 +70,11 @@ if Application.compile_env(:explorer, :chain_type) !== :zksync do
     setup do
       configuration = Application.get_env(:explorer, Explorer.SmartContract.RustVerifierInterfaceBehaviour)
       Application.put_env(:explorer, Explorer.SmartContract.RustVerifierInterfaceBehaviour, enabled: false)
+      Application.put_env(:tesla, :adapter, Tesla.Adapter.Mint)
 
       on_exit(fn ->
         Application.put_env(:explorer, Explorer.SmartContract.RustVerifierInterfaceBehaviour, configuration)
+        Application.put_env(:tesla, :adapter, Explorer.Mock.TeslaAdapter)
       end)
     end
 
@@ -503,17 +508,17 @@ if Application.compile_env(:explorer, :chain_type) !== :zksync do
           |> insert()
           |> with_block(transaction_success_details)
 
-        :internal_transaction
+        :internal_transaction_create
         |> insert(
-          created_contract_address_hash: contract_address.hash,
+          created_contract_address: contract_address,
           init: init,
           type: "create",
           created_contract_code: bytecode,
           input: nil,
           transaction_hash: transaction.hash,
+          transaction_index: transaction.index,
           index: 0,
-          block_hash: transaction.block_hash,
-          block_index: 0
+          block_number: transaction.block_number
         )
 
         params = %{
@@ -561,30 +566,30 @@ if Application.compile_env(:explorer, :chain_type) !== :zksync do
           |> insert()
           |> with_block(transaction_failure_details)
 
-        :internal_transaction
+        :internal_transaction_create
         |> insert(
-          created_contract_address_hash: contract_address.hash,
+          created_contract_address: contract_address,
           init: init,
           type: "create",
           created_contract_code: bytecode,
           input: nil,
           transaction_hash: transaction_success.hash,
+          transaction_index: transaction_success.index,
           index: 0,
-          block_hash: transaction_success.block_hash,
-          block_index: 0
+          block_number: transaction_success.block_number
         )
 
-        :internal_transaction
+        :internal_transaction_create
         |> insert(
-          created_contract_address_hash: contract_address.hash,
+          created_contract_address: contract_address,
           init: init,
           type: "create",
           created_contract_code: bytecode,
           input: nil,
           transaction_hash: transaction_failure.hash,
+          transaction_index: transaction_failure.index,
           index: 0,
-          block_hash: transaction_failure.block_hash,
-          block_index: 0
+          block_number: transaction_failure.block_number
         )
 
         params = %{

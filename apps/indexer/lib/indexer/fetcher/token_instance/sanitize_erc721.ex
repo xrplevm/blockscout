@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenInstance.SanitizeERC721 do
   @moduledoc """
     This fetcher is stands for creating token instances which wasn't inserted yet and index meta for them.
@@ -54,7 +55,7 @@ defmodule Indexer.Fetcher.TokenInstance.SanitizeERC721 do
     address_hashes =
       state[:tokens_queue_size]
       |> Token.ordered_erc_721_token_address_hashes_list_query(state[:last_token_address_hash])
-      |> Repo.all()
+      |> Repo.all(timeout: :infinity)
 
     if Enum.empty?(address_hashes) do
       MigrationStatus.set_status(@migration_name, "completed")
@@ -81,7 +82,7 @@ defmodule Indexer.Fetcher.TokenInstance.SanitizeERC721 do
     instances_to_fetch =
       (concurrency * batch_size)
       |> Instance.not_inserted_token_instances_query_by_token(current_address_hash)
-      |> Repo.all()
+      |> Repo.all(timeout: :infinity)
 
     if Enum.empty?(instances_to_fetch) do
       Constants.insert_last_processed_token_address_hash(current_address_hash)

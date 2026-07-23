@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.CsvExport.Helper do
   @moduledoc """
   CSV export helper functions.
@@ -160,6 +161,7 @@ defmodule Explorer.Chain.CsvExport.Helper do
       "address" ->
         filter_value in supported_address_filter_values()
 
+      # todo: topic filter is unused, consider removing
       "topic" ->
         case Hash.cast(filter_value) do
           {:ok, _} -> true
@@ -169,5 +171,10 @@ defmodule Explorer.Chain.CsvExport.Helper do
       _ ->
         true
     end
+  end
+
+  @spec async_enabled?() :: boolean()
+  def async_enabled? do
+    Application.get_env(:explorer, Explorer.Chain.CsvExport)[:async?]
   end
 end

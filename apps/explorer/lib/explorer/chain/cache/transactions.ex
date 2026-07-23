@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Transactions do
   @moduledoc """
   Caches the latest imported transactions
@@ -12,10 +13,7 @@ defmodule Explorer.Chain.Cache.Transactions do
       :block,
       created_contract_address: :names,
       from_address: :names,
-      to_address: :names,
-      token_transfers: :token,
-      token_transfers: :from_address,
-      token_transfers: :to_address
+      to_address: :names
     ],
     ttl_check_interval: Application.get_env(:explorer, __MODULE__)[:ttl_check_interval],
     global_ttl: Application.get_env(:explorer, __MODULE__)[:global_ttl]

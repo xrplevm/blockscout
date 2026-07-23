@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.Helper do
   @moduledoc """
     API V2 helper
@@ -5,7 +6,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   alias Ecto.Association.NotLoaded
-  alias Explorer.Chain.{Address, SmartContract}
+  alias Explorer.Chain.{Address, Address.Reputation}
   alias Explorer.Chain.SmartContract.Proxy
   alias Explorer.Chain.Transaction.History.TransactionStats
 
@@ -82,6 +83,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
       "is_contract" => smart_contract?,
       "name" => address_name(address),
       "is_scam" => address_marked_as_scam?(address),
+      "reputation" => (address_marked_as_scam?(address) && "scam") || address_reputation_if_loaded(address),
       "proxy_type" => proxy_implementations && proxy_implementations.proxy_type,
       "implementations" => Proxy.proxy_object_info(proxy_implementations),
       "is_verified" => smart_contract_verified?(address) || verified_as_proxy?(proxy_implementations),
@@ -111,12 +113,22 @@ defmodule BlockScoutWeb.API.V2.Helper do
       "hash" => Address.checksum(address_hash),
       "is_contract" => false,
       "name" => nil,
+      "is_scam" => false,
+      "reputation" => "ok",
       "proxy_type" => nil,
       "implementations" => [],
       "is_verified" => nil,
       "ens_domain_name" => nil,
       "metadata" => nil
     }
+  end
+
+  defp address_reputation_if_loaded(%Address{reputation: %Reputation{reputation: reputation}}) do
+    reputation
+  end
+
+  defp address_reputation_if_loaded(_) do
+    "ok"
   end
 
   case @chain_type do
@@ -144,7 +156,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
     case Enum.find(address_names, &(&1.primary == true)) do
       nil ->
         # take last created address name, if there is no `primary` one.
-        %Address.Name{name: name} = Enum.max_by(address_names, & &1.id)
+        %Address.Name{name: name} = Enum.max_by(address_names, & &1.inserted_at)
         name
 
       %Address.Name{name: name} ->
@@ -176,15 +188,27 @@ defmodule BlockScoutWeb.API.V2.Helper do
     - `false` if the smart contract is `NotLoaded`.
     - `true` if the smart contract is present and does not have metadata from a verified bytecode twin.
   """
-  @spec smart_contract_verified?(Address.t()) :: boolean()
-  def smart_contract_verified?(%Address{smart_contract: nil}), do: false
-  def smart_contract_verified?(%Address{smart_contract: %{metadata_from_verified_bytecode_twin: true}}), do: false
-  def smart_contract_verified?(%Address{smart_contract: %NotLoaded{}}), do: nil
-  def smart_contract_verified?(%Address{smart_contract: %SmartContract{}}), do: true
+  @spec smart_contract_verified?(Address.t()) :: boolean() | nil
+  def smart_contract_verified?(%Address{verified: verified}) when is_boolean(verified), do: verified
+  def smart_contract_verified?(%Address{verified: nil}), do: nil
+  def smart_contract_verified?(_), do: false
 
-  def market_cap(:standard, %{available_supply: available_supply, fiat_value: fiat_value, market_cap: market_cap})
+  def market_cap(:standard, %{
+        available_supply: available_supply,
+        fiat_value: fiat_value,
+        market_cap: %Decimal{} = market_cap
+      })
       when is_nil(available_supply) or is_nil(fiat_value) do
-    max(Decimal.new(0), market_cap)
+    Decimal.max(Decimal.new(0), market_cap)
+  end
+
+  def market_cap(:standard, %{
+        available_supply: available_supply,
+        fiat_value: fiat_value,
+        market_cap: nil
+      })
+      when is_nil(available_supply) or is_nil(fiat_value) do
+    Decimal.new(0)
   end
 
   def market_cap(:standard, %{available_supply: available_supply, fiat_value: fiat_value}) do
@@ -197,7 +221,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
 
   def get_transaction_stats do
     stats_scale = date_range(1)
-    transaction_stats = TransactionStats.by_date_range(stats_scale.earliest, stats_scale.latest)
+    transaction_stats = TransactionStats.by_date_range(stats_scale.earliest, stats_scale.latest, api?: true)
 
     # Need datapoint for legend if none currently available.
     if Enum.empty?(transaction_stats) do

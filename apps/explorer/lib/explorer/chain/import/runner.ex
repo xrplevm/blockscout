@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner do
   @moduledoc """
   Behaviour used by `Explorer.Chain.Import.all/1` to import data into separate tables.
@@ -58,5 +59,10 @@ defmodule Explorer.Chain.Import.Runner do
   """
   @callback runner_specific_options() :: [atom()]
 
-  @optional_callbacks runner_specific_options: 0
+  @doc """
+  The optional function to prepare data for passing it to the changeset.
+  """
+  @callback prepare_data(changes_list) :: changes_list
+
+  @optional_callbacks runner_specific_options: 0, prepare_data: 1
 end

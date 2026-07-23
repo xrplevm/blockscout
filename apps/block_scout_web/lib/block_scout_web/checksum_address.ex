@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.ChecksumAddress do
   @moduledoc """
   Adds checksummed version of address hashes.
@@ -49,7 +50,7 @@ defmodule BlockScoutWeb.ChecksumAddress do
 
       conn
       |> Controller.redirect(to: new_path |> BlockScoutWebController.full_path())
-      |> halt
+      |> halt()
     else
       conn
     end

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.PendingBlockOperationsSanitizer do
   @moduledoc """
   Set block_number for pending block operations that have it empty
@@ -7,8 +8,8 @@ defmodule Indexer.Fetcher.PendingBlockOperationsSanitizer do
 
   import Ecto.Query
 
-  alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.PendingBlockOperation
+  alias Explorer.Chain.{PendingBlockOperation, Transaction}
+  alias Explorer.Repo
   alias Indexer.Fetcher.InternalTransaction
 
   @interval :timer.seconds(1)
@@ -60,7 +61,7 @@ defmodule Indexer.Fetcher.PendingBlockOperationsSanitizer do
       |> update([pbo, po, b], set: [block_number: b.number])
       |> Repo.update_all([], timeout: @timeout)
 
-    transactions = Chain.get_transactions_of_block_numbers(block_numbers)
+    transactions = Transaction.get_transactions_of_block_numbers(block_numbers)
 
     InternalTransaction.async_fetch(block_numbers, transactions, false)
 

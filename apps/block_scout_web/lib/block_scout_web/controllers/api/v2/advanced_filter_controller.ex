@@ -1,18 +1,33 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   use BlockScoutWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
-  import BlockScoutWeb.Chain, only: [split_list_by_page: 1, next_page_params: 4, fetch_scam_token_toggle: 2]
+  import BlockScoutWeb.Chain, only: [split_list_by_page: 1, next_page_params: 5, fetch_scam_token_toggle: 2]
   import Explorer.PagingOptions, only: [default_paging_options: 0]
 
-  alias BlockScoutWeb.CaptchaHelper
-  alias BlockScoutWeb.API.V2.{AdvancedFilterView, CsvExportController}
+  alias BlockScoutWeb.AccessHelper
+  alias BlockScoutWeb.API.V2.CsvExportController
+  alias BlockScoutWeb.Schemas.API.V2.General
   alias Explorer.{Chain, PagingOptions}
-  alias Explorer.Chain.{AdvancedFilter, ContractMethod, Data, Token, Transaction}
+  alias Explorer.Chain.{Address.Reputation, AdvancedFilter, ContractMethod, Data, Token, Transaction}
+  alias Explorer.Chain.CsvExport.AdvancedFilter, as: CsvExportAdvancedFilter
+  alias Explorer.Chain.CsvExport.AsyncHelper, as: AsyncCsvHelper
   alias Explorer.Chain.CsvExport.Helper, as: CsvHelper
-  alias Explorer.Helper, as: ExplorerHelper
+  alias Explorer.Chain.CsvExport.Request, as: AsyncCsvExportRequest
   alias Plug.Conn
 
+  require Logger
+
   action_fallback(BlockScoutWeb.API.V2.FallbackController)
+
+  # Once CastAndValidate is installed, every new action in this controller must
+  # declare either a real `operation …` spec or `operation :name, false`;
+  # otherwise the plug rejects requests to it.
+  plug(OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true)
+
+  tags(["advanced-filters"])
 
   @api_true [api?: true]
 
@@ -48,6 +63,223 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   @methods_filter_limit 20
   @tokens_filter_limit 20
 
+  @token_options [api?: true, necessity_by_association: %{Reputation.reputation_association() => :optional}]
+
+  @comma_separated_address_hashes_example "0x5a52e96bacdabb82fd05763e25335261b270efcb,0x00000000219ab540356cbb839cbe05303d7705fa"
+
+  @advanced_filter_query_params [
+    %OpenApiSpex.Parameter{
+      name: :transaction_types,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description:
+        "Comma-separated list of transaction types to include. Allowed values: `COIN_TRANSFER`, " <>
+          "`CONTRACT_INTERACTION`, `CONTRACT_CREATION`, `ERC-20`, `ERC-404`, `ERC-721`, `ERC-1155`, `ERC-7984` " <>
+          "(plus `ZRC-2` on Zilliqa). Values are matched case-insensitively; unknown entries are silently dropped.",
+      example: "COIN_TRANSFER,ERC-20"
+    },
+    %OpenApiSpex.Parameter{
+      name: :methods,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description:
+        "Comma-separated list of 4-byte contract method selectors (lowercase, `0x`-prefixed). At most 20 unique " <>
+          "entries are honored; invalid entries are dropped.",
+      example: "0xa9059cbb,0x095ea7b3"
+    },
+    %OpenApiSpex.Parameter{
+      name: :age_from,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Inclusive lower bound on `timestamp` (ISO 8601).",
+      example: "2024-01-01T00:00:00Z"
+    },
+    %OpenApiSpex.Parameter{
+      name: :age_to,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Inclusive upper bound on `timestamp` (ISO 8601).",
+      example: "2024-12-31T23:59:59Z"
+    },
+    %OpenApiSpex.Parameter{
+      name: :from_address_hashes_to_include,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Comma-separated list of sender address hashes to include.",
+      example: @comma_separated_address_hashes_example
+    },
+    %OpenApiSpex.Parameter{
+      name: :from_address_hashes_to_exclude,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Comma-separated list of sender address hashes to exclude.",
+      example: @comma_separated_address_hashes_example
+    },
+    %OpenApiSpex.Parameter{
+      name: :to_address_hashes_to_include,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Comma-separated list of recipient address hashes to include.",
+      example: @comma_separated_address_hashes_example
+    },
+    %OpenApiSpex.Parameter{
+      name: :to_address_hashes_to_exclude,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Comma-separated list of recipient address hashes to exclude.",
+      example: @comma_separated_address_hashes_example
+    },
+    %OpenApiSpex.Parameter{
+      name: :address_relation,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description:
+        "How to combine the `from_address_hashes_*` and `to_address_hashes_*` filters. " <>
+          "Accepts `or` or `and` (case-insensitive). `or` (default) matches an item if either side matches; " <>
+          "`and` requires both sides to match. Any other value is silently coerced to `nil` (no relation constraint).",
+      example: "and"
+    },
+    %OpenApiSpex.Parameter{
+      name: :amount_from,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Inclusive lower bound on the item's transferred amount (decimal string in the token's base units).",
+      example: "0"
+    },
+    %OpenApiSpex.Parameter{
+      name: :amount_to,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Inclusive upper bound on the item's transferred amount (decimal string in the token's base units).",
+      example: "1000000"
+    },
+    %OpenApiSpex.Parameter{
+      name: :token_contract_address_hashes_to_include,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description:
+        "Comma-separated list of token contract address hashes to include. Use the literal `native` to also " <>
+          "include native coin transfers. Each list (include and exclude) is capped to 20 entries separately.",
+      example: "native,0xdac17f958d2ee523a2206206994597c13d831ec7"
+    },
+    %OpenApiSpex.Parameter{
+      name: :token_contract_address_hashes_to_exclude,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description:
+        "Comma-separated list of token contract address hashes to exclude. Use the literal `native` to also " <>
+          "exclude native coin transfers. Each list (include and exclude) is capped to 20 entries separately.",
+      example: "0x0000000000000000000000000000000000000000"
+    },
+    %OpenApiSpex.Parameter{
+      name: :methods_names,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Comma-separated list of human-readable method names corresponding to the `methods` selectors.",
+      example: "transfer,approve"
+    },
+    %OpenApiSpex.Parameter{
+      name: :token_contract_symbols_to_include,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Comma-separated list of token symbols to include.",
+      example: "USDT,USDC"
+    },
+    %OpenApiSpex.Parameter{
+      name: :token_contract_symbols_to_exclude,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+      required: false,
+      description: "Comma-separated list of token symbols to exclude.",
+      example: "USDT,USDC"
+    }
+  ]
+
+  @advanced_filter_keyset_params [
+    %OpenApiSpex.Parameter{
+      name: :block_number,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, pattern: General.non_negative_integer_pattern()},
+      required: false,
+      description: "Keyset cursor: block number of the last item from the previous page.",
+      example: "23532302"
+    },
+    %OpenApiSpex.Parameter{
+      name: :transaction_index,
+      in: :query,
+      schema: %OpenApiSpex.Schema{type: :string, pattern: General.non_negative_integer_pattern()},
+      required: false,
+      description: "Keyset cursor: transaction index within the block of the last item from the previous page.",
+      example: "1"
+    },
+    %OpenApiSpex.Parameter{
+      name: :internal_transaction_index,
+      in: :query,
+      schema: General.IntegerStringOrEmptyOrNullLiteral,
+      required: false,
+      description:
+        "Keyset cursor: internal-transaction index of the last item from the previous page. " <>
+          "Use an empty string or the literal `null` when the previous item was not an internal transaction."
+    },
+    %OpenApiSpex.Parameter{
+      name: :token_transfer_index,
+      in: :query,
+      schema: General.IntegerStringOrEmptyOrNullLiteral,
+      required: false,
+      description:
+        "Keyset cursor: token-transfer index of the last item from the previous page. " <>
+          "Use an empty string or the literal `null` when the previous item was not a token transfer."
+    },
+    %OpenApiSpex.Parameter{
+      name: :token_transfer_batch_index,
+      in: :query,
+      schema: General.IntegerStringOrEmptyOrNullLiteral,
+      required: false,
+      description:
+        "Keyset cursor: index within an ERC-1155 batch token transfer. " <>
+          "Use an empty string or the literal `null` when the previous item was not part of a batch."
+    }
+  ]
+
+  @items_count_param %OpenApiSpex.Parameter{
+    name: :items_count,
+    in: :query,
+    schema: %OpenApiSpex.Schema{type: :integer, minimum: 1},
+    required: false,
+    description: "Cumulative number of items already returned across previous pages."
+  }
+
+  operation :list,
+    summary: "List transactions, internal transactions and token transfers matching the advanced filter criteria",
+    description:
+      "Returns a paginated, mixed list of activity — native value transfers, internal transactions and token " <>
+        "transfers — filtered by transaction type, contract method, time window, address relations, value range " <>
+        "and/or token contract. The response also echoes the resolved human-readable names of the methods and " <>
+        "tokens referenced in the request filters.",
+    parameters:
+      base_params() ++ @advanced_filter_query_params ++ @advanced_filter_keyset_params ++ [@items_count_param],
+    responses: [
+      ok:
+        {"List of matching items with pagination information and resolved search params.", "application/json",
+         Schemas.AdvancedFilter.Response},
+      unprocessable_entity: JsonErrorResponse.response()
+    ]
+
   @doc """
   Function responsible for `api/v2/advanced-filters/` endpoint.
   """
@@ -70,7 +302,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
       |> Transaction.decode_transactions(true, @api_true)
 
     next_page_params =
-      next_page |> next_page_params(advanced_filters, Map.take(params, ["items_count"]), &paging_params/1)
+      next_page |> next_page_params(advanced_filters, Map.take(params, [:items_count]), false, &paging_params/1)
 
     render(conn, :advanced_filters,
       advanced_filters: advanced_filters,
@@ -83,43 +315,114 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
     )
   end
 
+  operation :list_csv,
+    summary: "Export advanced-filter results as CSV",
+    description:
+      "Streams the items matching the advanced filter criteria as a CSV file. " <>
+        "When asynchronous CSV export is enabled on the deployment, returns `202 Accepted` with a `request_id` " <>
+        "that can be polled via `/api/v2/csv-exports/{request_id}`; otherwise the CSV body is streamed inline.",
+    parameters: base_params() ++ @advanced_filter_query_params ++ @advanced_filter_keyset_params,
+    responses: [
+      ok: {"CSV file (sync export).", "application/csv", nil},
+      accepted:
+        {"Async export queued; poll `/api/v2/csv-exports/{request_id}` with the returned `request_id`.",
+         "application/json", Schemas.AdvancedFilter.CsvExportAccepted},
+      conflict:
+        {"Too many pending export requests for this client.", "application/json", Schemas.AdvancedFilter.CsvExportError},
+      internal_server_error:
+        {"Failed to create CSV export request.", "application/json", Schemas.AdvancedFilter.CsvExportError},
+      unprocessable_entity: JsonErrorResponse.response()
+    ]
+
   @doc """
   Function responsible for `api/v2/advanced-filters/csv` endpoint.
   """
   @spec list_csv(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def list_csv(conn, params) do
-    with {:recaptcha, true} <- {:recaptcha, CaptchaHelper.recaptcha_passed?(params)} do
-      full_options =
-        params
-        |> extract_filters()
-        |> Keyword.merge(paging_options(params))
-        |> Keyword.update(:paging_options, %PagingOptions{page_size: CsvHelper.limit()}, fn paging_options ->
-          %PagingOptions{paging_options | page_size: CsvHelper.limit()}
-        end)
-        |> Keyword.put(:timeout, :timer.minutes(5))
+    full_options = build_csv_export_options(params)
 
-      full_options
-      |> AdvancedFilter.list()
-      |> AdvancedFilterView.to_csv_format()
-      |> CsvHelper.dump_to_stream()
-      |> Enum.reduce_while(CsvExportController.put_resp_params(conn), fn chunk, conn ->
-        case Conn.chunk(conn, chunk) do
-          {:ok, conn} ->
-            {:cont, conn}
-
-          {:error, :closed} ->
-            {:halt, conn}
-        end
-      end)
+    if CsvHelper.async_enabled?() do
+      handle_async_csv_export(conn, full_options)
+    else
+      stream_csv_to_conn(conn, CsvExportAdvancedFilter.export(full_options))
     end
   end
+
+  defp build_csv_export_options(params) do
+    []
+    |> Keyword.merge(extract_filters(params))
+    |> Keyword.merge(paging_options(params))
+    |> Keyword.update(:paging_options, %PagingOptions{page_size: CsvHelper.limit()}, fn
+      %PagingOptions{} = paging_options ->
+        %PagingOptions{paging_options | page_size: CsvHelper.limit()}
+    end)
+  end
+
+  defp handle_async_csv_export(conn, full_options) do
+    case AsyncCsvExportRequest.create(AccessHelper.conn_to_ip_string(conn), %{
+           advanced_filters_params: full_options |> :erlang.term_to_binary() |> Base.encode64()
+         }) do
+      {:ok, request} ->
+        conn |> put_status(:accepted) |> json(%{request_id: request.id})
+
+      {:error, :too_many_pending_requests} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: "You can only have #{AsyncCsvHelper.max_pending_tasks_per_ip()} pending requests at a time"})
+
+      {:error, error} ->
+        Logger.error("Failed to create CSV export request: #{inspect(error)}")
+        conn |> put_status(:internal_server_error) |> json(%{error: "Failed to create CSV export request"})
+    end
+  end
+
+  defp stream_csv_to_conn(conn, stream) do
+    stream
+    |> Enum.reduce_while(CsvExportController.put_resp_params(conn), fn chunk, conn ->
+      case Conn.chunk(conn, chunk) do
+        {:ok, conn} -> {:cont, conn}
+        {:error, :closed} -> {:halt, conn}
+      end
+    end)
+  end
+
+  operation :list_methods,
+    summary: "List known contract methods",
+    description:
+      "Returns a list of known contract methods. " <>
+        "When the `q` parameter is provided, searches for a single method by its 4-byte selector or name. " <>
+        "Without `q`, returns the default list of popular methods.",
+    parameters: [
+      %OpenApiSpex.Parameter{
+        name: :q,
+        in: :query,
+        schema: %OpenApiSpex.Schema{type: :string, nullable: true},
+        required: false,
+        description:
+          "Search string: either a 4-byte method selector (e.g. `0xa9059cbb`) or a method name (e.g. `transfer`).",
+        example: "transfer"
+      }
+      | base_params()
+    ],
+    responses: [
+      ok:
+        {"List of contract methods.", "application/json",
+         %OpenApiSpex.Schema{
+           type: :array,
+           items: Schemas.AdvancedFilter.Method,
+           nullable: false
+         }},
+      unprocessable_entity: JsonErrorResponse.response()
+    ]
 
   @doc """
   Function responsible for `api/v2/advanced-filters/methods` endpoint,
   including `api/v2/advanced-filters/methods/?q=:search_string`.
   """
-  @spec list_methods(Plug.Conn.t(), map()) :: {:method, nil | Explorer.Chain.ContractMethod.t()} | Plug.Conn.t()
-  def list_methods(conn, %{"q" => query}) do
+  @spec list_methods(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def list_methods(conn, %{q: query}) when is_binary(query) do
+    query = String.downcase(query)
+
     case {@methods_id_to_name_map[query], @methods_name_to_id_map[query]} do
       {name, _} when is_binary(name) ->
         render(conn, :methods, methods: [%{method_id: query, name: name}])
@@ -128,18 +431,21 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
         render(conn, :methods, methods: [%{method_id: id, name: query}])
 
       _ ->
-        mb_contract_method =
+        contract_method_method_id_tuple =
           case Data.cast(query) do
-            {:ok, %Data{bytes: <<_::bytes-size(4)>> = binary_method_id}} ->
-              ContractMethod.find_contract_method_by_selector_id(binary_method_id, @api_true)
+            {:ok, %Data{bytes: <<_::bytes-size(4)>> = binary_method_id} = data_method_id} ->
+              {ContractMethod.find_contract_method_by_selector_id(binary_method_id, @api_true), data_method_id}
 
             _ ->
-              ContractMethod.find_contract_method_by_name(query, @api_true)
+              {ContractMethod.find_contract_method_by_name(query, @api_true), nil}
           end
 
-        case mb_contract_method do
-          %ContractMethod{abi: %{"name" => name}, identifier: identifier} ->
-            render(conn, :methods, methods: [%{method_id: ExplorerHelper.add_0x_prefix(identifier), name: name}])
+        case contract_method_method_id_tuple do
+          {%ContractMethod{abi: %{"name" => name}, identifier: identifier}, _} ->
+            render(conn, :methods, methods: [%{method_id: identifier, name: name}])
+
+          {_, identifier} when not is_nil(identifier) ->
+            render(conn, :methods, methods: [%{method_id: identifier, name: ""}])
 
           _ ->
             render(conn, :methods, methods: [])
@@ -175,7 +481,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
     |> Enum.reduce(%{}, fn contract_method, acc ->
       case contract_method do
         %ContractMethod{abi: %{"name" => name}, identifier: identifier} when is_binary(name) ->
-          Map.put(acc, ExplorerHelper.add_0x_prefix(identifier), name)
+          Map.put(acc, identifier, name)
 
         _ ->
           acc
@@ -194,33 +500,33 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
     |> Enum.reject(&(&1 == "native"))
     |> Enum.uniq()
     |> Enum.take(@tokens_filter_limit)
-    |> Token.get_by_contract_address_hashes(@api_true)
+    |> Token.get_by_contract_address_hashes(@token_options)
     |> Map.new(fn token -> {token.contract_address_hash, token} end)
   end
 
   defp extract_filters(params) do
     [
-      transaction_types: prepare_transaction_types(params["transaction_types"]),
-      methods: params["methods"] |> prepare_methods(),
-      age: prepare_age(params["age_from"], params["age_to"]),
+      transaction_types: prepare_transaction_types(params[:transaction_types]),
+      methods: merge_methods(prepare_methods(params[:methods]), prepare_methods_from_names(params[:methods_names])),
+      age: prepare_age(params[:age_from], params[:age_to]),
       from_address_hashes:
         prepare_include_exclude_address_hashes(
-          params["from_address_hashes_to_include"],
-          params["from_address_hashes_to_exclude"],
+          params[:from_address_hashes_to_include],
+          params[:from_address_hashes_to_exclude],
           &prepare_address_hash/1
         ),
       to_address_hashes:
         prepare_include_exclude_address_hashes(
-          params["to_address_hashes_to_include"],
-          params["to_address_hashes_to_exclude"],
+          params[:to_address_hashes_to_include],
+          params[:to_address_hashes_to_exclude],
           &prepare_address_hash/1
         ),
-      address_relation: prepare_address_relation(params["address_relation"]),
-      amount: prepare_amount(params["amount_from"], params["amount_to"]),
+      address_relation: prepare_address_relation(params[:address_relation]),
+      amount: prepare_amount(params[:amount_from], params[:amount_to]),
       token_contract_address_hashes:
-        params["token_contract_address_hashes_to_include"]
+        params[:token_contract_address_hashes_to_include]
         |> prepare_include_exclude_address_hashes(
-          params["token_contract_address_hashes_to_exclude"],
+          params[:token_contract_address_hashes_to_exclude],
           &prepare_token_address_hash/1
         )
         |> Enum.map(fn
@@ -230,7 +536,15 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
     ]
   end
 
-  @allowed_transaction_types ~w(COIN_TRANSFER ERC-20 ERC-404 ERC-721 ERC-1155)
+  @default_allowed_transaction_types ~w(COIN_TRANSFER CONTRACT_INTERACTION CONTRACT_CREATION ERC-20 ERC-404 ERC-721 ERC-1155 ERC-7984)
+
+  if @chain_type == :zilliqa do
+    @chain_type_allowed_transaction_types ~w(ZRC-2)
+  else
+    @chain_type_allowed_transaction_types ~w()
+  end
+
+  @allowed_transaction_types @default_allowed_transaction_types ++ @chain_type_allowed_transaction_types
 
   defp prepare_transaction_types(transaction_types) when is_binary(transaction_types) do
     transaction_types
@@ -260,6 +574,28 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   end
 
   defp prepare_methods(_), do: nil
+
+  defp prepare_methods_from_names(names) when is_binary(names) do
+    names
+    |> String.split(",")
+    |> Enum.map(&(String.trim(&1) |> String.downcase()))
+    |> Enum.flat_map(fn name -> List.wrap(Map.get(@methods_name_to_id_map, name)) end)
+    |> Enum.uniq()
+  end
+
+  defp prepare_methods_from_names(_), do: nil
+
+  defp merge_methods(nil, nil), do: nil
+
+  defp merge_methods(a, b) do
+    (List.wrap(a) ++ List.wrap(b))
+    |> Enum.uniq()
+    |> Enum.take(@methods_filter_limit)
+    |> case do
+      [] -> nil
+      list -> list
+    end
+  end
 
   defp prepare_age(from, to), do: [from: parse_date(from), to: parse_date(to)]
 
@@ -320,11 +656,11 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   # Paging
 
   defp paging_options(%{
-         "block_number" => block_number_string,
-         "transaction_index" => transaction_index_string,
-         "internal_transaction_index" => internal_transaction_index_string,
-         "token_transfer_index" => token_transfer_index_string,
-         "token_transfer_batch_index" => token_transfer_batch_index_string
+         block_number: block_number_string,
+         transaction_index: transaction_index_string,
+         internal_transaction_index: internal_transaction_index_string,
+         token_transfer_index: token_transfer_index_string,
+         token_transfer_batch_index: token_transfer_batch_index_string
        }) do
     with {block_number, ""} <- block_number_string && Integer.parse(block_number_string),
          {transaction_index, ""} <- transaction_index_string && Integer.parse(transaction_index_string),

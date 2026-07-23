@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Temporary.UnclesWithoutIndex do
   @moduledoc """
   Fetches `index`es for unfetched `t:Explorer.Chain.Block.SecondDegreeRelation.t/0`.
@@ -33,7 +34,7 @@ defmodule Indexer.Temporary.UnclesWithoutIndex do
   def child_spec([init_options, gen_server_options]) when is_list(init_options) do
     {state, mergeable_init_options} = Keyword.pop(init_options, :json_rpc_named_arguments)
 
-    unless state do
+    if !state do
       raise ArgumentError,
             ":json_rpc_named_arguments must be provided to `#{__MODULE__}.child_spec " <>
               "to allow for json_rpc calls when running."
@@ -123,7 +124,7 @@ defmodule Indexer.Temporary.UnclesWithoutIndex do
     loggable_errors = loggable_errors(errors)
     loggable_error_count = Enum.count(loggable_errors)
 
-    unless loggable_error_count == 0 do
+    if loggable_error_count != 0 do
       Logger.error(
         fn ->
           [

@@ -1,7 +1,10 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Celo.TransactionGasTokens do
   @moduledoc """
   Helper functions for extracting tokens specified as gas fee currency.
   """
+  use Utils.RuntimeEnvHelper,
+    chain_identity: [:explorer, :chain_identity]
 
   alias Explorer.Chain.Hash
 
@@ -19,7 +22,7 @@ defmodule Indexer.Transform.Celo.TransactionGasTokens do
           }
         ]
   def parse(transactions) do
-    if Application.get_env(:explorer, :chain_type) == :celo do
+    if chain_identity() == {:optimism, :celo} do
       transactions
       |> Enum.reduce(
         MapSet.new(),

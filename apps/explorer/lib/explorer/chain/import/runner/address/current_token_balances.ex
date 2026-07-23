@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Address.CurrentTokenBalance.t/0`.
@@ -231,7 +232,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
     filtered_ctbs =
       Enum.filter(changes_list, fn ctb ->
         existing_ctb = existing_ctb_map[{ctb[:address_hash], ctb[:token_contract_address_hash], ctb[:token_id]}]
-        should_update?(ctb, existing_ctb)
+        should_update?(Map.put_new(ctb, :value_fetched_at, nil), existing_ctb)
       end)
 
     {:ok, filtered_ctbs}
@@ -239,42 +240,63 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
 
   defp select_existing_current_token_balances(_repo, [], _with_token_id?), do: []
 
-  defp select_existing_current_token_balances(repo, params, with_token_id?) do
-    params
-    |> existing_ctb_query(with_token_id?)
-    |> repo.all()
-  end
-
-  defp existing_ctb_query(params, false) do
+  defp select_existing_current_token_balances(repo, params, false) do
     ids =
       params
       |> Enum.map(&{&1.address_hash.bytes, &1.token_contract_address_hash.bytes})
       |> Enum.uniq()
 
-    from(
-      ctb in CurrentTokenBalance,
-      where: is_nil(ctb.token_id),
-      where: ^QueryHelper.tuple_in([:address_hash, :token_contract_address_hash], ids)
-    )
+    existing_ctb_query =
+      from(
+        ctb in CurrentTokenBalance,
+        where: is_nil(ctb.token_id),
+        where: ^QueryHelper.tuple_in([:address_hash, :token_contract_address_hash], ids)
+      )
+
+    repo.all(existing_ctb_query)
   end
 
-  defp existing_ctb_query(params, true) do
-    ids =
-      params
-      |> Enum.map(&{&1.address_hash.bytes, &1.token_contract_address_hash.bytes, &1.token_id})
-      |> Enum.uniq()
+  defp select_existing_current_token_balances(repo, params, true) do
+    ids = Enum.map(params, &[&1.address_hash.bytes, &1.token_contract_address_hash.bytes, &1.token_id])
 
-    from(
-      ctb in CurrentTokenBalance,
-      where: ^QueryHelper.tuple_in([:address_hash, :token_contract_address_hash, :token_id], ids)
-    )
+    placeholders =
+      ids
+      |> Enum.with_index(1)
+      |> Enum.map_join(",", fn {_, i} ->
+        # The value 3 corresponds to the number of parameters in each group within the WHERE clause.
+        # If this number changes, make sure to update it accordingly. For example, placeholders for
+        # an array of ids [[1, 2, 3], [4, 5, 6]] would be formatted as: ($1, $2, $3),($4, $5, $6)".
+        "($#{3 * i - 2}, $#{3 * i - 1}, $#{3 * i})"
+      end)
+
+    # Using raw SQL here is needed to be able to add the `COALESCE` statement
+    # which is needed to force `fetched_current_token_balances` full index usage
+    existing_ctb_query =
+      """
+      SELECT address_hash, token_contract_address_hash, token_id, block_number, value, value_fetched_at
+      FROM address_current_token_balances
+      WHERE (address_hash, token_contract_address_hash, COALESCE(token_id, -1)) IN (#{placeholders})
+      """
+
+    query_params = List.flatten(ids)
+
+    existing_ctb_query
+    |> repo.query!(query_params)
+    |> Map.get(:rows, [])
+    |> Enum.map(fn [address_hash, token_contract_address_hash, token_id, block_number, value, value_fetched_at] ->
+      %{
+        address_hash: address_hash,
+        token_contract_address_hash: token_contract_address_hash,
+        token_id: token_id,
+        block_number: block_number,
+        value: value,
+        value_fetched_at: value_fetched_at
+      }
+    end)
   end
 
   # ctb does not exist
   defp should_update?(_new_ctb, nil), do: true
-
-  # new ctb has no value
-  defp should_update?(%{value_fetched_at: nil}, _existing_ctb), do: false
 
   # new ctb is newer
   defp should_update?(%{block_number: new_ctb_block_number}, %{block_number: existing_ctb_block_number})
@@ -284,7 +306,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
   # new ctb is the same height or older
   defp should_update?(new_ctb, existing_ctb) do
     existing_ctb.block_number == new_ctb.block_number and not is_nil(Map.get(new_ctb, :value)) and
-      (is_nil(existing_ctb.value_fetched_at) or existing_ctb.value_fetched_at < new_ctb.value_fetched_at)
+      (is_nil(existing_ctb.value_fetched_at) or Timex.before?(existing_ctb.value_fetched_at, new_ctb.value_fetched_at))
   end
 
   @spec insert(Repo.t(), [map()], %{
@@ -355,21 +377,23 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
       update: [
         set: [
           block_number: fragment("EXCLUDED.block_number"),
-          value: fragment("EXCLUDED.value"),
+          value: fragment("COALESCE(EXCLUDED.value, ?)", current_token_balance.value),
           value_fetched_at: fragment("EXCLUDED.value_fetched_at"),
           old_value: current_token_balance.value,
           token_type: fragment("EXCLUDED.token_type"),
+          refetch_after: fragment("EXCLUDED.refetch_after"),
+          retries_count: fragment("EXCLUDED.retries_count"),
           inserted_at: fragment("LEAST(EXCLUDED.inserted_at, ?)", current_token_balance.inserted_at),
           updated_at: fragment("GREATEST(EXCLUDED.updated_at, ?)", current_token_balance.updated_at)
         ]
       ],
       where:
-        fragment("EXCLUDED.value_fetched_at IS NOT NULL") and
-          (fragment("? < EXCLUDED.block_number", current_token_balance.block_number) or
-             (fragment("? = EXCLUDED.block_number", current_token_balance.block_number) and
-                fragment("EXCLUDED.value IS NOT NULL") and
-                (is_nil(current_token_balance.value_fetched_at) or
-                   fragment("? < EXCLUDED.value_fetched_at", current_token_balance.value_fetched_at))))
+        fragment("? < EXCLUDED.block_number", current_token_balance.block_number) or
+          (fragment("? = EXCLUDED.block_number", current_token_balance.block_number) and
+             fragment("EXCLUDED.value_fetched_at IS NOT NULL") and
+             fragment("EXCLUDED.value IS NOT NULL") and
+             (is_nil(current_token_balance.value_fetched_at) or
+                fragment("? < EXCLUDED.value_fetched_at", current_token_balance.value_fetched_at)))
     )
   end
 
