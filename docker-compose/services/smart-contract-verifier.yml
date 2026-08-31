@@ -9,3 +9,6 @@ services:
     container_name: 'smart-contract-verifier'
     env_file:
       -  ../envs/common-smart-contract-verifier.env
+    volumes:
+      - ./solidity-compilers-data:/tmp/solidity-compilers
+      - ./vyper-compilers-data:/tmp/vyper-compilers
