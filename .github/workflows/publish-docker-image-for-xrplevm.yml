@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DOCKER_CHAIN_NAME: xrplevm
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: Add SHORT_SHA env property with commit short sha
