@@ -13,7 +13,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       next_page_params: 3,
       next_page_params: 5,
       paging_options: 1,
-      param_to_block_number: 1,
+      param_to_block_number: 2,
       put_key_value_to_paging_options: 3,
       split_list_by_page: 1,
       parse_block_hash_or_number_param: 1,
@@ -28,10 +28,9 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       internal_transaction_call_type_options: 1
     ]
 
-  import Explorer.MicroserviceInterfaces.BENS,
-    only: [maybe_preload_ens: 1, maybe_preload_ens_for_blocks: 1, maybe_preload_ens_for_transactions: 1]
+  import Explorer.Chain.Address.MetadataPreloader,
+    only: [maybe_preload_ens_and_metadata: 1, maybe_preload_ens_and_metadata: 2]
 
-  import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata: 1]
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
 
   alias BlockScoutWeb.API.V2.{
@@ -42,6 +41,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
   }
 
   alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotFoundResponse
+  alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotImplementedResponse
   alias Explorer.Chain
   alias Explorer.Chain.Arbitrum.Reader.API.Settlement, as: ArbitrumSettlementReader
   alias Explorer.Chain.Beacon.Deposit
@@ -226,7 +226,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -273,7 +273,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -321,7 +321,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -369,7 +369,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -423,7 +423,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> put_status(200)
       |> put_view(TransactionView)
       |> render(:transactions, %{
-        transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+        transactions: transactions |> maybe_preload_ens_and_metadata(:transactions),
         next_page_params: next_page_params
       })
     end
@@ -545,7 +545,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> put_status(200)
       |> put_view(WithdrawalView)
       |> render(:withdrawals, %{
-        withdrawals: withdrawals |> maybe_preload_ens() |> maybe_preload_metadata(),
+        withdrawals: withdrawals |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end
@@ -559,7 +559,8 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     responses: [
       ok: {"Block countdown information.", "application/json", Schemas.Block.Countdown},
       unprocessable_entity: JsonErrorResponse.response(),
-      not_found: NotFoundResponse.response()
+      not_found: NotFoundResponse.response(),
+      not_implemented: NotImplementedResponse.response()
     ]
 
   @doc """
@@ -582,7 +583,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
           | {:average_block_time, {:error, :disabled}}
           | {:remaining_blocks, 0}
   def block_countdown(conn, %{block_number_param: block_number}) do
-    with {:format, {:ok, target_block_number}} <- {:format, param_to_block_number(block_number)},
+    with {:format, {:ok, target_block_number}} <- {:format, param_to_block_number(block_number, false)},
          {:max_block, current_block_number} when not is_nil(current_block_number) <-
            {:max_block, BlockNumber.get_max()},
          {:average_block_time, average_block_time} when is_struct(average_block_time) <-
@@ -682,7 +683,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> put_status(200)
       |> put_view(DepositView)
       |> render(:deposits, %{
-        deposits: deposits |> maybe_preload_ens() |> maybe_preload_metadata(),
+        deposits: deposits |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end

@@ -187,6 +187,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
     case result do
       {:ok, %{errors: errors}} ->
         valid_errors = handle_null_rounds(errors)
+        log_errors(valid_errors, range)
 
         {:ok, %{range: range, errors: valid_errors}}
 
@@ -258,6 +259,11 @@ defmodule Indexer.Block.Catchup.Fetcher do
     other_errors
   end
 
+  defp log_errors([], _range), do: :ok
+
+  defp log_errors(errors, range),
+    do: Logger.error(fn -> "Failed to fetch block range #{inspect(range)}: #{inspect(errors)}" end)
+
   defp timeout_exception?(%{message: message}) when is_binary(message) do
     match_timeout_exception?(message)
   end
@@ -269,7 +275,8 @@ defmodule Indexer.Block.Catchup.Fetcher do
   defp timeout_exception?(_exception), do: false
 
   defp match_timeout_exception?(error_message) do
-    String.match?(error_message, ~r/due to a timeout/) or String.match?(error_message, ~r/due to user request/)
+    String.match?(error_message, ~r/due to a timeout/) or String.match?(error_message, ~r/due to user request/) or
+      String.match?(error_message, ~r/ssl recv: closed/)
   end
 
   @doc """
