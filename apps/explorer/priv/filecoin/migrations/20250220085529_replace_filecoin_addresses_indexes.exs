@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Filecoin.Migrations.ReplaceFilecoinAddressesIndexes do
   use Ecto.Migration
 

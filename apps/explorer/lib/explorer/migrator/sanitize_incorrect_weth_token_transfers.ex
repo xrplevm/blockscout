@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.SanitizeIncorrectWETHTokenTransfers do
   @moduledoc """
     This migrator will delete all incorrect WETH token transfers. As incorrect we consider:

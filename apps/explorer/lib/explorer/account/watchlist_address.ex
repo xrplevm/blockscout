@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.WatchlistAddress.Schema do
   @moduledoc """
     Models account's addresses watchlist.

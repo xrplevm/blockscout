@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.RunnerCase do
   import Explorer.Factory, only: [insert: 2]
   import Ecto.Query, only: [from: 2]

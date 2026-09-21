@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.General.IntegerStringNullable do
   @moduledoc false
   require OpenApiSpex

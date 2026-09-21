@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.CeloEpochs do
   @moduledoc """
   Cache for efficiently mapping block numbers to epoch numbers in Celo blockchain.

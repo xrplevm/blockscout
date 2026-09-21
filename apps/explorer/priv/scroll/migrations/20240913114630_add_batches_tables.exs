@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Scroll.Migrations.AddBatchesTables do
   use Ecto.Migration
 

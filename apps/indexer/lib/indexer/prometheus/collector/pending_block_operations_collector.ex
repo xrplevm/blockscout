@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Prometheus.Collector.PendingBlockOperations do
   @moduledoc """
   Custom collector to count number of records in pending_block_operations table.

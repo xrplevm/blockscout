@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Address.TokenBalanceTest do
   use Explorer.DataCase
 

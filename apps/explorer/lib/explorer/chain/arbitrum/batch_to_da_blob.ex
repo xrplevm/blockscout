@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.BatchToDaBlob do
   @moduledoc """
     Models a link between an Arbitrum L1 batch and its corresponding data blob.

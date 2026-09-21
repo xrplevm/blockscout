@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Account.WatchlistView do
   use BlockScoutWeb, :view
 

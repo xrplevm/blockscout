@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Withdrawal do
   @moduledoc """
   Reindexes withdrawals from blocks that were indexed before app update.

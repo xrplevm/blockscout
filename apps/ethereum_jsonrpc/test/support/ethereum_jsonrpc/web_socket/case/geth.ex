@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.WebSocket.Case.Geth do
   @moduledoc """
   `EthereumJSONRPC.WebSocket.Case` connecting to Geth.

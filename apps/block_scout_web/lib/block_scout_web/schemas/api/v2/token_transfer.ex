@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.TokenTransfer.TransactionHashCustomization do
   @moduledoc false
   use Utils.RuntimeEnvHelper,

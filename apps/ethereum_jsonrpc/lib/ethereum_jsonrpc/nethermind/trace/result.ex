@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Nethermind.Trace.Result do
   @moduledoc """
   The result of performing the `t:EthereumJSONRPC.Nethermind.Action.t/0` in a `t:EthereumJSONRPC.Nethermind.Trace.t/0`.
@@ -40,6 +39,4 @@ defmodule EthereumJSONRPC.Nethermind.Trace.Result do
   defp entry_to_elixir({key, quantity}) when key in ~w(gasUsed) do
     {key, quantity_to_integer(quantity)}
   end
-
-  defp entry_to_elixir({_, _}), do: {:ignore, :ignore}
 end

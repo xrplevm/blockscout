@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Fetcher.Token do
   @moduledoc """
   Periodically fetches fiat value of tokens.
@@ -7,13 +6,9 @@ defmodule Explorer.Market.Fetcher.Token do
 
   require Logger
 
-  import Ecto.Query
-
-  alias Ecto.Multi
-  alias Explorer.{Chain, Repo}
+  alias Explorer.Chain
   alias Explorer.Chain.Hash.Address
   alias Explorer.Chain.Import.Runner.Tokens
-  alias Explorer.Chain.Token
   alias Explorer.Market.Source
   alias Explorer.MicroserviceInterfaces.MultichainSearch
 
@@ -22,8 +17,7 @@ defmodule Explorer.Market.Fetcher.Token do
     :source_state,
     :max_batch_size,
     :interval,
-    :refetch_interval,
-    seen_token_hashes: MapSet.new()
+    :refetch_interval
   ]
 
   @spec start_link(term()) :: GenServer.on_start()
@@ -66,11 +60,9 @@ defmodule Explorer.Market.Fetcher.Token do
       ) do
     case source.fetch_tokens(source_state, max_batch_size) do
       {:ok, source_state, fetch_finished?, tokens_data} ->
-        filtered_tokens = Enum.reject(tokens_data, &Source.zero_or_nil?(&1[:fiat_value]))
-
-        case update_tokens(filtered_tokens) do
+        case update_tokens(tokens_data) do
           {:ok, _imported} ->
-            enqueue_to_multichain(filtered_tokens)
+            enqueue_to_multichain(tokens_data)
 
           {:error, err} ->
             Logger.error("Error while importing tokens market data: #{inspect(err)}")
@@ -79,23 +71,13 @@ defmodule Explorer.Market.Fetcher.Token do
             Logger.error("Error while importing tokens market data: #{inspect({step, failed_value, changes_so_far})}")
         end
 
-        new_seen =
-          filtered_tokens
-          |> Enum.reduce(state.seen_token_hashes, fn token, acc ->
-            MapSet.put(acc, token.contract_address_hash)
-          end)
+        if fetch_finished? do
+          Process.send_after(self(), {:fetch, 0}, refetch_interval)
+        else
+          Process.send_after(self(), {:fetch, 0}, interval)
+        end
 
-        new_seen =
-          if fetch_finished? do
-            nullify_stale_market_data(new_seen)
-            Process.send_after(self(), {:fetch, 0}, refetch_interval)
-            MapSet.new()
-          else
-            Process.send_after(self(), {:fetch, 0}, interval)
-            new_seen
-          end
-
-        {:noreply, %{state | source_state: source_state, seen_token_hashes: new_seen}}
+        {:noreply, %{state | source_state: source_state}}
 
       {:error, reason} ->
         Logger.error("Error while fetching tokens: #{inspect(reason)}")
@@ -152,61 +134,6 @@ defmodule Explorer.Market.Fetcher.Token do
       end
     end)
     |> MultichainSearch.send_token_info_to_queue(:market_data)
-  end
-
-  defp nullify_stale_market_data(seen_token_hashes) do
-    if !Enum.empty?(seen_token_hashes) do
-      do_nullify_stale_market_data(seen_token_hashes)
-    end
-  end
-
-  defp do_nullify_stale_market_data(seen_token_hashes) do
-    entries = Enum.map(seen_token_hashes, &%{contract_address_hash: &1.bytes})
-
-    Multi.new()
-    |> Multi.run(:create_temp_seen_token_hashes_table, fn repo, _changes ->
-      repo.query("""
-      CREATE TEMP TABLE temp_seen_token_hashes (
-        contract_address_hash bytea
-      ) ON COMMIT DROP
-      """)
-    end)
-    |> Multi.run(:insert_seen_token_hashes, fn repo, _changes ->
-      {:ok, repo.safe_insert_all("temp_seen_token_hashes", entries, [])}
-    end)
-    |> Multi.update_all(
-      :nullify_stale_market_data,
-      from(t in Token,
-        as: :token,
-        where: not is_nil(t.fiat_value),
-        where:
-          not exists(
-            from(s in "temp_seen_token_hashes",
-              where: s.contract_address_hash == parent_as(:token).contract_address_hash,
-              select: 1
-            )
-          )
-      ),
-      [
-        set: [
-          fiat_value: nil,
-          circulating_market_cap: nil,
-          circulating_supply: nil,
-          volume_24h: nil,
-          updated_at: DateTime.utc_now()
-        ]
-      ],
-      timeout: :infinity
-    )
-    |> Repo.transaction()
-    |> case do
-      {:ok, _} ->
-        :ok
-
-      {:error, step, reason, _} ->
-        Logger.error("Failed to nullify stale market data at step #{step}: #{inspect(reason)}")
-        :error
-    end
   end
 
   defp update_tokens(token_params) do

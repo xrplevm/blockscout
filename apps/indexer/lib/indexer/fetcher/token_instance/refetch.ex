@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenInstance.Refetch do
   @moduledoc """
   Fetches information about a token instance, which is marked to be re-fetched.

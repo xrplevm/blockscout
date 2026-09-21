@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Counters.InternalTransactionsIndexedCounter do
   @moduledoc """
   Module responsible for fetching and consolidating the number pending block operations (internal transactions) indexed.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.SmartContractAdditionalSource do
   @moduledoc """
   The representation of a verified Smart Contract additional sources.

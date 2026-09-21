@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Fetcher.Receipts do
   @moduledoc """
     Fetches and processes transaction receipts and logs for block indexing.

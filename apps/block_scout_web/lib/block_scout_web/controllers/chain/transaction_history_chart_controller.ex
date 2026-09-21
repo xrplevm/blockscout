@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Chain.TransactionHistoryChartController do
   use BlockScoutWeb, :controller
 

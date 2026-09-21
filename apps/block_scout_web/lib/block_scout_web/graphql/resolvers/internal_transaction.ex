@@ -1,8 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.GraphQL.Resolvers.InternalTransaction do
   @moduledoc false
 
-  import Explorer.Chain, only: [hash_to_transaction: 2]
+  import Explorer.Chain, only: [hash_to_transaction: 1]
 
   alias Absinthe.Relay.Connection
   alias BlockScoutWeb.Chain
@@ -11,12 +10,12 @@ defmodule BlockScoutWeb.GraphQL.Resolvers.InternalTransaction do
   alias Indexer.Fetcher.OnDemand.InternalTransaction, as: InternalTransactionOnDemand
 
   def get_by(%{transaction_hash: transaction_hash, index: index} = args, _) do
-    case hash_to_transaction(transaction_hash, api?: true) do
+    case hash_to_transaction(transaction_hash) do
       {:ok, transaction} ->
         if InternalTransaction.present_in_db?(transaction.block_number) do
           GraphQL.get_internal_transaction(args)
         else
-          options = [paging_options: %PagingOptions{page_size: index + 1}, api?: true]
+          options = [paging_options: %PagingOptions{page_size: index + 1}]
 
           transaction
           |> InternalTransactionOnDemand.fetch_by_transaction(options)
@@ -41,7 +40,7 @@ defmodule BlockScoutWeb.GraphQL.Resolvers.InternalTransaction do
 
   defp options(%{before: _}), do: []
 
-  defp options(%{count: count}), do: [paging_options: %PagingOptions{page_size: count}, api?: true]
+  defp options(%{count: count}), do: [paging_options: %PagingOptions{page_size: count}]
 
   defp options(_), do: []
 end

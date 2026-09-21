@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.BlockWithdrawalController do
   use BlockScoutWeb, :controller
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule ConfigHelper do
   require Logger
 
@@ -13,10 +12,10 @@ defmodule ConfigHelper do
       %{
         {:arbitrum, nil} => [Explorer.Repo.Arbitrum],
         {:blackfort, nil} => [Explorer.Repo.Blackfort],
-        {:eden, nil} => [Explorer.Repo.Eden],
         {:ethereum, nil} => [Explorer.Repo.Beacon],
         {:filecoin, nil} => [Explorer.Repo.Filecoin],
         {:optimism, nil} => [Explorer.Repo.Optimism],
+        {:polygon_zkevm, nil} => [Explorer.Repo.PolygonZkevm],
         {:rsk, nil} => [Explorer.Repo.RSK],
         {:scroll, nil} => [Explorer.Repo.Scroll],
         {:shibarium, nil} => [Explorer.Repo.Shibarium],
@@ -125,25 +124,14 @@ defmodule ConfigHelper do
     |> :timer.seconds()
   end
 
-  @spec parse_integer_env_var(String.t(), integer(), keyword()) :: integer()
-  def parse_integer_env_var(env_var, default_value, opts \\ []) do
-    raw_value = safe_get_env(env_var, to_string(default_value))
-
-    result =
-      case Integer.parse(raw_value) do
-        {integer, _} -> integer
-        _ -> raise "#{env_var} must be an integer, got: #{raw_value}"
-      end
-
-    case Keyword.get(opts, :min) do
-      nil ->
-        result
-
-      min when result < min ->
-        raise "#{env_var} must be >= #{min}, got: #{result}"
-
-      _ ->
-        result
+  @spec parse_integer_env_var(String.t(), integer()) :: non_neg_integer()
+  def parse_integer_env_var(env_var, default_value) do
+    env_var
+    |> safe_get_env(to_string(default_value))
+    |> Integer.parse()
+    |> case do
+      {integer, _} -> integer
+      _ -> 0
     end
   end
 
@@ -190,7 +178,7 @@ defmodule ConfigHelper do
   Parses value of env var through catalogued values list. If a value is not in the list, nil is returned.
   Also, the application shutdown option is supported, if a value is wrong.
   """
-  @spec parse_catalog_value(String.t(), List.t(), boolean(), String.t() | nil) :: atom() | nil
+  @spec parse_catalog_value(String.t(), List.t(), bool(), String.t() | nil) :: atom() | nil
   def parse_catalog_value(env_var, catalog, shutdown_on_wrong_value?, default_value \\ nil) do
     value = env_var |> safe_get_env(default_value)
 
@@ -220,7 +208,7 @@ defmodule ConfigHelper do
   the map, nil is returned. Also, the application shutdown option is supported,
   if a value is wrong.
   """
-  @spec parse_catalog_map_value(String.t(), %{binary() => any()}, boolean(), String.t() | nil) :: any() | nil
+  @spec parse_catalog_map_value(String.t(), %{binary() => any()}, bool(), String.t() | nil) :: any() | nil
   def parse_catalog_map_value(env_var, catalog, shutdown_on_wrong_key?, default_key \\ nil) do
     key = env_var |> safe_get_env(default_key)
 
@@ -423,10 +411,10 @@ defmodule ConfigHelper do
     "arbitrum" => :arbitrum,
     "arc" => :arc,
     "blackfort" => :blackfort,
-    "eden" => :eden,
     "ethereum" => :ethereum,
     "filecoin" => :filecoin,
     "optimism" => :optimism,
+    "polygon_zkevm" => :polygon_zkevm,
     "rsk" => :rsk,
     "scroll" => :scroll,
     "shibarium" => :shibarium,

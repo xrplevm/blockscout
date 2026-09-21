@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.CeloAggregatedElectionRewards do
   @moduledoc """
   Backfills the `celo_aggregated_election_rewards` table with aggregated

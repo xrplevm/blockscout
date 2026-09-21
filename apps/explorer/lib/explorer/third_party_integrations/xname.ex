@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.Xname do
   @moduledoc """
   Module for proxying xname https://xname.app/ API endpoints

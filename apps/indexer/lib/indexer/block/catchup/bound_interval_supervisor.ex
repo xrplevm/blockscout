@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Catchup.BoundIntervalSupervisor do
   @moduledoc """
   Supervises the `Indexer.BlockerFetcher.Catchup` with exponential backoff for restarts.

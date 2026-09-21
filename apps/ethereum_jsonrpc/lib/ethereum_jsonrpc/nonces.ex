@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Nonces do
   @moduledoc """
   Nonce params and errors from a batch request from `eth_getTransactionCount`.

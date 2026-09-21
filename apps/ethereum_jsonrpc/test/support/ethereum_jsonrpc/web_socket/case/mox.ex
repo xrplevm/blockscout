@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.WebSocket.Case.Mox do
   @moduledoc """
   `EthereumJSONRPC.WebSocket.Case` using `Mox`

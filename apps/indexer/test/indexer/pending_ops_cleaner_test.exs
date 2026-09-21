@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.PendingOpsCleanerTest do
   use Explorer.DataCase
 

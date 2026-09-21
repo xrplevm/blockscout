@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Account.Migrations.MigratePublicTagsAddressesToArray do
   use Ecto.Migration
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.ZkSync.LifecycleTransaction do
   @moduledoc "Models an L1 lifecycle transaction for ZkSync."
 

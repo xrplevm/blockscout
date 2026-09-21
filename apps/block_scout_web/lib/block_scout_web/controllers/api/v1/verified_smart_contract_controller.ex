@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V1.VerifiedSmartContractController do
   use BlockScoutWeb, :controller
 
@@ -17,7 +16,13 @@ defmodule BlockScoutWeb.API.V1.VerifiedSmartContractController do
           send_resp(conn, :created, encode(%{status: :success}))
 
         {:error, changeset} ->
-          send_resp(conn, :unprocessable_entity, encode(format_changeset_errors(changeset)))
+          errors =
+            changeset.errors
+            |> Enum.into(%{}, fn {field, {message, _}} ->
+              {field, message}
+            end)
+
+          send_resp(conn, :unprocessable_entity, encode(errors))
       end
     else
       :invalid_address ->
@@ -33,13 +38,6 @@ defmodule BlockScoutWeb.API.V1.VerifiedSmartContractController do
           encode(%{error: "verified code already exists for this address"})
         )
     end
-  end
-
-  defp format_changeset_errors(changeset) do
-    changeset.errors
-    |> Enum.into(%{}, fn {field, {message, _}} ->
-      {field, message}
-    end)
   end
 
   defp validate_address_hash(address_hash) do

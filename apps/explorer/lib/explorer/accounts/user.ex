@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Accounts.User do
   @moduledoc """
   An Explorer user.

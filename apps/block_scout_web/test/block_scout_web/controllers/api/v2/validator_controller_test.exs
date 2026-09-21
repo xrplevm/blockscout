@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.ValidatorControllerTest do
   use BlockScoutWeb.ConnCase
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
@@ -191,39 +190,29 @@ defmodule BlockScoutWeb.API.V2.ValidatorControllerTest do
 
   if @chain_type == :zilliqa do
     alias Explorer.Chain.Zilliqa.Staker
+    alias Explorer.Chain.Zilliqa.Hash.BLSPublicKey
+    alias Explorer.Chain.Cache.BlockNumber
 
     @page_limit 50
 
-    # A helper to verify the JSON structure for a validator.
+    # A helper to verify the JSON structure for a single validator.
     # Adjust the expectations based on what your prepare functions return.
-    defp check_validator_json(%Staker{} = validator, json, detailed? \\ true) do
-      assert json["balance"] == validator.balance |> to_string()
-      assert json["bls_public_key"] |> String.downcase() == validator.bls_public_key |> String.downcase()
-      assert json["index"] == validator.index
-
-      if detailed? do
-        assert json["peer_id"] == validator.peer_id
-        assert json["added_at_block_number"] == validator.added_at_block_number
-        assert json["stake_updated_at_block_number"] == validator.stake_updated_at_block_number
-        assert json["control_address"]["hash"] |> String.downcase() == validator.control_address_hash |> to_string()
-        assert json["reward_address"]["hash"] |> String.downcase() == validator.reward_address_hash |> to_string()
-        assert json["signing_address"]["hash"] |> String.downcase() == validator.signing_address_hash |> to_string()
-      end
-    end
-
-    defp check_paginated_response(first_page_resp, second_page_resp, items) do
-      assert first_page_resp["next_page_params"] != nil
-      check_validator_json(Enum.at(items, 0), Enum.at(first_page_resp["items"], 0), false)
-      check_validator_json(Enum.at(items, @page_limit - 1), Enum.at(first_page_resp["items"], @page_limit - 1), false)
-      check_validator_json(Enum.at(items, @page_limit), Enum.at(second_page_resp["items"], 0), false)
+    defp check_validator_json(%Staker{} = validator, json) do
+      assert json["peer_id"] == validator.peer_id
+      assert json["added_at_block_number"] == validator.added_at_block_number
+      assert json["stake_updated_at_block_number"] == validator.stake_updated_at_block_number
+      assert json["control_address"]["hash"] |> String.downcase() == validator.control_address_hash |> to_string()
+      assert json["reward_address"]["hash"] |> String.downcase() == validator.reward_address_hash |> to_string()
+      assert json["signing_address"]["hash"] |> String.downcase() == validator.signing_address_hash |> to_string()
     end
 
     describe "GET /api/v2/validators/zilliqa" do
       test "returns a paginated list of validators", %{conn: conn} do
         total_validators = @page_limit + 1
-
         # Insert enough validators to force pagination.
-        validators = insert_list(total_validators, :zilliqa_staker)
+        for _ <- 1..total_validators do
+          insert(:zilliqa_staker)
+        end
 
         # First page request.
         request = get(conn, "/api/v2/validators/zilliqa")
@@ -233,7 +222,7 @@ defmodule BlockScoutWeb.API.V2.ValidatorControllerTest do
         assert is_list(first_page["items"])
         assert Map.has_key?(first_page, "next_page_params")
 
-        # Check that the first page contains the page limit number of items.
+        # # Check that the first page contains the page limit number of items.
         assert length(first_page["items"]) == @page_limit
 
         # Second page request using next_page_params.
@@ -244,8 +233,6 @@ defmodule BlockScoutWeb.API.V2.ValidatorControllerTest do
         # and no further page.
         assert length(second_page["items"]) == total_validators - @page_limit
         assert second_page["next_page_params"] == nil
-
-        check_paginated_response(first_page, second_page, validators)
       end
     end
 
@@ -258,7 +245,7 @@ defmodule BlockScoutWeb.API.V2.ValidatorControllerTest do
       index = staker.index
       balance = to_string(staker.balance)
 
-      request = get(conn, "/api/v2/validators/zilliqa")
+      request = get(conn, "/api/v2/validators/zilliqa", %{"filter" => "active"})
 
       assert %{
                "items" => [
@@ -287,16 +274,6 @@ defmodule BlockScoutWeb.API.V2.ValidatorControllerTest do
 
       test "returns an error for an invalid BLS public key", %{conn: conn} do
         invalid_bls_key = "invalid_key"
-
-        conn = get(conn, "/api/v2/validators/zilliqa/#{invalid_bls_key}")
-        response = json_response(conn, 422)
-
-        # The controller returns a 422 with a JSON message for an invalid BLS public key format.
-        assert String.contains?(inspect(response), "Invalid format")
-      end
-
-      test "returns an error for an invalid 0x-prefixed BLS public key", %{conn: conn} do
-        invalid_bls_key = "0x00"
 
         conn = get(conn, "/api/v2/validators/zilliqa/#{invalid_bls_key}")
         response = json_response(conn, 400)

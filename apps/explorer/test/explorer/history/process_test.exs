@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.History.ProcessTest do
   use Explorer.DataCase, async: false
 

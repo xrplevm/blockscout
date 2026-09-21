@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Admin.Administrator do
   @moduledoc """
   Represents a user with administrative privileges.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.Utils.Logging do
   @moduledoc """
     Common logging functions for Indexer.Fetcher.Arbitrum fetchers

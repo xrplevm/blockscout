@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.L1Batch do
   @moduledoc """
     Models an L1 batch for Arbitrum.

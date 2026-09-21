@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.CsvExport.Address.InternalTransactions do
   @moduledoc """
   Exports internal transactions to a csv file.
@@ -7,11 +6,10 @@ defmodule BlockScoutWeb.CsvExport.Address.InternalTransactions do
   import BlockScoutWeb.Chain, only: [address_to_internal_transactions: 2]
 
   alias Explorer.Chain.{Address, Hash, InternalTransaction, Transaction, Wei}
-  alias Explorer.Chain.CsvExport.{AsyncHelper, Helper}
+  alias Explorer.Chain.CsvExport.Helper
 
-  @spec export(Hash.Address.t(), String.t(), String.t(), Keyword.t(), String.t() | nil, String.t() | nil) ::
-          Enumerable.t()
-  def export(address_hash, from_period, to_period, _options, filter_type, filter_value) do
+  @spec export(Hash.Address.t(), String.t(), String.t(), String.t() | nil, String.t() | nil) :: Enumerable.t()
+  def export(address_hash, from_period, to_period, _options, filter_type \\ nil, filter_value \\ nil) do
     {from_block, to_block} = Helper.block_from_period(from_period, to_period)
 
     address_hash
@@ -35,7 +33,9 @@ defmodule BlockScoutWeb.CsvExport.Address.InternalTransactions do
       |> Keyword.put(:paging_options, paging_options)
       |> Keyword.put(:from_block, from_block)
       |> Keyword.put(:to_block, to_block)
-      |> Keyword.put(:timeout, AsyncHelper.db_timeout())
+      |> Keyword.put(:necessity_by_association, %{
+        :transaction => :optional
+      })
       |> (&if(Helper.valid_filter?(filter_type, filter_value, "internal_transactions"),
             do: &1 |> Keyword.put(:direction, String.to_atom(filter_value)),
             else: &1

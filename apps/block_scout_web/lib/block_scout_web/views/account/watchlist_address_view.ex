@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Account.WatchlistAddressView do
   use BlockScoutWeb, :view
   import BlockScoutWeb.AddressView, only: [trimmed_hash: 1]

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.DropOutdatedIndexForTokenHoldersList do
   use Ecto.Migration
   @disable_ddl_transaction true

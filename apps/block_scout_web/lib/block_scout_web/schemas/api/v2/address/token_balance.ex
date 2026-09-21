@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Address.TokenBalance do
   @moduledoc """
   This module defines the schema for the TokenBalance struct.

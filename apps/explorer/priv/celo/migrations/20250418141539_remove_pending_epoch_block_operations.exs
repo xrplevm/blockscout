@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Celo.Migrations.RemovePendingEpochBlockOperations do
   use Ecto.Migration
 

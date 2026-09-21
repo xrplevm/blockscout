@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.FallbackController do
   use Phoenix.Controller, namespace: BlockScoutWeb
 
@@ -37,7 +36,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   @not_a_smart_contract "Address is not a smart-contract"
 
   def call(conn, {:format, _params}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@invalid_parameters}"]
     end)
 
@@ -48,7 +47,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:format_address, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@invalid_address_hash}"]
     end)
 
@@ -59,7 +58,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:format_url, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@invalid_url}"]
     end)
 
@@ -70,7 +69,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:not_found, _, :empty_items_with_next_page_params}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       [":empty_items_with_next_page_params"]
     end)
 
@@ -79,7 +78,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:not_found, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@not_found}"]
     end)
 
@@ -90,7 +89,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:contract_interaction_disabled, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@contract_interaction_disabled}"]
     end)
 
@@ -109,7 +108,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
         :celo_election_reward_type -> @invalid_celo_election_reward_type
       end
 
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{message}"]
     end)
 
@@ -120,16 +119,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:error, :not_found}) do
-    Logger.debug(fn ->
-      [":not_found"]
-    end)
-
-    conn
-    |> call({:not_found, nil})
-  end
-
-  def call(conn, :not_found) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       [":not_found"]
     end)
 
@@ -152,7 +142,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:restricted_access, true}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@restricted_access}"]
     end)
 
@@ -163,7 +153,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:already_verified, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@already_verified}"]
     end)
 
@@ -173,7 +163,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:no_json_file, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@json_not_found}"]
     end)
 
@@ -183,7 +173,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:file_error, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@error_while_reading_json}"]
     end)
 
@@ -193,7 +183,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:libs_format, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@error_in_libraries}"]
     end)
 
@@ -203,7 +193,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:lost_consensus, {:ok, block}}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@block_lost_consensus}"]
     end)
 
@@ -213,7 +203,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:lost_consensus, {:error, :not_found}}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@block_lost_consensus}"]
     end)
 
@@ -222,7 +212,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:recaptcha, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@invalid_captcha_resp}"]
     end)
 
@@ -233,7 +223,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:auth, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@unauthorized}"]
     end)
 
@@ -244,7 +234,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:sensitive_endpoints_api_key, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@not_configured_api_key}"]
     end)
 
@@ -255,7 +245,7 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
   end
 
   def call(conn, {:api_key, _}) do
-    Logger.debug(fn ->
+    Logger.error(fn ->
       ["#{@wrong_api_key}"]
     end)
 
@@ -332,21 +322,21 @@ defmodule BlockScoutWeb.API.V2.FallbackController do
     conn
     |> put_status(501)
     |> put_view(ApiView)
-    |> render(:message, %{message: "Average block time calculation is disabled, so block countdown is not available"})
+    |> render(:message, %{message: "Average block time calculating is disabled, so getblockcountdown is not available"})
   end
 
   def call(conn, {stage, _}) when stage in ~w(max_block average_block_time)a do
     conn
-    |> put_status(:unprocessable_entity)
+    |> put_status(200)
     |> put_view(ApiView)
     |> render(:message, %{message: "Chain is indexing now, try again later"})
   end
 
   def call(conn, {:remaining_blocks, _}) do
     conn
-    |> put_status(:not_found)
+    |> put_status(200)
     |> put_view(ApiView)
-    |> render(:message, %{message: "Block number already mined"})
+    |> render(:message, %{message: "Error! Block number already pass"})
   end
 
   def call(conn, {code, response}) when is_integer(code) do

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.ZkSync.Discovery.Workers do
   @moduledoc """
     Provides functions to download a set of batches from RPC and import them to DB.

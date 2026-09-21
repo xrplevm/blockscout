@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Mixfile do
   use Mix.Project
 
@@ -20,9 +19,10 @@ defmodule BlockScoutWeb.Mixfile do
       lockfile: "../../mix.lock",
       package: package(),
       start_permanent: Mix.env() == :prod,
-      version: "11.3.1",
+      version: "10.2.3",
       xref: [
         exclude: [
+          Explorer.Chain.PolygonZkevm.Reader,
           Explorer.Chain.Beacon.Reader,
           Explorer.Chain.Cache.OptimismFinalizationPeriod,
           Explorer.Chain.Optimism.OutputRoot,
@@ -190,7 +190,7 @@ defmodule BlockScoutWeb.Mixfile do
   defp package do
     [
       maintainers: ["Blockscout"],
-      licenses: ["Blockscout Software Licence"],
+      licenses: ["GPL 3.0"],
       links: %{"GitHub" => "https://github.com/blockscout/blockscout"}
     ]
   end

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenBalance.Historical do
   @moduledoc """
   Fetches historical token balances and sends the ones that were fetched to be imported in `Address.TokenBalance`.
@@ -99,14 +98,7 @@ defmodule Indexer.Fetcher.TokenBalance.Historical do
         :ok
 
       {:error, reason} ->
-        Logger.error(fn -> ["failed to import token balances: ", inspect(reason)] end,
-          error_count: Enum.count(token_balances_params)
-        )
-
-        :error
-
-      error ->
-        Logger.error(fn -> ["failed to import token balances: ", inspect(error)] end,
+        Logger.debug(fn -> ["failed to import token balances: ", inspect(reason)] end,
           error_count: Enum.count(token_balances_params)
         )
 

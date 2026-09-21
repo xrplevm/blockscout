@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressTokenBalanceViewTest do
   use BlockScoutWeb.ConnCase, async: true
 

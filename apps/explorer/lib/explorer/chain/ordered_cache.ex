@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.OrderedCache do
   @moduledoc """
   Behaviour for a cache of ordered elements.
@@ -36,15 +35,6 @@ defmodule Explorer.Chain.OrderedCache do
   and `c:element_to_id/1` callbacks.
   For typechecking purposes it's also recommended to override the `t:element/0`
   and `t:id/0` type definitions.
-
-  ## Distributed writes
-
-  In split API/indexer deployments, `update/1` uses `do_raw_update/2`: the ids list and
-  elements are written to the local `ConCache` first, then indexer nodes hand the prepared
-  update to `Explorer.Chain.Cache.Propagator`. The propagator coalesces updates and
-  asynchronously multicasts them to other cluster nodes via `:erpc`, which call
-  `do_raw_update/2` with `propagate: false` and write locally without any database access.
-  The local write never waits for a remote node.
   """
 
   @type element :: struct()
@@ -268,10 +258,27 @@ defmodule Explorer.Chain.OrderedCache do
       def update(elements) when is_list(elements) do
         case Explorer.mode() do
           mode when mode in [:all, :api, :indexer] ->
-            elements
-            |> Enum.sort_by(&element_to_id(&1), &prevails?(&1, &2))
-            |> Enum.take(max_size())
-            |> do_preloads()
+            elements_for_preload =
+              elements
+              |> Enum.sort_by(&element_to_id(&1), &prevails?(&1, &2))
+              |> Enum.take(max_size())
+
+            preloaded_elements =
+              try do
+                do_preloads(elements_for_preload)
+              rescue
+                postgrex_error in Postgrex.Error ->
+                  Logger.error(fn ->
+                    [
+                      "Error while preloading elements for ordered cache: ",
+                      Exception.format(:error, postgrex_error, __STACKTRACE__)
+                    ]
+                  end)
+
+                  elements_for_preload
+              end
+
+            preloaded_elements
             |> Enum.map(&{element_to_id(&1), sanitize_before_update(&1)})
             |> do_raw_update(true)
 
@@ -282,64 +289,36 @@ defmodule Explorer.Chain.OrderedCache do
 
       def update(element), do: update([element])
 
-      @doc """
-      Merges prepared `{id, element}` pairs into the local ordered cache.
+      def do_raw_update(prepared_elements, propagate) do
+        case Explorer.mode() do
+          mode when mode in [:all, :api] ->
+            ConCache.update(cache_name(), ids_list_key(), fn ids ->
+              updated_list =
+                prepared_elements
+                |> merge_and_update(ids || [], max_size())
 
-      With `propagate: true` (the writing side) the elements are written locally and, when
-      `Explorer.mode/0` is `:indexer`, handed to `Explorer.Chain.Cache.Propagator`, which
-      multicasts them to the other cluster nodes asynchronously. The local write never waits
-      for a remote node.
+              # ids_list is set to never expire
+              {:ok, %ConCache.Item{value: updated_list, ttl: :infinity}}
+            end)
 
-      With `propagate: false` (the receiving side) the elements, already preloaded by the
-      sender, are written locally without any database access.
-      """
-      def do_raw_update(prepared_elements, true) do
-        write_locally(prepared_elements)
+          :indexer ->
+            if propagate do
+              Node.list() |> :erpc.multicast(__MODULE__, :do_raw_update, [prepared_elements, false])
+            else
+              Logger.error("Indexer got unexpected propagation call to do_raw_update/2")
+              :ok
+            end
 
-        if Explorer.mode() == :indexer do
-          # credo:disable-for-next-line Credo.Check.Design.AliasUsage
-          Explorer.Chain.Cache.Propagator.enqueue_ordered(__MODULE__, prepared_elements)
+          _ ->
+            :ok
         end
-
-        :ok
-      end
-
-      def do_raw_update(prepared_elements, false) do
-        if Explorer.mode() == :indexer do
-          Logger.error("Indexer got unexpected propagation call to do_raw_update/2")
-        end
-
-        write_locally(prepared_elements)
-      end
-
-      defp write_locally(prepared_elements) do
-        ConCache.update(cache_name(), ids_list_key(), fn ids ->
-          updated_list =
-            prepared_elements
-            |> merge_and_update(ids || [], max_size())
-
-          # ids_list is set to never expire
-          {:ok, %ConCache.Item{value: updated_list, ttl: :infinity}}
-        end)
       end
 
       defp do_preloads(elements) do
         if Enum.empty?(preloads()) do
           elements
         else
-          try do
-            Explorer.Repo.preload(elements, preloads())
-          rescue
-            error in [Postgrex.Error, DBConnection.ConnectionError] ->
-              Logger.error(fn ->
-                [
-                  "Error while preloading elements for ordered cache: ",
-                  Exception.format(:error, error, __STACKTRACE__)
-                ]
-              end)
-
-              elements
-          end
+          Explorer.Repo.preload(elements, preloads())
         end
       end
 

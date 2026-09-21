@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Optimism.EIP1559ConfigUpdates do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Optimism.EIP1559ConfigUpdate.t/0`.

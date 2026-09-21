@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Shibarium.Reader do
   @moduledoc "Contains read functions for Shibarium modules."
 

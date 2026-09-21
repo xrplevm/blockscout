@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.MudController do
   use BlockScoutWeb, :controller
   use OpenApiSpex.ControllerSpecs
@@ -12,7 +11,8 @@ defmodule BlockScoutWeb.API.V2.MudController do
   import BlockScoutWeb.PagingHelper, only: [mud_records_sorting: 1]
   import Explorer.PagingOptions, only: [default_paging_options: 0]
 
-  import Explorer.Chain.Address.MetadataPreloader, only: [maybe_preload_ens_and_metadata: 1]
+  import Explorer.MicroserviceInterfaces.BENS, only: [maybe_preload_ens: 1]
+  import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata: 1]
 
   alias BlockScoutWeb.Schemas.Helper, as: SchemasHelper
   alias Explorer.Chain
@@ -82,7 +82,8 @@ defmodule BlockScoutWeb.API.V2.MudController do
       worlds:
         worlds
         |> Enum.map(fn world -> Map.get(world_addresses, world, %Address{hash: world}) end)
-        |> maybe_preload_ens_and_metadata(),
+        |> maybe_preload_ens()
+        |> maybe_preload_metadata(),
       next_page_params: next_page_params
     })
   end
@@ -429,27 +430,19 @@ defmodule BlockScoutWeb.API.V2.MudController do
         <<1::256>>
 
       "0x" <> hex ->
-        decode_hex_filter(hex, schema, field_idx)
+        with {:ok, bin} <- Base.decode16(hex, case: :mixed) do
+          # addresses are padded to 32 bytes with zeros on the right
+          if FieldSchema.type_of(schema.key_schema, field_idx) == 97 do
+            <<0::size(256 - byte_size(bin) * 8), bin::binary>>
+          else
+            <<bin::binary, 0::size(256 - byte_size(bin) * 8)>>
+          end
+        end
 
       dec ->
-        decode_decimal_filter(dec)
-    end
-  end
-
-  defp decode_hex_filter(hex, schema, field_idx) do
-    with {:ok, bin} <- Base.decode16(hex, case: :mixed) do
-      # addresses are padded to 32 bytes with zeros on the right
-      if FieldSchema.type_of(schema.key_schema, field_idx) == 97 do
-        <<0::size(256 - byte_size(bin) * 8), bin::binary>>
-      else
-        <<bin::binary, 0::size(256 - byte_size(bin) * 8)>>
-      end
-    end
-  end
-
-  defp decode_decimal_filter(dec) do
-    with {num, _} <- Integer.parse(dec) do
-      <<num::256>>
+        with {num, _} <- Integer.parse(dec) do
+          <<num::256>>
+        end
     end
   end
 

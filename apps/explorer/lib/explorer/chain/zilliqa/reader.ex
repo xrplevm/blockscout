@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Zilliqa.Reader do
   @moduledoc """
   Reads Zilliqa-related data from the database.

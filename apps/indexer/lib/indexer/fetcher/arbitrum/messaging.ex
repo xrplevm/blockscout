@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.Messaging do
   @moduledoc """
   Provides functionality for filtering and handling messaging between Layer 1 (L1) and Layer 2 (L2) in the Arbitrum protocol.

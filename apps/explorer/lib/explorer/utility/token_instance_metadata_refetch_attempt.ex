@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Utility.TokenInstanceMetadataRefetchAttempt do
   @moduledoc """
   Module is responsible for keeping the number of retries for

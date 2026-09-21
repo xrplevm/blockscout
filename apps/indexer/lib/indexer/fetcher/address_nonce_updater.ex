@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.AddressNonceUpdater do
   @moduledoc """
   Periodically updates addresses nonce

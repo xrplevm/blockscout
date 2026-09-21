@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.BlockBurntFeeCount do
   @moduledoc """
   Caches Block Burnt Fee counter.

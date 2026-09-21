@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.ReindexInternalTransactionsWithIncompatibleStatusTest do
   use Explorer.DataCase, async: false
 

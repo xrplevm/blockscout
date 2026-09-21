@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Counters.BlocksIndexedCounter do
   @moduledoc """
   Module responsible for fetching and consolidating the number blocks indexed.

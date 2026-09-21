@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.TransactionsTest do
   use Explorer.DataCase
   alias Explorer.Chain.Cache.Counters.TransactionsCount

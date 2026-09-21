@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.CeloCoreContracts do
   @moduledoc """
   Cache for Celo core contract addresses.

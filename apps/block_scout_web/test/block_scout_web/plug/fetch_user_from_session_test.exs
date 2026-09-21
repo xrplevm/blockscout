@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Plug.FetchUserFromSessionTest do
   use BlockScoutWeb.ConnCase
 

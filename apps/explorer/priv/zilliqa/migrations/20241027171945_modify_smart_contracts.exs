@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Zilliqa.Migrations.ModifySmartContracts do
   use Ecto.Migration
 

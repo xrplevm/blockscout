@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Withdrawal.Supervisor.Case do
   alias Indexer.Fetcher.Withdrawal
 

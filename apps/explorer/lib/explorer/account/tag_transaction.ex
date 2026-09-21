@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.TagTransaction do
   @moduledoc """
     This is a personal tag for transaction

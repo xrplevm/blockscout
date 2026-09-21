@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Case.Geth.Mox do
   @moduledoc """
   `EthereumJSONRPC.Case` for mocking connecting to Geth using `Mox`

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 import Config
 
 config :ethereum_jsonrpc, EthereumJSONRPC.RequestCoordinator,

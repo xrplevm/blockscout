@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Optimism.FrameSequences do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Optimism.FrameSequence.t/0`.

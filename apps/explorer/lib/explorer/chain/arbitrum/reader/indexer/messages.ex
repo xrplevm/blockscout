@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.Reader.Indexer.Messages do
   @moduledoc """
     Provides functions for querying and managing Arbitrum cross-chain messages in the Blockscout indexer.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.MultichainSearchDb.BalancesExportQueue do
   @moduledoc """
   Tracks token and coin balances, pending for export to the Multichain Service database.

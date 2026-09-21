@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.Keycloak do
   @moduledoc """
   Keycloak Admin REST API client for user management.
@@ -476,7 +475,7 @@ defmodule Explorer.ThirdPartyIntegrations.Keycloak do
   defp do_send_registration_webhook(_email, nil), do: :ok
 
   defp create_auth(user, address_hash \\ nil) do
-    address_hash = address_hash || List.last(user["attributes"]["address"] || [])
+    address_hash = address_hash || List.first(user["attributes"]["address"] || [])
 
     %Auth{
       uid: user["id"],

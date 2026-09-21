@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.NewProxyTypeResolvedDelegateProxy do
   use Ecto.Migration
 

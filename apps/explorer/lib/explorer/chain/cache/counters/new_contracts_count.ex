@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.NewContractsCount do
   @moduledoc """
   Caches the number of new contracts (created in last 24 hours).

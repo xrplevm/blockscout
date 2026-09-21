@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Utils.HttpClient.HTTPoisonHelper do
   @moduledoc """
   Helper module for building HTTPoison request options.

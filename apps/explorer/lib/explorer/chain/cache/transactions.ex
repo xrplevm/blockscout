@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Transactions do
   @moduledoc """
   Caches the latest imported transactions

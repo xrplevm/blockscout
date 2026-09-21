@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Stage.ChainTypeSpecific do
   @moduledoc """
   Imports any chain type specific tables.
@@ -24,6 +23,13 @@ defmodule Explorer.Chain.Import.Stage.ChainTypeSpecific do
       Runner.Optimism.WithdrawalEvents,
       Runner.Optimism.EIP1559ConfigUpdates,
       Runner.Optimism.InteropMessages
+    ],
+    polygon_zkevm: [
+      Runner.PolygonZkevm.LifecycleTransactions,
+      Runner.PolygonZkevm.TransactionBatches,
+      Runner.PolygonZkevm.BatchTransactions,
+      Runner.PolygonZkevm.BridgeL1Tokens,
+      Runner.PolygonZkevm.BridgeOperations
     ],
     zksync: [
       Runner.ZkSync.LifecycleTransactions,

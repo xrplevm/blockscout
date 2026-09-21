@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.LastFetchedCounter do
   @moduledoc """
   Stores last fetched counters.

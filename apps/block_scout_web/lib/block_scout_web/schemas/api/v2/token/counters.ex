@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Token.Counters do
   @moduledoc """
   This module defines the schema for the response from /api/v2/tokens/:address_hash_param/counters.

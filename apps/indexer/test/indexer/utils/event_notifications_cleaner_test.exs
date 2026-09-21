@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Utils.EventNotificationsCleanerTest do
   use Explorer.DataCase
 

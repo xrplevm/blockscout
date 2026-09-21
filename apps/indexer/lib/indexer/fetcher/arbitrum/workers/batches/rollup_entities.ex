@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.Workers.Batches.RollupEntities do
   @moduledoc """
   The module associates rollup blocks and transactions with their corresponding batches in the Arbitrum blockchain.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.OnDemand.ContractCode do
   @moduledoc """
   Ensures that we have a smart-contract bytecode indexed.

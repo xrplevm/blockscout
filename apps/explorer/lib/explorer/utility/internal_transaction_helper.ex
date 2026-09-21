@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Utility.InternalTransactionHelper do
   @moduledoc """
   Internal transactions helping functions.

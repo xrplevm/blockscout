@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Celo.ValidatorGroupVotes do
   @moduledoc """
   Fetches validator group votes from the Celo blockchain.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.BlockPriorityFeeCount do
   @moduledoc """
   Caches Block Priority Fee counter.

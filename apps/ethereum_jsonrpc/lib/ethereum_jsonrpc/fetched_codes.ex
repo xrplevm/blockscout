@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.FetchedCodes do
   @moduledoc """
   Code params and errors from a batch request from `eth_getCode`.

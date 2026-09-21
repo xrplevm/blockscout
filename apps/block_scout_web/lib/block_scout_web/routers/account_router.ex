@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Routers.AccountRouter do
   @moduledoc """
   Router for account-related requests

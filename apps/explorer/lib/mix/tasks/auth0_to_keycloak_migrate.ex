@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Mix.Tasks.Auth0ToKeycloakMigrate do
   @moduledoc """
   Migrates users from Auth0 to Keycloak.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Application do
   @moduledoc """
   Supervises `BlockScoutWeb.Endpoint` in order to serve Web UI.
@@ -63,11 +62,10 @@ defmodule BlockScoutWeb.Application do
   end
 
   alias Indexer.Prometheus.Metrics, as: IndexerMetrics
-  alias Indexer.Prometheus.RealtimeMetrics, as: IndexerRealtimeMetrics
 
   defp indexer_metric_worker do
     if Explorer.mode() in [:indexer, :all] do
-      [{IndexerMetrics, []}, {IndexerRealtimeMetrics, []}]
+      [{IndexerMetrics, []}]
     else
       []
     end

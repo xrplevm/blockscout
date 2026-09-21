@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.MultichainSearchDb.CountersFetcher do
   @moduledoc """
   Fetches counters and adds them to a queue to send to Multichain Search DB service.

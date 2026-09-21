@@ -1,19 +1,6 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 # This file is responsible for configuring your application
 # and its dependencies with the aid of the Config module.
 import Config
-
-config :explorer, Oban,
-  engine: Oban.Engines.Basic,
-  notifier: Oban.Notifiers.Postgres,
-  repo: Explorer.Repo,
-  plugins: [
-    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
-    {Oban.Plugins.Cron,
-     crontab: [
-       {"@daily", Explorer.Chain.CsvExport.RequestsSanitizer}
-     ]}
-  ]
 
 # By default, the umbrella project as well as each child
 # application will require this configuration file, ensuring

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 import Config
 
 # For production, we often load configuration from external

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.Rootstock.LockedBTCCountTest do
   use Explorer.DataCase
 

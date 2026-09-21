@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation.CreateLogsBlockHashIndex do
   @moduledoc """
   Create B-tree index on `logs` table for `block_hash` column.

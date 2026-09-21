@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.ShrunkInternalTransactions.Migrations.DropCallHasErrorIdOrResultConstraint do
   use Ecto.Migration
 

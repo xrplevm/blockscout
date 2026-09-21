@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Log.Schema do
   @moduledoc false
   use Utils.CompileTimeEnvHelper,
@@ -230,7 +229,14 @@ defmodule Explorer.Chain.Log do
           {{:error, :contract_not_verified, candidates}, events_acc}
         else
           {_, events_acc} ->
-            handle_unverified_method(log, transaction, decoding_from_list?, skip_sig_provider?, events_acc)
+            result =
+              if decoding_from_list? do
+                mark_events_to_decode_later_via_sig_provider_in_batch(log, transaction.hash)
+              else
+                decode_event_via_sig_provider(log, transaction.hash, skip_sig_provider?)
+              end
+
+            {result, events_acc}
         end
     end
   end
@@ -248,17 +254,6 @@ defmodule Explorer.Chain.Log do
         {result, Map.put(events_acc, method_id, event_candidates)}
       end
     end
-  end
-
-  defp handle_unverified_method(log, transaction, decoding_from_list?, skip_sig_provider?, events_acc) do
-    result =
-      if decoding_from_list? do
-        mark_events_to_decode_later_via_sig_provider_in_batch(log, transaction.hash)
-      else
-        decode_event_via_sig_provider(log, transaction.hash, skip_sig_provider?)
-      end
-
-    {result, events_acc}
   end
 
   defp find_method_candidates_from_db(method_id, log, transaction, options) do
@@ -311,7 +306,7 @@ defmodule Explorer.Chain.Log do
     end
   rescue
     e ->
-      Logger.debug(fn ->
+      Logger.warning(fn ->
         [
           "Could not decode input data for log from transaction hash: ",
           Hash.to_iodata(transaction_hash),
@@ -465,32 +460,25 @@ defmodule Explorer.Chain.Log do
                          :log => log,
                          :transaction_hash => transaction_hash
                        }}, %{"abi" => abi}} ->
-        decode_sig_provider_batch_item(index, abi, log, transaction_hash)
+        abi_first_item = abi |> List.first()
+
+        if is_map(abi_first_item) do
+          abi = [abi_first_item |> Map.put("type", "event")]
+
+          {:ok, selector, mapping} = find_and_decode(abi, log, transaction_hash)
+
+          identifier = Base.encode16(selector.method_id, case: :lower)
+          text = function_call(selector.function, mapping)
+
+          {index, {:error, :contract_not_verified, [{:ok, identifier, text, mapping}]}}
+        else
+          {index, {:error, :could_not_decode}}
+        end
       end)
     else
       _ ->
         input
         |> Enum.map(fn {index, _} -> {index, {:error, :could_not_decode}} end)
-    end
-  end
-
-  defp decode_sig_provider_batch_item(index, abi, log, transaction_hash) do
-    abi_first_item = List.first(abi)
-
-    if is_map(abi_first_item) do
-      normalized_abi = [Map.put(abi_first_item, "type", "event")]
-
-      case find_and_decode(normalized_abi, log, transaction_hash) do
-        {:ok, selector, mapping} ->
-          identifier = Base.encode16(selector.method_id, case: :lower)
-          text = function_call(selector.function, mapping)
-          {index, {:error, :contract_not_verified, [{:ok, identifier, text, mapping}]}}
-
-        {:error, _} ->
-          {index, {:error, :could_not_decode}}
-      end
-    else
-      {index, {:error, :could_not_decode}}
     end
   end
 

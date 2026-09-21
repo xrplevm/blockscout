@@ -1,5 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
-# credo:disable-for-this-file
 defmodule Explorer.Migrator.FillingMigration do
   @moduledoc """
     Provides a behaviour and implementation for data migration tasks that fill or update
@@ -156,11 +154,6 @@ defmodule Explorer.Migrator.FillingMigration do
   """
   @callback before_start :: any()
 
-  @doc """
-  Returns a list of migration names that the current migration depends on.
-  """
-  @callback dependent_from_migrations :: list(String.t())
-
   @optional_callbacks unprocessed_data_query: 0, unprocessed_data_query: 1
 
   defmacro __using__(opts) do
@@ -171,8 +164,6 @@ defmodule Explorer.Migrator.FillingMigration do
 
       import Ecto.Query
 
-      alias Explorer.Chain.Block
-      alias Explorer.Migrator.HeavyDbIndexOperation.Helper, as: HeavyDbIndexOperationHelper
       alias Explorer.Migrator.MigrationStatus
       alias Explorer.Repo
 
@@ -196,13 +187,7 @@ defmodule Explorer.Migrator.FillingMigration do
 
       @impl true
       def init(_) do
-        if Repo.exists?(Block) do
-          {:ok, %{}, {:continue, :ok}}
-        else
-          MigrationStatus.set_status(migration_name(), "completed")
-          update_cache()
-          :ignore
-        end
+        {:ok, %{}, {:continue, :ok}}
       end
 
       # Called once when the GenServer starts to initialize the migration process by checking its
@@ -229,22 +214,11 @@ defmodule Explorer.Migrator.FillingMigration do
             {:stop, :normal, state}
 
           migration_status ->
-            schedule_next_migration_readiness_check(0)
+            MigrationStatus.set_status(migration_name(), "started")
+            before_start()
+            schedule_batch_migration(0)
             {:noreply, (migration_status && migration_status.meta) || %{}}
         end
-      end
-
-      @impl true
-      def handle_info(:check_migration_readiness, state) do
-        if migration_is_ready_to_start?() do
-          MigrationStatus.set_status(migration_name(), "started")
-          before_start()
-          schedule_batch_migration(0)
-        else
-          schedule_next_migration_readiness_check()
-        end
-
-        {:noreply, state}
       end
 
       # Processes a batch of unprocessed identifiers for migration.
@@ -301,25 +275,6 @@ defmodule Explorer.Migrator.FillingMigration do
       @spec run_task([any()]) :: any()
       defp run_task(batch), do: Task.async(fn -> update_batch(batch) end)
 
-      defp migration_is_ready_to_start? do
-        migrations = dependent_from_migrations()
-
-        if Enum.empty?(migrations) do
-          true
-        else
-          all_statuses = MigrationStatus.fetch_migration_statuses(migrations)
-          Enum.count(all_statuses) == Enum.count(migrations) and Enum.all?(all_statuses, &(&1 == "completed"))
-        end
-      end
-
-      defp schedule_next_migration_readiness_check(timeout \\ nil) do
-        Process.send_after(
-          self(),
-          :check_migration_readiness,
-          timeout || HeavyDbIndexOperationHelper.get_check_interval()
-        )
-      end
-
       # Schedules the next batch migration by sending a delayed :migrate_batch message.
       #
       # ## Parameters
@@ -350,11 +305,7 @@ defmodule Explorer.Migrator.FillingMigration do
         :ignore
       end
 
-      def dependent_from_migrations do
-        []
-      end
-
-      defoverridable on_finish: 0, before_start: 0, dependent_from_migrations: 0
+      defoverridable on_finish: 0, before_start: 0
     end
   end
 end

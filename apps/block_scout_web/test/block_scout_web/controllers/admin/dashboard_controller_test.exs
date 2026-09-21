@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Admin.DashboardControllerTest do
   use BlockScoutWeb.ConnCase
 

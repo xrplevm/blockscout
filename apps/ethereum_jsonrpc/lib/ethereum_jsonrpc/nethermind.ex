@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 # credo:disable-for-this-file
 defmodule EthereumJSONRPC.Nethermind do
   @moduledoc """

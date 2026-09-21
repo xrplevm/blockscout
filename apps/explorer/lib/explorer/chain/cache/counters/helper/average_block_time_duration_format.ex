@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.Helper.AverageBlockTimeDurationFormat do
   @moduledoc """
   A `Timex.Format.Duration.Formatter` that renders the most significant unit out to one decimal point.

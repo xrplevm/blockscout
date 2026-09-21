@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Optimism.Withdrawal do
   @moduledoc """
   Fills op_withdrawals DB table.

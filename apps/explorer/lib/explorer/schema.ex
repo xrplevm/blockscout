@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Schema do
   @moduledoc "Common configuration for Explorer schemas."
 

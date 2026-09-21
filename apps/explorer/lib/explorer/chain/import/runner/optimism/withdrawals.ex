@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Optimism.Withdrawals do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.OptimismWithdrawal.t/0`.

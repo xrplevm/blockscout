@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Proxy.AccountAbstraction.Account do
   @moduledoc """
   This module defines the schema for the Account struct.

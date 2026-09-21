@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.RustVerifierInterfaceBehaviour do
   @moduledoc """
     This behaviour module was created in order to add possibility to extend the functionality of RustVerifierInterface
@@ -84,20 +83,17 @@ defmodule Explorer.SmartContract.RustVerifierInterfaceBehaviour do
             process_verifier_response(body, options)
 
           {:error, error} ->
+            old_truncate = Application.get_env(:logger, :truncate)
+            Logger.configure(truncate: :infinity)
+
             Logger.error(fn ->
               [
-                "Error while sending request to verification microservice url: #{url} ",
-                inspect(error)
-              ]
-            end)
-
-            Logger.debug(fn ->
-              [
                 "Error while sending request to verification microservice url: #{url}, body: #{inspect(body, limit: :infinity, printable_limit: :infinity)}: ",
-                inspect(error)
+                inspect(error, limit: :infinity, printable_limit: :infinity)
               ]
             end)
 
+            Logger.configure(truncate: old_truncate)
             {:error, @request_error_msg}
         end
       end
@@ -121,13 +117,17 @@ defmodule Explorer.SmartContract.RustVerifierInterfaceBehaviour do
             {:error, body}
 
           {:error, error} ->
+            old_truncate = Application.get_env(:logger, :truncate)
+            Logger.configure(truncate: :infinity)
+
             Logger.error(fn ->
               [
                 "Error while sending request to verification microservice url: #{url}: ",
-                inspect(error)
+                inspect(error, limit: :infinity, printable_limit: :infinity)
               ]
             end)
 
+            Logger.configure(truncate: old_truncate)
             {:error, @request_error_msg}
         end
       end

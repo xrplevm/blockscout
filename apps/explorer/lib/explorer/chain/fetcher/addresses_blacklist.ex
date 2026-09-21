@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Fetcher.AddressesBlacklist do
   @moduledoc """
   General fetcher for addresses blacklist

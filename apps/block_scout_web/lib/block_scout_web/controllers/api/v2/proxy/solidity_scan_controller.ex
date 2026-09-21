@@ -1,8 +1,5 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.Proxy.SolidityScanController do
   use BlockScoutWeb, :controller
-
-  action_fallback(BlockScoutWeb.API.V2.FallbackController)
 
   alias BlockScoutWeb.AccessHelper
   alias Explorer.Chain
@@ -30,7 +27,7 @@ defmodule BlockScoutWeb.API.V2.Proxy.SolidityScanController do
          {:is_smart_contract, true} <- {:is_smart_contract, Address.smart_contract?(address)},
          smart_contract = SmartContract.address_hash_to_smart_contract(address_hash, @api_true),
          {:is_verified_smart_contract, true} <- {:is_verified_smart_contract, !is_nil(smart_contract)},
-         {:language, language} when language != :vyper <- {:language, smart_contract.language},
+         {:language, language} when language != :vyper <- {:language, SmartContract.language(smart_contract)},
          response = SolidityScan.solidityscan_request(address_hash_string),
          {:is_empty_response, false} <- {:is_empty_response, is_nil(response)} do
       conn

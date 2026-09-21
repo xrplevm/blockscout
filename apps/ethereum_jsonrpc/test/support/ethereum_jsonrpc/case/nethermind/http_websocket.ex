@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Case.Nethermind.HTTPWebSocket do
   @moduledoc """
   `EthereumJSONRPC.Case` for connecting to Nethermind using `EthereumJSONRPC.HTTP` for `json_rpc_named_arguments`

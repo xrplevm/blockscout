@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Utils.CompileTimeEnvHelper do
   @moduledoc """
   A module that helps with compile time environment variable handling and automatic

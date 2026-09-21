@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Suave.Migrations.AddSuaveTransactionFields do
   use Ecto.Migration
 

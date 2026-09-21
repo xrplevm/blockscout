@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.Workers.Confirmations.RollupBlocks do
   @moduledoc """
   Handles the discovery and marking of confirmed rollup blocks in Arbitrum.
@@ -221,15 +220,22 @@ defmodule Indexer.Fetcher.Arbitrum.Workers.Confirmations.RollupBlocks do
            not genesis_reached?(first_unconfirmed_block, rollup_first_block) do
         log_info("End of the batch #{batch.number} discovered, moving to the previous batch")
 
-        discover_previous_batch_blocks(
-          first_unconfirmed_block,
-          confirmation_desc,
-          outbox_config,
-          rollup_first_block,
-          new_cache,
-          unconfirmed_rollup_blocks,
-          raw_unconfirmed_rollup_blocks
-        )
+        {status, updated_rollup_blocks} =
+          discover_rollup_blocks_belonging_to_one_confirmation(
+            first_unconfirmed_block - 1,
+            confirmation_desc,
+            outbox_config,
+            rollup_first_block,
+            new_cache
+          )
+
+        case status do
+          :error -> {:error, []}
+          # updated_rollup_blocks will contain either [] if the previous batch
+          # already confirmed or list of unconfirmed blocks of all previous
+          # unconfirmed batches
+          :ok -> {:ok, unconfirmed_rollup_blocks ++ updated_rollup_blocks}
+        end
       else
         # During the process of new confirmations discovery it will show "N of N",
         # for the process of historical confirmations discovery it will show "N of M".
@@ -239,33 +245,6 @@ defmodule Indexer.Fetcher.Arbitrum.Workers.Confirmations.RollupBlocks do
 
         {:ok, unconfirmed_rollup_blocks}
       end
-    end
-  end
-
-  defp discover_previous_batch_blocks(
-         first_unconfirmed_block,
-         confirmation_desc,
-         outbox_config,
-         rollup_first_block,
-         new_cache,
-         unconfirmed_rollup_blocks,
-         _raw_unconfirmed_rollup_blocks
-       ) do
-    {status, updated_rollup_blocks} =
-      discover_rollup_blocks_belonging_to_one_confirmation(
-        first_unconfirmed_block - 1,
-        confirmation_desc,
-        outbox_config,
-        rollup_first_block,
-        new_cache
-      )
-
-    case status do
-      :error -> {:error, []}
-      # updated_rollup_blocks will contain either [] if the previous batch
-      # already confirmed or list of unconfirmed blocks of all previous
-      # unconfirmed batches
-      :ok -> {:ok, unconfirmed_rollup_blocks ++ updated_rollup_blocks}
     end
   end
 

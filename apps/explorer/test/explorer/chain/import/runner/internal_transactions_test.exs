@@ -1,11 +1,9 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
   use Explorer.DataCase
 
   alias Ecto.Multi
   alias Explorer.Chain.{Block, Data, Wei, PendingBlockOperation, Transaction, InternalTransaction}
   alias Explorer.Chain.Import.Runner.InternalTransactions
-  alias Explorer.Migrator.DeleteZeroValueInternalTransactions
 
   setup do
     config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
@@ -174,49 +172,13 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
 
       assert {:ok, _} = run_internal_transactions([transaction_changes, pending_changes])
 
-      assert Repo.exists?(
-               from(i in InternalTransaction,
-                 where: i.block_number == ^transaction.block_number and i.transaction_index == ^transaction.index
-               )
-             )
+      assert Repo.exists?(from(i in InternalTransaction, where: i.transaction_hash == ^transaction.hash))
 
       assert PendingBlockOperation |> Repo.get(transaction.block_hash) |> is_nil()
 
-      assert InternalTransaction
-             |> InternalTransaction.join_transaction_query()
-             |> where([_it, t], t.hash == ^pending.hash)
-             |> Repo.one()
-             |> is_nil()
+      assert from(i in InternalTransaction, where: i.transaction_hash == ^pending.hash) |> Repo.one() |> is_nil()
 
       assert is_nil(Repo.get(Transaction, pending.hash).block_hash)
-    end
-
-    test "internal transactions of a transaction index that has no transaction are ignored" do
-      transaction = insert(:transaction) |> with_block(status: :ok)
-      insert(:pending_block_operation, block_hash: transaction.block_hash, block_number: transaction.block_number)
-
-      duplicated_transaction_index = transaction.index + 1
-
-      changes = Enum.map([0, 1], &make_internal_transaction_changes(transaction, &1, nil))
-      duplicated_changes = Enum.map(changes, &%{&1 | transaction_index: duplicated_transaction_index})
-
-      assert {:ok, _} = run_internal_transactions(changes ++ duplicated_changes)
-
-      assert PendingBlockOperation |> Repo.get(transaction.block_hash) |> is_nil()
-
-      assert Repo.exists?(
-               from(it in InternalTransaction,
-                 where: it.block_number == ^transaction.block_number and it.transaction_index == ^transaction.index
-               )
-             )
-
-      refute Repo.exists?(
-               from(it in InternalTransaction,
-                 where:
-                   it.block_number == ^transaction.block_number and
-                     it.transaction_index == ^duplicated_transaction_index
-               )
-             )
     end
 
     test "removes consensus to blocks where transactions are missing" do
@@ -245,17 +207,9 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
 
       assert {:ok, _} = run_internal_transactions([pending_transaction_changes, transaction_changes])
 
-      assert InternalTransaction
-             |> InternalTransaction.join_transaction_query()
-             |> where([_it, t], t.hash == ^pending.hash)
-             |> Repo.one()
-             |> is_nil()
+      assert from(i in InternalTransaction, where: i.transaction_hash == ^pending.hash) |> Repo.one() |> is_nil()
 
-      assert from(i in InternalTransaction,
-               where: i.block_number == ^inserted.block_number and i.transaction_index == ^inserted.index
-             )
-             |> Repo.one()
-             |> is_nil() ==
+      assert from(i in InternalTransaction, where: i.transaction_hash == ^inserted.hash) |> Repo.one() |> is_nil() ==
                false
 
       assert %{consensus: true} = Repo.get(Block, full_block.hash)
@@ -274,15 +228,11 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
 
         assert {:ok, _} = run_internal_transactions([transaction_a_changes])
 
-        assert from(i in InternalTransaction,
-                 where: i.block_number == ^transaction_a.block_number and i.transaction_index == ^transaction_a.index
-               )
+        assert from(i in InternalTransaction, where: i.transaction_hash == ^transaction_a.hash)
                |> Repo.one()
                |> is_nil()
 
-        assert from(i in InternalTransaction,
-                 where: i.block_number == ^transaction_b.block_number and i.transaction_index == ^transaction_b.index
-               )
+        assert from(i in InternalTransaction, where: i.transaction_hash == ^transaction_b.hash)
                |> Repo.one()
                |> is_nil()
 
@@ -305,51 +255,11 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
 
         assert {:ok, _} = run_internal_transactions([transaction_a_changes])
 
-        assert from(i in InternalTransaction,
-                 where: i.block_number == ^transaction_a.block_number and i.transaction_index == ^transaction_a.index
-               )
+        assert from(i in InternalTransaction, where: i.transaction_hash == ^transaction_a.hash)
                |> Repo.one()
                |> is_nil()
 
-        assert from(i in InternalTransaction,
-                 where: i.block_number == ^transaction_b.block_number and i.transaction_index == ^transaction_b.index
-               )
-               |> Repo.one()
-               |> is_nil()
-
-        assert %{consensus: true, refetch_needed: false} = Repo.get(Block, full_block.hash)
-
-        on_exit(fn -> Application.put_env(:indexer, :trace_block_ranges, original_config) end)
-      end
-
-      test "does not set refetch_needed=true for non-traceable blocks and multiple ranges" do
-        original_config = Application.get_env(:indexer, :trace_block_ranges)
-
-        full_block = insert(:block)
-        transaction_a = insert(:transaction) |> with_block(full_block)
-        transaction_b = insert(:transaction) |> with_block(full_block)
-
-        Application.put_env(
-          :indexer,
-          :trace_block_ranges,
-          "#{full_block.number - 2}..#{full_block.number - 1},#{full_block.number + 1}..latest"
-        )
-
-        insert(:pending_block_operation, block_hash: full_block.hash, block_number: full_block.number)
-
-        transaction_a_changes = make_internal_transaction_changes(transaction_a, 0, nil)
-
-        assert {:ok, _} = run_internal_transactions([transaction_a_changes])
-
-        assert from(i in InternalTransaction,
-                 where: i.block_number == ^transaction_a.block_number and i.transaction_index == ^transaction_a.index
-               )
-               |> Repo.one()
-               |> is_nil()
-
-        assert from(i in InternalTransaction,
-                 where: i.block_number == ^transaction_b.block_number and i.transaction_index == ^transaction_b.index
-               )
+        assert from(i in InternalTransaction, where: i.transaction_hash == ^transaction_b.hash)
                |> Repo.one()
                |> is_nil()
 
@@ -377,11 +287,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
 
         assert {:ok, _} = run_internal_transactions([transaction_changes])
 
-        assert from(i in InternalTransaction,
-                 where: i.block_number == ^transaction.block_number and i.transaction_index == ^transaction.index
-               )
-               |> Repo.one()
-               |> is_nil()
+        assert from(i in InternalTransaction, where: i.transaction_hash == ^transaction.hash) |> Repo.one() |> is_nil()
 
         assert %{consensus: true, refetch_needed: false} = Repo.get(Block, full_block.hash)
 
@@ -412,18 +318,12 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
       assert %{consensus: true} = Repo.get(Block, empty_block.hash)
       assert PendingBlockOperation |> Repo.get(empty_block.hash) |> is_nil()
 
-      assert from(i in InternalTransaction,
-               where: i.block_number == ^inserted.block_number and i.transaction_index == ^inserted.index,
-               where: i.index == 1
-             )
+      assert from(i in InternalTransaction, where: i.transaction_hash == ^inserted.hash, where: i.index == 1)
              |> Repo.one()
              |> is_nil() ==
                false
 
-      assert from(i in InternalTransaction,
-               where: i.block_number == ^inserted.block_number and i.transaction_index == ^inserted.index,
-               where: i.index == 2
-             )
+      assert from(i in InternalTransaction, where: i.transaction_hash == ^inserted.hash, where: i.index == 2)
              |> Repo.one()
              |> is_nil() ==
                false
@@ -451,6 +351,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         index: 0,
         input: input,
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: 0,
         type: :stop,
         value: Wei.from(Decimal.new(0), :wei)
@@ -474,6 +375,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         to_address_hash: insert(:address).hash,
         gas: nil,
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: transaction.index,
         index: 0,
         type: :selfdestruct,
@@ -505,6 +407,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         gas_used: 25000,
         init: %Data{bytes: <<1, 2, 3>>},
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: transaction.index,
         index: 0,
         type: :create,
@@ -518,6 +421,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         to_address_hash: insert(:address).hash,
         gas: nil,
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: transaction.index,
         index: 1,
         type: :selfdestruct,
@@ -548,6 +452,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         to_address_hash: insert(:address).hash,
         gas: nil,
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: transaction.index,
         index: 0,
         type: :selfdestruct,
@@ -560,6 +465,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         to_address_hash: insert(:address).hash,
         gas: nil,
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: transaction.index,
         index: 1,
         type: :selfdestruct,
@@ -572,6 +478,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         to_address_hash: insert(:address).hash,
         gas: nil,
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: transaction.index,
         index: 2,
         type: :selfdestruct,
@@ -609,6 +516,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         gas_used: 25000,
         index: 0,
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: transaction.index,
         init: %Data{bytes: <<1, 2, 3>>},
         type: :create2,
@@ -622,6 +530,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         to_address_hash: insert(:address).hash,
         gas: nil,
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: transaction.index,
         index: 1,
         type: :selfdestruct,
@@ -649,6 +558,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         to_address_hash: insert(:address).hash,
         gas: nil,
         trace_address: [],
+        transaction_hash: transaction.hash,
         transaction_index: transaction.index,
         index: 0,
         type: :selfdestruct,
@@ -660,128 +570,9 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
     end
   end
 
-  describe "zero value internal transactions filtering" do
-    setup do
-      original_config = Application.get_env(:explorer, DeleteZeroValueInternalTransactions)
-
-      on_exit(fn ->
-        Application.put_env(:explorer, DeleteZeroValueInternalTransactions, original_config)
-      end)
-
-      :ok
-    end
-
-    test "prepare_data/1 does not drop zero-value calls (filtering happens at insert/3, after validation)" do
-      Application.put_env(:explorer, DeleteZeroValueInternalTransactions, enabled: true, storage_period: 0)
-      block = insert(:block)
-
-      params = [
-        %{type: :call, block_number: block.number - 1, value: Wei.from(Decimal.new(0), :wei)},
-        %{type: :call, block_number: block.number - 1, value: Wei.from(Decimal.new(1), :wei)},
-        %{type: "call", block_number: block.number - 1, value: 0},
-        %{type: :call, block_number: block.number - 1, value: nil}
-      ]
-
-      # Dropping zero-value calls here would make their parent transactions look
-      # un-traced during block validation, so prepare_data/1 must keep them all.
-      assert length(InternalTransactions.prepare_data(params)) == 4
-    end
-
-    test "run/3 excludes zero-value calls from persistence while still validating the block and clearing its pending operation" do
-      Application.put_env(:explorer, DeleteZeroValueInternalTransactions, enabled: true, storage_period: 0)
-
-      full_block = insert(:block)
-      transaction_a = insert(:transaction) |> with_block(full_block)
-      transaction_b = insert(:transaction) |> with_block(full_block)
-      insert(:pending_block_operation, block_hash: full_block.hash, block_number: full_block.number)
-
-      # transaction_a keeps a normal, non-zero-value internal transaction
-      transaction_a_changes = make_internal_transaction_changes(transaction_a, 0, nil)
-
-      # transaction_b's only internal transaction is a zero-value call subject to deletion
-      transaction_b_changes =
-        transaction_b
-        |> make_internal_transaction_changes(0, nil)
-        |> Map.put(:value, Wei.from(Decimal.new(0), :wei))
-
-      assert {:ok, _} = run_internal_transactions([transaction_a_changes, transaction_b_changes])
-
-      # The block is validated: consensus kept, refetch not requested, pending op cleared
-      assert %{consensus: true, refetch_needed: refetch_needed} = Repo.get(Block, full_block.hash)
-      refute refetch_needed
-      assert PendingBlockOperation |> Repo.get(full_block.hash) |> is_nil()
-
-      # transaction_a's internal transaction is persisted
-      refute from(i in InternalTransaction,
-               where: i.block_number == ^transaction_a.block_number and i.transaction_index == ^transaction_a.index
-             )
-             |> Repo.one()
-             |> is_nil()
-
-      # transaction_b's zero-value internal transaction is excluded from persistence
-      assert from(i in InternalTransaction,
-               where: i.block_number == ^transaction_b.block_number and i.transaction_index == ^transaction_b.index
-             )
-             |> Repo.one()
-             |> is_nil()
-    end
-
-    test "run_insert_only/2 excludes zero-value calls from persistence" do
-      Application.put_env(:explorer, DeleteZeroValueInternalTransactions, enabled: true, storage_period: 0)
-
-      full_block = insert(:block)
-      transaction = insert(:transaction) |> with_block(full_block)
-
-      zero_value_changes =
-        transaction
-        |> make_internal_transaction_changes(0, nil)
-        |> Map.put(:value, Wei.from(Decimal.new(0), :wei))
-
-      non_zero_value_changes = make_internal_transaction_changes(transaction, 1, nil)
-
-      InternalTransactions.run_insert_only([zero_value_changes, non_zero_value_changes], %{
-        timeout: :infinity,
-        timestamps: %{inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
-      })
-
-      persisted_indexes =
-        from(i in InternalTransaction,
-          where: i.block_number == ^transaction.block_number and i.transaction_index == ^transaction.index,
-          select: i.index,
-          order_by: i.index
-        )
-        |> Repo.all()
-
-      assert persisted_indexes == [1]
-    end
-
-    test "run/3 keeps zero-value calls when the feature is disabled" do
-      Application.put_env(:explorer, DeleteZeroValueInternalTransactions, enabled: false, storage_period: 0)
-
-      full_block = insert(:block)
-      transaction = insert(:transaction) |> with_block(full_block)
-      insert(:pending_block_operation, block_hash: full_block.hash, block_number: full_block.number)
-
-      zero_value_changes =
-        transaction
-        |> make_internal_transaction_changes(0, nil)
-        |> Map.put(:value, Wei.from(Decimal.new(0), :wei))
-
-      assert {:ok, _} = run_internal_transactions([zero_value_changes])
-
-      refute from(i in InternalTransaction,
-               where: i.block_number == ^transaction.block_number and i.transaction_index == ^transaction.index
-             )
-             |> Repo.one()
-             |> is_nil()
-
-      assert PendingBlockOperation |> Repo.get(full_block.hash) |> is_nil()
-    end
-  end
-
   defp run_internal_transactions(changes_list, multi \\ Multi.new()) when is_list(changes_list) do
     multi
-    |> InternalTransactions.run(InternalTransactions.prepare_data(changes_list), %{
+    |> InternalTransactions.run(changes_list, %{
       timeout: :infinity,
       timestamps: %{inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
     })
@@ -811,6 +602,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         end,
       index: index,
       trace_address: [],
+      transaction_hash: transaction.hash,
       transaction_index: transaction.index,
       type: :call,
       value: Wei.from(Decimal.new(1), :wei),
@@ -840,6 +632,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactionsTest do
         end,
       index: index,
       trace_address: [],
+      transaction_hash: transaction.hash,
       transaction_index: transaction.index,
       type: :call,
       value: Wei.from(Decimal.new(1), :wei),

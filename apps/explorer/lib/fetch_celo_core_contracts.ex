@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Mix.Tasks.FetchCeloCoreContracts do
   @moduledoc """
   Fetch the addresses of celo core contracts: `mix help celo-contracts`

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.RollupMessagesCatchup do
   @moduledoc """
   Manages the catch-up process for historical rollup messages between Layer 1 (L1)

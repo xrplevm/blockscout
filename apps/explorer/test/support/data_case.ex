@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.DataCase do
   @moduledoc """
   This module defines the setup for tests requiring
@@ -57,20 +56,12 @@ defmodule Explorer.DataCase do
   end
 
   def wait_for_results(producer) do
-    wait_for_results(producer, 30)
-  end
-
-  def wait_for_results(_producer, 0) do
-    raise "wait_for_results timed out after exhausting retries"
-  end
-
-  def wait_for_results(producer, retries) when retries > 0 do
     Process.sleep(100)
     producer.()
   rescue
-    _error in [DBConnection.ConnectionError, Ecto.NoResultsError] ->
+    [DBConnection.ConnectionError, Ecto.NoResultsError] ->
       Process.sleep(300)
-      wait_for_results(producer, retries - 1)
+      wait_for_results(producer)
   end
 
   @doc """

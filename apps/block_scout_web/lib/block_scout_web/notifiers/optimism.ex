@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Notifiers.Optimism do
   @moduledoc """
   Module to handle and broadcast OP related events.
@@ -12,7 +11,7 @@ defmodule BlockScoutWeb.Notifiers.Optimism do
     batches
     |> Enum.sort_by(& &1.number, :asc)
     |> Enum.each(fn batch ->
-      Endpoint.local_broadcast("optimism:new_batch", "new_optimism_batch", %{
+      Endpoint.broadcast("optimism:new_batch", "new_optimism_batch", %{
         batch: batch
       })
     end)
@@ -22,7 +21,7 @@ defmodule BlockScoutWeb.Notifiers.Optimism do
     deposits_count = Enum.count(deposits)
 
     if deposits_count > 0 do
-      Endpoint.local_broadcast("optimism:new_deposits", "new_optimism_deposits", %{
+      Endpoint.broadcast("optimism:new_deposits", "new_optimism_deposits", %{
         deposits: deposits_count
       })
     end

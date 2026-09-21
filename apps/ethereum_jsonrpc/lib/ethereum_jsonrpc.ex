@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC do
   @moduledoc """
   Ethereum JSONRPC client.
@@ -969,7 +968,6 @@ defmodule EthereumJSONRPC do
   formats. The function identifies two types of contract failures:
   1. Errors with the atom `:unable_to_decode`
   2. Binary errors containing the pattern "execution" followed by "revert"
-  3. Binary errors containing the pattern "out of gas"
 
   ## Parameters
   - `error`: The error to check. Can be a map with an `:error` key, a tuple
@@ -981,14 +979,8 @@ defmodule EthereumJSONRPC do
   """
   @spec contract_failure?(any()) :: boolean()
   def contract_failure?(%{error: :unable_to_decode}), do: true
-
-  def contract_failure?(%{error: error}) when is_binary(error),
-    do: String.match?(error, ~r/execution.*revert/) or String.match?(error, ~r/out of gas/)
-
+  def contract_failure?(%{error: error}) when is_binary(error), do: String.match?(error, ~r/execution.*revert/)
   def contract_failure?({:error, :unable_to_decode}), do: true
-
-  def contract_failure?({:error, error}) when is_binary(error),
-    do: String.match?(error, ~r/execution.*revert/) or String.match?(error, ~r/out of gas/)
-
+  def contract_failure?({:error, error}) when is_binary(error), do: String.match?(error, ~r/execution.*revert/)
   def contract_failure?(_), do: false
 end

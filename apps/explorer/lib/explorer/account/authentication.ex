@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.Authentication do
   @moduledoc """
   Context module for user authentication and third-party identity management.

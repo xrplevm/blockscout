@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Arbitrum.Constants.Events do
   @moduledoc """
     Provides constant values for Arbitrum-specific event signatures and their parameter types.

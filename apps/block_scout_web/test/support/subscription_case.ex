@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.SubscriptionCase do
   @moduledoc """
   This module defines the test case to be used by GraphQL subscription tests.

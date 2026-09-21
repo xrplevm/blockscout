@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Celo.EpochLogs do
   @moduledoc """
   Fetches logs that are not linked to transaction, but to the block.

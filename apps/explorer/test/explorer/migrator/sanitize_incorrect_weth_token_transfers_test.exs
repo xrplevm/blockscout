@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.SanitizeIncorrectWETHTokenTransfersTest do
   use Explorer.DataCase, async: false
 

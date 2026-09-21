@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.ConfigControllerTest do
   use BlockScoutWeb.ConnCase
 
@@ -22,27 +21,6 @@ defmodule BlockScoutWeb.API.V2.ConfigControllerTest do
       # Compare string representations
       expected_chain_type = if is_atom(@chain_type), do: Atom.to_string(@chain_type), else: @chain_type
       assert chain_type == expected_chain_type
-    end
-
-    test "returns openapi spec folder name", %{conn: conn} do
-      request = get(conn, "/api/v2/config/backend")
-      response = json_response(request, 200)
-
-      assert %{"openapi_spec_folder_name" => openapi_spec_folder_name} = response
-      assert is_binary(openapi_spec_folder_name)
-    end
-
-    case Application.compile_env(:explorer, :chain_identity) do
-      {:optimism, :celo} ->
-        test "translates optimism-celo chain identity to celo openapi folder", %{conn: conn} do
-          request = get(conn, "/api/v2/config/backend")
-          response = json_response(request, 200)
-
-          assert %{"openapi_spec_folder_name" => "optimism-celo"} = response
-        end
-
-      _ ->
-        :ok
     end
   end
 

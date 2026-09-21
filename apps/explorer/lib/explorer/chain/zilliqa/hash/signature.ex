@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Zilliqa.Hash.Signature do
   @moduledoc """
   A 96-byte BLS signature of the supermajority of the validators.

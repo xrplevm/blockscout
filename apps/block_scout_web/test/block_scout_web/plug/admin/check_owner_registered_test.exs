@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Plug.Admin.CheckOwnerRegisteredTest do
   use BlockScoutWeb.ConnCase
 

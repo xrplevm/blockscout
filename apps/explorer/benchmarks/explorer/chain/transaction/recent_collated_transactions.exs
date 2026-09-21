@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 path = "benchmarks/explorer/chain/recent_collated_transactions.benchee"
 
 import Explorer.Factory

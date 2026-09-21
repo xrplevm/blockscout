@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Celo.TransactionTokenTransfers do
   @moduledoc """
   Helper functions for generating ERC20 token transfers from native Celo coin
@@ -21,8 +20,7 @@ defmodule Indexer.Transform.Celo.TransactionTokenTransfers do
     ]
 
   alias Explorer.Chain.Cache.CeloCoreContracts
-  alias Explorer.Chain.{Hash, InternalTransaction}
-  alias Explorer.Repo
+  alias Explorer.Chain.Hash
   alias Indexer.Fetcher.TokenTotalSupplyUpdater
   @token_type "ERC-20"
   @transaction_buffer_size 20_000
@@ -99,7 +97,6 @@ defmodule Indexer.Transform.Celo.TransactionTokenTransfers do
           not Map.has_key?(internal_transaction, :error) &&
           (not Map.has_key?(internal_transaction, :call_type) || internal_transaction.call_type != "delegatecall")
       end)
-      |> InternalTransaction.preload_transaction(Repo)
       |> Enum.map(fn internal_transaction ->
         to_address_hash =
           Map.get(internal_transaction, :to_address_hash) ||
@@ -120,7 +117,7 @@ defmodule Indexer.Transform.Celo.TransactionTokenTransfers do
           token_contract_address_hash: celo_token_address,
           token_ids: nil,
           token_type: @token_type,
-          transaction_hash: internal_transaction.transaction.hash
+          transaction_hash: internal_transaction.transaction_hash
         }
       end)
 

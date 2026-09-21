@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Zilliqa.QuorumCertificate do
   @moduledoc """
   A stored representation of a Zilliqa quorum certificate in the context of PBFT

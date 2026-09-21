@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Celo.EpochBlockOperations.ValidatorAndGroupPaymentsPostL2Migration do
   @moduledoc """
   Fetches validator and group payments for the epoch post L2 migration.

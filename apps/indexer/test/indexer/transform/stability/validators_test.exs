@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 if Application.compile_env(:explorer, :chain_type) == :stability do
   defmodule Indexer.Transform.Stability.ValidatorsTest do
     use ExUnit.Case, async: true

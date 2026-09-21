@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.TabHelper do
   @moduledoc """
   Helper functions for dealing with tabs, which are very common between pages.

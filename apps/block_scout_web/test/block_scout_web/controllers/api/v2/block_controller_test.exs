@@ -1,13 +1,9 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.BlockControllerTest do
   use BlockScoutWeb.ConnCase
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   alias Explorer.Chain.{Address, Block, InternalTransaction, Transaction, Withdrawal}
   alias Explorer.Chain.Beacon.Deposit, as: BeaconDeposit
-  alias Explorer.Chain.Cache.{BlockNumber, Counters.AverageBlockTime}
-
-  @page_size 50
 
   setup do
     Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.Blocks.child_id())
@@ -211,111 +207,6 @@ defmodule BlockScoutWeb.API.V2.BlockControllerTest do
       assert response_2nd_page = json_response(request_2nd_page, 200)
 
       check_paginated_response(response, response_2nd_page, uncles)
-    end
-
-    test "return 422 on invalid type", %{conn: conn} do
-      request = get(conn, "/api/v2/blocks", %{"type" => "bogus"})
-
-      assert %{
-               "errors" => [
-                 %{
-                   "source" => %{"pointer" => "/type"},
-                   "title" => "Invalid value"
-                 }
-                 | _
-               ]
-             } = json_response(request, 422)
-    end
-
-    # Regression: `select_block_type/1` marks `:nephews` as `:required`, and
-    # `nephews` is a `has_many through`. Joining a to-many association repeats the
-    # parent row per child, so the `limit/2` in `Explorer.Chain.fetch_blocks/4`
-    # used to count joined rows rather than blocks and returned a short page.
-    test "type=uncle returns a full page when every uncle has a single nephew", %{conn: conn} do
-      for _ <- 1..(@page_size + 10), do: insert_uncle_with_nephews(1)
-
-      response = json_response(get(conn, "/api/v2/blocks", %{"type" => "uncle"}), 200)
-
-      assert length(response["items"]) == @page_size
-      refute is_nil(response["next_page_params"])
-    end
-
-    test "type=uncle returns a full page when uncles have several nephews", %{conn: conn} do
-      for _ <- 1..(@page_size + 10), do: insert_uncle_with_nephews(2)
-
-      response = json_response(get(conn, "/api/v2/blocks", %{"type" => "uncle"}), 200)
-
-      assert length(response["items"]) == @page_size
-      refute is_nil(response["next_page_params"])
-    end
-
-    test "type=uncle returns every uncle once regardless of nephew count", %{conn: conn} do
-      for _ <- 1..10, do: insert_uncle_with_nephews(3)
-
-      response = json_response(get(conn, "/api/v2/blocks", %{"type" => "uncle"}), 200)
-
-      hashes = Enum.map(response["items"], & &1["hash"])
-
-      assert length(hashes) == 10
-      assert hashes == Enum.uniq(hashes)
-    end
-
-    # The default listing marks the to-many `:transactions` and `:rewards` as
-    # `:optional`. They must stay preloaded rather than joined, otherwise the
-    # `limit/2` counts joined rows and the page comes back short — the same
-    # failure the `type=uncle` cases above cover for `:required`.
-    test "a full page is returned when blocks carry several transactions", %{conn: conn} do
-      for _ <- 1..(@page_size + 10) do
-        block = insert(:block)
-        for _ <- 1..3, do: :transaction |> insert() |> with_block(block)
-      end
-
-      response = json_response(get(conn, "/api/v2/blocks"), 200)
-
-      assert length(response["items"]) == @page_size
-      refute is_nil(response["next_page_params"])
-    end
-  end
-
-  describe "/blocks/{block_number}/countdown" do
-    setup do
-      average_block_time_config = Application.get_env(:explorer, AverageBlockTime)
-
-      start_supervised!(AverageBlockTime)
-      Application.put_env(:explorer, AverageBlockTime, enabled: true, cache_period: 1_800_000)
-
-      Supervisor.terminate_child(Explorer.Supervisor, BlockNumber.child_id())
-      Supervisor.restart_child(Explorer.Supervisor, BlockNumber.child_id())
-
-      on_exit(fn ->
-        Application.put_env(:explorer, AverageBlockTime, average_block_time_config)
-      end)
-    end
-
-    test "returns countdown information for a future block", %{conn: conn} do
-      current_block_number = 110
-      target_block_number = 120
-      average_block_time = 15
-      first_timestamp = Timex.now()
-
-      for number <- 1..current_block_number do
-        insert(:block,
-          number: number,
-          timestamp: Timex.shift(first_timestamp, seconds: number * average_block_time),
-          consensus: true
-        )
-      end
-
-      AverageBlockTime.refresh()
-
-      request = get(conn, "/api/v2/blocks/#{target_block_number}/countdown")
-
-      assert %{
-               "current_block_number" => to_string(current_block_number),
-               "countdown_block_number" => to_string(target_block_number),
-               "remaining_blocks_count" => "10",
-               "estimated_time_in_seconds" => "150.0"
-             } == json_response(request, 200)
     end
   end
 
@@ -987,7 +878,8 @@ defmodule BlockScoutWeb.API.V2.BlockControllerTest do
         transaction: transaction,
         index: 0,
         block_number: transaction.block_number,
-        transaction_index: transaction.index
+        transaction_index: transaction.index,
+        block_hash: transaction.block_hash
       )
 
       internal_transactions =
@@ -1002,10 +894,10 @@ defmodule BlockScoutWeb.API.V2.BlockControllerTest do
             transaction: transaction,
             index: index,
             block_number: transaction.block_number,
-            transaction_index: transaction.index
+            transaction_index: transaction.index,
+            block_hash: transaction.block_hash
           )
         end)
-        |> InternalTransaction.preload_addresses()
 
       request = get(conn, "/api/v2/blocks/#{block.hash}/internal-transactions")
       assert response = json_response(request, 200)
@@ -1093,16 +985,6 @@ defmodule BlockScoutWeb.API.V2.BlockControllerTest do
     end
   end
 
-  defp insert_uncle_with_nephews(nephew_count) do
-    uncle = insert(:block, consensus: false)
-
-    for index <- 0..(nephew_count - 1) do
-      insert(:block_second_degree_relation, uncle_hash: uncle.hash, nephew: insert(:block), index: index)
-    end
-
-    uncle
-  end
-
   defp compare_item(%Block{} = block, json) do
     assert to_string(block.hash) == json["hash"]
     assert block.number == json["height"]
@@ -1124,7 +1006,7 @@ defmodule BlockScoutWeb.API.V2.BlockControllerTest do
     assert internal_transaction.block_number == json["block_number"]
     assert to_string(internal_transaction.gas) == json["gas_limit"]
     assert internal_transaction.index == json["index"]
-    assert to_string(internal_transaction.transaction.hash) == json["transaction_hash"]
+    assert to_string(internal_transaction.transaction_hash) == json["transaction_hash"]
     assert Address.checksum(internal_transaction.from_address_hash) == json["from"]["hash"]
     assert Address.checksum(internal_transaction.to_address_hash) == json["to"]["hash"]
   end
@@ -1177,54 +1059,5 @@ defmodule BlockScoutWeb.API.V2.BlockControllerTest do
     assert Enum.count(second_page_resp["items"]) == 1
     assert second_page_resp["next_page_params"] == nil
     compare_item(Enum.at(list, 0), Enum.at(second_page_resp["items"], 0))
-  end
-
-  if @chain_type == :arbitrum do
-    describe "/blocks/arbitrum-batch/:batch_number_param" do
-      test "returns empty list when batch has no blocks", %{conn: conn} do
-        batch = insert(:arbitrum_l1_batch)
-
-        request = get(conn, "/api/v2/blocks/arbitrum-batch/#{batch.number}")
-        assert response = json_response(request, 200)
-        assert response["items"] == []
-        assert response["next_page_params"] == nil
-      end
-
-      test "returns blocks in the batch", %{conn: conn} do
-        batch = insert(:arbitrum_l1_batch)
-        block = insert(:block, consensus: true)
-
-        insert(:arbitrum_batch_block, batch_number: batch.number, block_number: block.number)
-
-        request = get(conn, "/api/v2/blocks/arbitrum-batch/#{batch.number}")
-        assert response = json_response(request, 200)
-        assert length(response["items"]) == 1
-        assert hd(response["items"])["height"] == block.number
-      end
-
-      test "can paginate blocks in Arbitrum batch", %{conn: conn} do
-        batch = insert(:arbitrum_l1_batch)
-        blocks = insert_list(51, :block, consensus: true)
-
-        Enum.each(blocks, fn block ->
-          insert(:arbitrum_batch_block, batch_number: batch.number, block_number: block.number)
-        end)
-
-        request = get(conn, "/api/v2/blocks/arbitrum-batch/#{batch.number}")
-        assert response = json_response(request, 200)
-
-        request_2nd_page =
-          get(conn, "/api/v2/blocks/arbitrum-batch/#{batch.number}", response["next_page_params"])
-
-        assert response_2nd_page = json_response(request_2nd_page, 200)
-
-        check_paginated_response(response, response_2nd_page, blocks)
-      end
-
-      test "returns 422 for non-integer batch_number_param", %{conn: conn} do
-        request = get(conn, "/api/v2/blocks/arbitrum-batch/invalid")
-        assert %{"errors" => [_]} = json_response(request, 422)
-      end
-    end
   end
 end

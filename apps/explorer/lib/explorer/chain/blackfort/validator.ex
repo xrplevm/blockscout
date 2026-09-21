@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Blackfort.Validator do
   @moduledoc """
     Blackfort validators

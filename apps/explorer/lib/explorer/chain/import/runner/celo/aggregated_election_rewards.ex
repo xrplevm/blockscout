@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Celo.AggregatedElectionRewards do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Celo.AggregatedElectionReward.t/0`.

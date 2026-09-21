@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Block.SecondDegreeRelations do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Block.SecondDegreeRelation.t/0`.

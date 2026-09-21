@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.GraphQL.Schema.Subscription.TokenTransfersTest do
   use BlockScoutWeb.SubscriptionCase
   import Mox

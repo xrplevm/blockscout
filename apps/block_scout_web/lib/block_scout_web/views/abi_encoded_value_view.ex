@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.ABIEncodedValueView do
   @moduledoc """
   Renders a decoded value that is encoded according to an ABI.

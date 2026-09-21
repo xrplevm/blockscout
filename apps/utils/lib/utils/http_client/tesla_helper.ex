@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Utils.HttpClient.TeslaHelper do
   @moduledoc """
   Helper module for building Tesla HTTP clients and adapter options.

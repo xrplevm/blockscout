@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.AddDecompiledAndVerifiedFlagToAddresses do
   use Ecto.Migration
 

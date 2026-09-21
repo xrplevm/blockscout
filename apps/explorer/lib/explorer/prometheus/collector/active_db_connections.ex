@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Prometheus.Collector.ActiveDbConnections do
   @moduledoc """
   Custom collector to count number of currently active DB connections.

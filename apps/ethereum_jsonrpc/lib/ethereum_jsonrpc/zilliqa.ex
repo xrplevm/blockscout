@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Zilliqa do
   @moduledoc """
   Zilliqa type definitions.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.GraphQL.Celo.QueryFields do
   @moduledoc """
   Query fields for the CELO schema.

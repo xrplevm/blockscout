@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.BridgedTokens.CalcLpTokensTotalLiquidity do
   @moduledoc """
   Periodically updates LP tokens total liquidity

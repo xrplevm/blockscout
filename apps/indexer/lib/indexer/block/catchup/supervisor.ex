@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Catchup.Supervisor do
   @moduledoc """
   Supervises `Indexer.Block.Catchup.TaskSupervisor` and `Indexer.Block.Catchup.BoundIntervalSupervisor`

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenInstance.Realtime do
   @moduledoc """
   Fetches information about a token instance.
@@ -59,15 +58,19 @@ defmodule Indexer.Fetcher.TokenInstance.Realtime do
 
   def async_fetch(_data, true), do: :ok
 
-  def async_fetch(token_instances, _disabled?) when is_list(token_instances) do
+  def async_fetch(token_transfers, _disabled?) when is_list(token_transfers) do
     data =
-      token_instances
-      |> Enum.map(fn token_instance ->
-        %{
-          contract_address_hash: token_instance.token_contract_address_hash,
-          token_id: token_instance.token_id
-        }
+      token_transfers
+      |> Enum.reject(fn token_transfer -> is_nil(token_transfer.token_ids) end)
+      |> Enum.map(fn token_transfer ->
+        Enum.map(token_transfer.token_ids, fn token_id ->
+          %{
+            contract_address_hash: token_transfer.token_contract_address_hash,
+            token_id: token_id
+          }
+        end)
       end)
+      |> List.flatten()
       |> Enum.uniq()
 
     BufferedTask.buffer(__MODULE__, data, true)

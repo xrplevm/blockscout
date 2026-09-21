@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Account.Migrations.DropAccountPublicTagsRequests do
   use Ecto.Migration
 

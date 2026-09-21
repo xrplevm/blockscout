@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Plug.Admin.RequireAdminRole do
   @moduledoc """
   Authorization plug requiring a user to be authenticated and have an admin role.

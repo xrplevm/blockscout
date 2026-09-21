@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.ZkSync.BatchesStatusTracker do
   @moduledoc """
     Updates batches statuses and imports historical batches to the `zksync_transaction_batches` table.

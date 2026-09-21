@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.FiatValueBenchmark do
   @moduledoc """
   Benchmark for the performance of fetching fiat value type data from the database.

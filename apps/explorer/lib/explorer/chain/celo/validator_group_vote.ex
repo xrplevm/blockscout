@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Celo.ValidatorGroupVote do
   @moduledoc """
   Represents the information about a vote for a validator group made by an

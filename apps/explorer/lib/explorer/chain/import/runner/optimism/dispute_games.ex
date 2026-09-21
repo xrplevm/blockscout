@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Optimism.DisputeGames do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Optimism.DisputeGame.t/0`.

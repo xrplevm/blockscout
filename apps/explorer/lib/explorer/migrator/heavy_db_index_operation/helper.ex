@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation.Helper do
   @moduledoc """
   Common functions for Explorer.Migrator.HeavyDbIndexOperation.* modules

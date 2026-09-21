@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Application do
   @moduledoc """
   This is the `Application` module for `Indexer`.

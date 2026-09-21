@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.GraphQL.Celo.Resolvers.TokenTransferTransaction do
   @moduledoc false
 

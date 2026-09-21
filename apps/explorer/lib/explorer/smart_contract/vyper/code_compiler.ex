@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.Vyper.CodeCompiler do
   @moduledoc """
   Module responsible to compile the Vyper code of a given Smart Contract.

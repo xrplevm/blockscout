@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Block.SecondDegreeRelation do
   @moduledoc """
   A [second-degree relative](https://en.wikipedia.org/wiki/Second-degree_relative) is a relative where the share

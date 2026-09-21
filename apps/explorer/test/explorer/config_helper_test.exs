@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule ConfigHelperTest do
   use ExUnit.Case
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Hash.Address do
   @moduledoc """
   The address (40 (hex) characters / 160 bits / 20 bytes) is derived from the public key (128 (hex) characters /

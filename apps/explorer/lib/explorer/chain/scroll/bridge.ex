@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Scroll.Bridge do
   @moduledoc """
     Models a bridge operation for Scroll.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.SanitizeReplacedTransactions do
   @moduledoc """
   Cleans the transactions that are related to non-consensus blocks.

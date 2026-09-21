@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.ReaderTest do
   use EthereumJSONRPC.Case
   use Explorer.DataCase

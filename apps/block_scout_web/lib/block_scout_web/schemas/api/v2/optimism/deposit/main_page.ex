@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Optimism.Deposit.MainPage do
   @moduledoc """
   This module defines the schema for the Optimism Deposit struct for the main page.

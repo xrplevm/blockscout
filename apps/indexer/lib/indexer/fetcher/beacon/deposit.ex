@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Beacon.Deposit do
   @moduledoc """
   Fetches deposit data from the beacon chain.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.MinMissingBlockNumber do
   @moduledoc """
   Caches min missing block number (break in the chain).

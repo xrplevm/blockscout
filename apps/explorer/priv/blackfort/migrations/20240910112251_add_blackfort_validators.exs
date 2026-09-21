@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Blackfort.Migrations.AddBlackfortValidators do
   use Ecto.Migration
 

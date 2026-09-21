@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.L1Execution do
   @moduledoc """
     Models a list of execution transactions related to a L2 to L1 messages on Arbitrum.

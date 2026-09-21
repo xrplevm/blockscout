@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Blocks do
   @moduledoc """
   Protocol for transforming blocks.

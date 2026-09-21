@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Blocks.Clique do
   @moduledoc """
   Handles block transforms for Clique chain.

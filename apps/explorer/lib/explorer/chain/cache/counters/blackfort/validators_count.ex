@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.Blackfort.ValidatorsCount do
   @moduledoc """
   Counts and store counters of validators blackfort.

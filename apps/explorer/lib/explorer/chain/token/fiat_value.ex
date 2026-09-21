@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Token.FiatValue do
   @moduledoc """
   Represents money values, used to hide the value if there is a chance that the value is not relevant.

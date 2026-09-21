@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.Dynamic do
   @moduledoc """
   Provides integration with Dynamic for JWT-based user authentication.

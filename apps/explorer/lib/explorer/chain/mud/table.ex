@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Mud.Table do
   @moduledoc """
     Represents a decoded MUD framework database table ID.

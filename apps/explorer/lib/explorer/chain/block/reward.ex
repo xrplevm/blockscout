@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Block.Reward do
   @moduledoc """
   Represents the total reward given to an address in a block.

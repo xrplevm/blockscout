@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.RequestCoordinator do
   @moduledoc """
   Coordinates requests with a backoff strategy.
@@ -74,9 +73,9 @@ defmodule EthereumJSONRPC.RequestCoordinator do
   @spec perform(Transport.batch_request(), Transport.t(), Transport.options(), non_neg_integer()) ::
           {:ok, Transport.batch_response()} | {:error, term()}
   def perform(request, transport, transport_options, throttle_timeout) do
-    request_methods = request_methods(request)
+    request_method = request_method(request)
 
-    sleep_time = sleep_time(request_methods)
+    sleep_time = sleep_time(request_method)
 
     if sleep_time <= throttle_timeout do
       :timer.sleep(sleep_time)
@@ -88,7 +87,7 @@ defmodule EthereumJSONRPC.RequestCoordinator do
           trace_request(request, fn ->
             request
             |> transport.json_rpc(transport_options)
-            |> handle_transport_response(request_methods)
+            |> handle_transport_response(request_method)
           end)
 
         :error ->
@@ -113,29 +112,24 @@ defmodule EthereumJSONRPC.RequestCoordinator do
 
   defp trace_request(_, fun), do: fun.()
 
-  defp request_methods(requests) when is_list(requests) do
-    requests
-    |> Enum.flat_map(&request_methods/1)
-    |> Enum.uniq()
-  end
+  defp request_method([request | _]), do: request_method(request)
+  defp request_method(%{method: method}), do: method
+  defp request_method(_), do: nil
 
-  defp request_methods(%{method: method}), do: [method]
-  defp request_methods(_), do: []
-
-  defp handle_transport_response({:error, {error_type, _}} = error, methods)
+  defp handle_transport_response({:error, {error_type, _}} = error, method)
        when error_type in [:bad_gateway, :bad_response] do
-    inc_methods_error_count(methods)
+    RollingWindow.inc(table(), method_error_key(method))
     inc_throttle_table()
     error
   end
 
-  defp handle_transport_response({:error, :timeout} = error, methods) do
-    inc_methods_error_count(methods)
+  defp handle_transport_response({:error, :timeout} = error, method) do
+    RollingWindow.inc(table(), method_error_key(method))
     inc_throttle_table()
     error
   end
 
-  defp handle_transport_response(response, _methods) do
+  defp handle_transport_response(response, _method) do
     inc_throttle_table()
     response
   end
@@ -167,16 +161,8 @@ defmodule EthereumJSONRPC.RequestCoordinator do
     end
   end
 
-  defp inc_methods_error_count(methods) do
-    Enum.each(methods, &RollingWindow.inc(table(), method_error_key(&1)))
-  end
-
-  defp sleep_time(request_methods) do
-    wait_coefficient =
-      Enum.reduce(request_methods, 0, fn request_method, acc ->
-        max(acc, RollingWindow.count(table(), method_error_key(request_method)))
-      end)
-
+  defp sleep_time(request_method) do
+    wait_coefficient = RollingWindow.count(table(), method_error_key(request_method))
     jitter = :rand.uniform(config!(:max_jitter))
     wait_per_timeout = config!(:wait_per_timeout)
 

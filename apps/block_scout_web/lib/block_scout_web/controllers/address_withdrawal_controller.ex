@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressWithdrawalController do
   @moduledoc """
     Display all the withdrawals that terminate at this Address.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Utility.VersionConstantsUpdater do
   @moduledoc """
   Module responsible for updating current and previous backend version in table `constants`.
@@ -21,6 +20,10 @@ defmodule Explorer.Utility.VersionConstantsUpdater do
   defp set_versions do
     stored_current_version = Constants.get_current_backend_version()
     current_version = to_string(Application.spec(:explorer, :vsn))
+
+    if not is_nil(stored_current_version) and stored_current_version != current_version do
+      Constants.insert_previous_backend_version(stored_current_version)
+    end
 
     if stored_current_version != current_version do
       Constants.insert_current_backend_version(current_version)

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.HelperTest do
   use ExUnit.Case, async: true
   use Explorer.DataCase

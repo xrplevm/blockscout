@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   @moduledoc """
   Auth0 Management REST API client for user management.
@@ -6,7 +5,7 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   require Logger
 
   alias Explorer.Account.{Authentication, Identity}
-  alias Explorer.{Helper, HttpClient, Vault}
+  alias Explorer.{Helper, HttpClient}
   alias Explorer.ThirdPartyIntegrations.Auth0.Internal
   alias Explorer.ThirdPartyIntegrations.Dynamic
   alias Ueberauth.Strategy.Auth0.OAuth
@@ -36,7 +35,7 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
     get_m2m_jwt_inner(Redix.command(:redix, ["GET", m2m_jwt_key()]))
   end
 
-  defp get_m2m_jwt_inner({:ok, token}) when not is_nil(token), do: Vault.decrypt!(token)
+  defp get_m2m_jwt_inner({:ok, token}) when not is_nil(token), do: token
 
   defp get_m2m_jwt_inner(_) do
     config = Application.get_env(:ueberauth, OAuth)
@@ -52,8 +51,7 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
       {:ok, %{status_code: 200, body: body}} ->
         case Jason.decode!(body) do
           %{"access_token" => token, "expires_in" => ttl} ->
-            cache_token(Vault.encrypt!(token), ttl - 1)
-            token
+            cache_token(token, ttl - 1)
 
           _ ->
             nil

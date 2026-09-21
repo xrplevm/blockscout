@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.VerifiedContractsController do
   use BlockScoutWeb, :controller
 

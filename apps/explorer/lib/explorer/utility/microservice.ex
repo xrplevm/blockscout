@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Utility.Microservice do
   @moduledoc """
   Module is responsible for common utils related to microservices.
@@ -11,7 +10,7 @@ defmodule Explorer.Utility.Microservice do
   """
   @spec base_url(atom(), atom()) :: nil | binary()
   def base_url(application \\ :explorer, module) do
-    url = config(application, module)[:service_url]
+    url = Application.get_env(application, module)[:service_url]
 
     if UtilsConfigHelper.valid_url?(url), do: url, else: nil
   end
@@ -21,7 +20,7 @@ defmodule Explorer.Utility.Microservice do
   """
   @spec check_enabled(atom(), atom()) :: :ok | {:error, :disabled}
   def check_enabled(application \\ :explorer, module) do
-    if config(application, module)[:enabled] && base_url(application, module) do
+    if Application.get_env(application, module)[:enabled] && base_url(application, module) do
       :ok
     else
       {:error, :disabled}
@@ -39,9 +38,6 @@ defmodule Explorer.Utility.Microservice do
   """
   @spec api_key(atom(), atom()) :: String.t() | nil
   def api_key(application \\ :explorer, module) do
-    config(application, module)[:api_key]
+    Application.get_env(application, module)[:api_key]
   end
-
-  @spec config(atom(), atom()) :: keyword()
-  defp config(application, module), do: Application.get_env(application, module, [])
 end

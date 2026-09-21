@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsBlockNumberTransactionIndexIndexUniqueIndex do
   @moduledoc """
   Create unique B-tree index `internal_transactions_block_number_transaction_index_index_index` on `internal_transactions` table for (`block_number`, `transaction_index`, `index`) columns.
@@ -11,7 +10,8 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsBloc
   alias Explorer.Migrator.{
     EmptyInternalTransactionsData,
     HeavyDbIndexOperation,
-    MigrationStatus
+    MigrationStatus,
+    ReindexDuplicatedInternalTransactions
   }
 
   alias Explorer.Migrator.HeavyDbIndexOperation.Helper, as: HeavyDbIndexOperationHelper
@@ -33,6 +33,7 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsBloc
   @impl HeavyDbIndexOperation
   def dependent_from_migrations,
     do: [
+      ReindexDuplicatedInternalTransactions.migration_name(),
       EmptyInternalTransactionsData.migration_name()
     ]
 

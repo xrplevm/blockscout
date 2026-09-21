@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Scroll.Migrations.AddFeeFields do
   use Ecto.Migration
 

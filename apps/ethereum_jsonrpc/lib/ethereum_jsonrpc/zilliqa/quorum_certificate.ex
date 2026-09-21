@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Zilliqa.QuorumCertificate do
   @moduledoc """
   Represents a quorum certificate associated with the block.

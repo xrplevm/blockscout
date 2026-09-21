@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.CryptoRankTest do
   use ExUnit.Case
 
@@ -63,8 +62,7 @@ defmodule Explorer.Market.Source.CryptoRankTest do
                 symbol: "ETH",
                 total_supply: Decimal.new("120723694"),
                 tvl: nil,
-                volume_24h: Decimal.new("5826359746"),
-                circulating_supply: Decimal.new("120723694")
+                volume_24h: Decimal.new("5826359746")
               }} ==
                CryptoRank.fetch_native_coin()
     end
@@ -101,8 +99,7 @@ defmodule Explorer.Market.Source.CryptoRankTest do
                 symbol: "ETH",
                 total_supply: Decimal.new("120723694"),
                 tvl: nil,
-                volume_24h: Decimal.new("5826359746"),
-                circulating_supply: Decimal.new("120723694")
+                volume_24h: Decimal.new("5826359746")
               }} ==
                CryptoRank.fetch_secondary_coin()
     end
@@ -157,8 +154,7 @@ defmodule Explorer.Market.Source.CryptoRankTest do
                    },
                    fiat_value: Decimal.new("0.019624517115"),
                    circulating_market_cap: Decimal.new("3046537.982244971760"),
-                   volume_24h: Decimal.new("214644.7428230154531300"),
-                   circulating_supply: Decimal.new("155241424")
+                   volume_24h: Decimal.new("214644.7428230154531300")
                  },
                  %{
                    name: "Zyfi",
@@ -170,8 +166,7 @@ defmodule Explorer.Market.Source.CryptoRankTest do
                    },
                    fiat_value: Decimal.new("0.004467522847"),
                    circulating_market_cap: Decimal.new("1019602.903569369320"),
-                   volume_24h: Decimal.new("527.5318580293320804"),
-                   circulating_supply: Decimal.new("228225560")
+                   volume_24h: Decimal.new("527.5318580293320804")
                  }
                ]
              } == CryptoRank.fetch_tokens(50, 50)

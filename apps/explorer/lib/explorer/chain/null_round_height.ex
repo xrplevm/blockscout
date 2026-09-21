@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.NullRoundHeight do
   @moduledoc """
   Manages and tracks null round heights in the Filecoin blockchain.

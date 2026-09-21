@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Accounts.User.Registration do
   @moduledoc """
   Represents the data required to register a new account.

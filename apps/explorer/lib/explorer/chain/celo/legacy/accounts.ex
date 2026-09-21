@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Celo.Legacy.Accounts do
   @moduledoc """
   Helper functions for transforming data for Celo accounts.

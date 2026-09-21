@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.BufferedTask do
   @moduledoc """
   Provides a behaviour for batched task running with retries and memory-aware buffering.
@@ -698,9 +697,7 @@ defmodule Indexer.BufferedTask do
   # This message is scheduled by the flush_interval to ensure regular processing of
   # accumulated data, pushing it to the queue and triggering batch processing.
   def handle_info(:flush, state) do
-    state
-    |> flush()
-    |> noreply_maybe_hibernate()
+    {:noreply, flush(state)}
   end
 
   # Handles graceful shutdown. A fetcher implementing BufferedTask behaviour
@@ -1430,15 +1427,6 @@ defmodule Indexer.BufferedTask do
     |> push_back(back_entries)
     |> push_front(front_entries)
     |> flush()
-  end
-
-  defp noreply_maybe_hibernate(%__MODULE__{bound_queue: %BoundQueue{size: 0}, task_ref_to_batch: tasks} = state)
-       when tasks == %{} do
-    {:noreply, state, :hibernate}
-  end
-
-  defp noreply_maybe_hibernate(%__MODULE__{} = state) do
-    {:noreply, state}
   end
 
   defp increased_delay, do: Application.get_env(:indexer, :fetcher_init_delay)

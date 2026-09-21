@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.AddressTokenBalanceTokenTypeTest do
   use Explorer.DataCase, async: false
 
@@ -9,8 +8,6 @@ defmodule Explorer.Migrator.AddressTokenBalanceTokenTypeTest do
 
   describe "Migrate token balances" do
     test "Set token_type for not processed token balances" do
-      insert(:block)
-
       Enum.each(0..10, fn _x ->
         token_balance = insert(:token_balance, token_type: nil)
         assert %{token_type: nil} = token_balance

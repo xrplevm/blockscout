@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation.CreateSmartContractsLanguageIndex do
   @moduledoc """
   Create B-tree index `smart_contracts_language_index` on `smart_contracts`

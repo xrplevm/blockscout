@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Tokens.TokenController do
   use BlockScoutWeb, :controller
 
@@ -13,12 +12,12 @@ defmodule BlockScoutWeb.Tokens.TokenController do
   end
 
   def token_counters(conn, %{"id" => address_hash_string}) do
-    with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
-         %Token{} = token <- Token.get_by_contract_address_hash(address_hash, []) do
-      {transfers_count, holders_count} = Token.fetch_token_counters(token)
+    case Chain.string_to_address_hash(address_hash_string) do
+      {:ok, address_hash} ->
+        {transfers_count, holders_count} = Token.fetch_token_counters(address_hash, 30_000)
 
-      json(conn, %{transfer_count: transfers_count, token_holder_count: holders_count})
-    else
+        json(conn, %{transfer_count: transfers_count, token_holder_count: holders_count})
+
       _ ->
         not_found(conn)
     end

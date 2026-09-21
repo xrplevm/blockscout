@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.CeloAccounts do
   @moduledoc """
   Backfills pending account operations table for each address that has

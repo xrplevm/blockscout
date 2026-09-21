@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.ReindexBlocksWithMissingTransactions do
   @moduledoc """
   Searches for all blocks where the number of transactions differs from the number of transactions on the node,

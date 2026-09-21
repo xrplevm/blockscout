@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Encrypted.Types.AddressHash do
   @moduledoc """
     An `Ecto.Type` to encrypt address_hash fields.

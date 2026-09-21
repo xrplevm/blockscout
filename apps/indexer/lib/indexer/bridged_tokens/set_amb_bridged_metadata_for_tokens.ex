@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.BridgedTokens.SetAmbBridgedMetadataForTokens do
   @moduledoc """
   Sets token metadata for bridged tokens from AMB extensions.

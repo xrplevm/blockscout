@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Memory.Shrinkable do
   @moduledoc """
   A process that can shrink its memory usage when asked by `Indexer.Memory.Monitor`.

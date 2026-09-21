@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.Notifier.Notify do
   @moduledoc """
     Composing notification, store and send it to email
@@ -61,7 +60,13 @@ defmodule Explorer.Account.Notifier.Notify do
                  summary,
                  direction
                ) do
-          handle_notification_save(notification, address)
+          notification
+          |> query_notification(address)
+          |> Repo.account_repo().all()
+          |> case do
+            [] -> save_and_send_notification(notification, address)
+            _ -> :ok
+          end
         end
 
       {:error, _message} ->
@@ -69,16 +74,6 @@ defmodule Explorer.Account.Notifier.Notify do
 
       false ->
         nil
-    end
-  end
-
-  defp handle_notification_save(notification, address) do
-    notification
-    |> query_notification(address)
-    |> Repo.account_repo().all()
-    |> case do
-      [] -> save_and_send_notification(notification, address)
-      _ -> :ok
     end
   end
 

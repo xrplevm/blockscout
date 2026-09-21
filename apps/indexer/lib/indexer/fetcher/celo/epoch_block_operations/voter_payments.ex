@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Celo.EpochBlockOperations.VoterPayments do
   @moduledoc """
   Fetches voter payments for the epoch block.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.AddNonceToAddresses do
   @moduledoc """
   Use `priv/repo/migrations/scripts/20181126182700_migrate_address_nonce.sql` to migrate data.

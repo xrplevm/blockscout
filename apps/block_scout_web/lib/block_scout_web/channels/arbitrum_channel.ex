@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.ArbitrumChannel do
   @moduledoc """
   Establishes pub/sub channel for live updates of Arbitrum related events.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 # credo:disable-for-this-file
 defmodule BlockScoutWeb.AddressWriteProxyController do
   use BlockScoutWeb, :controller
@@ -19,9 +18,8 @@ defmodule BlockScoutWeb.AddressWriteProxyController do
         :names => :optional,
         :smart_contract => :optional,
         :token => :optional,
-        Address.contract_creation_transaction_association() => :optional
+        Address.contract_creation_transaction_associations() => :optional
       },
-      preload_contract_creation_internal_transaction: true,
       ip: ip
     ]
 

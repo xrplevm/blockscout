@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Block.SecondDegreeRelationTest do
   use Explorer.DataCase, async: true
 

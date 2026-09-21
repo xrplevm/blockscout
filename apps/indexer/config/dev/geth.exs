@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 import Config
 
 ~w(config config_helper.exs)

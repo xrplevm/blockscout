@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.TokenTransferBlockConsensusSanitizer do
   @moduledoc """
   Periodically find token transfers with incorrect block_consensus and set refetch_needed for their blocks.

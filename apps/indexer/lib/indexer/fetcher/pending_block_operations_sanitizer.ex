@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.PendingBlockOperationsSanitizer do
   @moduledoc """
   Set block_number for pending block operations that have it empty

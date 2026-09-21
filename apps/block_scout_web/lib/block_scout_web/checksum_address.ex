@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.ChecksumAddress do
   @moduledoc """
   Adds checksummed version of address hashes.

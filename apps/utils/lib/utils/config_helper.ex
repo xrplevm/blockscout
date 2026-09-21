@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Utils.ConfigHelper do
   @moduledoc """
   Helper functions for parsing config values.

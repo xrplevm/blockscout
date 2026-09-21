@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.AddBlockRangeAndRetriesNumberToMultichainSearchDbMainExportQueueTable do
   use Ecto.Migration
 

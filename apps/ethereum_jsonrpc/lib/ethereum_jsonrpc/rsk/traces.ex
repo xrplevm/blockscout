@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.RSK.Traces do
   @moduledoc """
   Traces returned by

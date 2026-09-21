@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.ERC20 do
   @moduledoc """
     Provides ability to interact with ERC20 token contracts directly.

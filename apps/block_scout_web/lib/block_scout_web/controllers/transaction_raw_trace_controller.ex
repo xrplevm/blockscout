@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.TransactionRawTraceController do
   use BlockScoutWeb, :controller
 
@@ -27,7 +26,16 @@ defmodule BlockScoutWeb.TransactionRawTraceController do
            ),
          {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
          {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
-      render_fetched_trace(conn, transaction, hash)
+      if is_nil(transaction.block_number) do
+        render_raw_trace(conn, [], transaction, hash)
+      else
+        FirstTraceOnDemand.maybe_trigger_fetch(transaction)
+
+        case Chain.fetch_transaction_raw_traces(transaction) do
+          {:ok, raw_traces} -> render_raw_trace(conn, raw_traces, transaction, hash)
+          _error -> unprocessable_entity(conn)
+        end
+      end
     else
       {:restricted_access, _} ->
         TransactionController.set_not_found_view(conn, hash_string)
@@ -37,19 +45,6 @@ defmodule BlockScoutWeb.TransactionRawTraceController do
 
       {:error, :not_found} ->
         TransactionController.set_not_found_view(conn, hash_string)
-    end
-  end
-
-  defp render_fetched_trace(conn, transaction, hash) do
-    if is_nil(transaction.block_number) do
-      render_raw_trace(conn, [], transaction, hash)
-    else
-      FirstTraceOnDemand.maybe_trigger_fetch(transaction)
-
-      case Chain.fetch_transaction_raw_traces(transaction) do
-        {:ok, raw_traces} -> render_raw_trace(conn, raw_traces, transaction, hash)
-        _error -> unprocessable_entity(conn)
-      end
     end
   end
 

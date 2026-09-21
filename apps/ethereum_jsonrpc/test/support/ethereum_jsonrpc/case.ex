@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Case do
   @moduledoc """
   Adds `json_rpc_named_arguments` and `subscribe_named_arguments` to context.

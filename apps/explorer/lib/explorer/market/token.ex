@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Token do
   @moduledoc """
   Data container for modeling an exchange rate for a currency/token.
@@ -19,7 +18,6 @@ defmodule Explorer.Market.Token do
    * `:fiat_value` - The fiat value of the currency
    * `:volume_24h` - The volume from the last 24 hours
    * `:image_url` - Token image URL
-   * `:circulating_supply` - Circulating supply of a token
   """
   @type t :: %__MODULE__{
           available_supply: Decimal.t() | nil,
@@ -32,13 +30,12 @@ defmodule Explorer.Market.Token do
           symbol: String.t() | nil,
           fiat_value: Decimal.t() | nil,
           volume_24h: Decimal.t() | nil,
-          image_url: String.t() | nil,
-          circulating_supply: Decimal.t() | nil
+          image_url: String.t() | nil
         }
 
   @derive Jason.Encoder
-  @enforce_keys ~w(available_supply total_supply btc_value last_updated market_cap tvl name symbol fiat_value volume_24h image_url circulating_supply)a
-  defstruct ~w(available_supply total_supply btc_value last_updated market_cap tvl name symbol fiat_value volume_24h image_url circulating_supply)a
+  @enforce_keys ~w(available_supply total_supply btc_value last_updated market_cap tvl name symbol fiat_value volume_24h image_url)a
+  defstruct ~w(available_supply total_supply btc_value last_updated market_cap tvl name symbol fiat_value volume_24h image_url)a
 
   def null,
     do: %__MODULE__{
@@ -52,8 +49,7 @@ defmodule Explorer.Market.Token do
       symbol: nil,
       fiat_value: nil,
       volume_24h: nil,
-      image_url: nil,
-      circulating_supply: nil
+      image_url: nil
     }
 
   def null?(token), do: token == null()

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Celo.ValidatorEpochPaymentDistributions do
   @moduledoc """
   Extracts data from `ValidatorEpochPaymentDistributed` event logs of the

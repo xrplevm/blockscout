@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Beacon.Deposit do
   @moduledoc """
   Models a deposit in the beacon chain.

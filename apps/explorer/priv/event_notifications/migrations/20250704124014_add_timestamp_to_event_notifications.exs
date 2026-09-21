@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.EventNotifications.Migrations.AddTimestampToEventNotifications do
   use Ecto.Migration
 

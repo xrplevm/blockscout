@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.CsvExport.Address.Logs do
   @moduledoc """
   Exports logs to a csv file.
@@ -6,11 +5,11 @@ defmodule Explorer.Chain.CsvExport.Address.Logs do
 
   alias Explorer.Chain
   alias Explorer.Chain.{Address, Hash}
-  alias Explorer.Chain.CsvExport.{AsyncHelper, Helper}
+  alias Explorer.Chain.CsvExport.Helper
 
   @spec export(Hash.Address.t(), String.t(), String.t(), Keyword.t(), String.t() | nil, String.t() | nil) ::
           Enumerable.t()
-  def export(address_hash, from_period, to_period, _options, _filter_type, filter_value) do
+  def export(address_hash, from_period, to_period, _options, _filter_type \\ nil, filter_value \\ nil) do
     {from_block, to_block} = Helper.block_from_period(from_period, to_period)
 
     address_hash
@@ -26,7 +25,6 @@ defmodule Explorer.Chain.CsvExport.Address.Logs do
       |> Keyword.put(:from_block, from_block)
       |> Keyword.put(:to_block, to_block)
       |> Keyword.put(:topic, filter_value)
-      |> Keyword.put(:timeout, AsyncHelper.db_timeout())
 
     Chain.address_to_logs(address_hash, true, options)
   end

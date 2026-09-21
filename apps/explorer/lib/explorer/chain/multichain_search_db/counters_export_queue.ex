@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.MultichainSearchDb.CountersExportQueue do
   @moduledoc """
     Tracks counters data, pending for export to the Multichain Service database.

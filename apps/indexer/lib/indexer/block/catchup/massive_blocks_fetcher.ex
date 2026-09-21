@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Catchup.MassiveBlocksFetcher do
   @moduledoc """
   Fetches and indexes blocks by numbers from massive_blocks table.
@@ -9,10 +8,7 @@ defmodule Indexer.Block.Catchup.MassiveBlocksFetcher do
   require Logger
 
   alias Explorer.Utility.MassiveBlock
-  alias Indexer.Block.Catchup.Fetcher, as: CatchupFetcher
   alias Indexer.Block.Fetcher
-
-  @behaviour Fetcher
 
   @increased_interval 10000
 
@@ -78,11 +74,6 @@ defmodule Indexer.Block.Catchup.MassiveBlocksFetcher do
     {:noreply, state}
   end
 
-  @impl Fetcher
-  def import(block_fetcher, options) do
-    CatchupFetcher.import(block_fetcher, options)
-  end
-
   defp process_block(block_fetcher, number) do
     case Fetcher.fetch_and_import_range(block_fetcher, number..number, %{timeout: :infinity}) do
       {:ok, _result} ->
@@ -107,7 +98,7 @@ defmodule Indexer.Block.Catchup.MassiveBlocksFetcher do
 
     %Fetcher{
       broadcast: :catchup,
-      callback_module: __MODULE__,
+      callback_module: Indexer.Block.Catchup.Fetcher,
       json_rpc_named_arguments: json_rpc_named_arguments,
       receipts_batch_size: receipts_batch_size,
       receipts_concurrency: receipts_concurrency,

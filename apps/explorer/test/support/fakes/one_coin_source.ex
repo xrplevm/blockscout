@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.OneCoinSource do
   @moduledoc false
 
@@ -18,8 +17,7 @@ defmodule Explorer.Market.Source.OneCoinSource do
     symbol: Explorer.coin(),
     fiat_value: Decimal.new(1),
     volume_24h: Decimal.new(1),
-    image_url: nil,
-    circulating_supply: Decimal.new(10_000_000)
+    image_url: nil
   }
 
   {:ok, address_hash} = Hash.Address.cast("0x0000000000000000000000000000000000000001")

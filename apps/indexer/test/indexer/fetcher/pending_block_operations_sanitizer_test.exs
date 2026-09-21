@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.PendingBlockOperationsSanitizerTest do
   use Explorer.DataCase, async: false
 

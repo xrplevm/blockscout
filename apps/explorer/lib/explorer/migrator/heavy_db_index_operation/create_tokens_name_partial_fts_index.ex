@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation.CreateTokensNamePartialFtsIndex do
   @moduledoc """
   Creates partial full-text search index on the `tokens` table with filtering by `symbol IS NULL`.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.OnDemand.CoinBalance do
   @moduledoc """
   Ensures that we have a reasonably up to date coin balance for a given address.

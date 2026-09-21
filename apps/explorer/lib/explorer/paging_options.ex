@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.PagingOptions do
   @moduledoc """
   Defines paging options for paging by a stable key such as a timestamp or block

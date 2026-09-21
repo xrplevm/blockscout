@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Arbitrum.Constants.Contracts do
   @moduledoc """
   Provides constants and ABI definitions for Arbitrum-specific smart contracts.

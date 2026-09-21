@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressPage do
   @moduledoc false
 
@@ -84,10 +83,10 @@ defmodule BlockScoutWeb.AddressPage do
     css("[data-test='address_detail_hash']", text: to_string(address))
   end
 
-  def internal_transaction(%InternalTransaction{index: index} = internal_transaction) do
+  def internal_transaction(%InternalTransaction{transaction_hash: transaction_hash, index: index}) do
     css(
       "[data-test='internal_transaction']" <>
-        "[data-internal-transaction-transaction-hash='#{internal_transaction.transaction.hash}']" <>
+        "[data-internal-transaction-transaction-hash='#{transaction_hash}']" <>
         "[data-internal-transaction-index='#{index}']"
     )
   end
@@ -97,23 +96,23 @@ defmodule BlockScoutWeb.AddressPage do
   end
 
   def internal_transaction_address_link(
-        %InternalTransaction{index: index, from_address_hash: address_hash} = internal_transaction,
+        %InternalTransaction{transaction_hash: transaction_hash, index: index, from_address_hash: address_hash},
         :from
       ) do
     checksum = Address.checksum(address_hash)
 
     css(
-      "[data-internal-transaction-transaction-hash='#{internal_transaction.transaction.hash}'][data-internal-transaction-index='#{index}']" <>
+      "[data-internal-transaction-transaction-hash='#{transaction_hash}'][data-internal-transaction-index='#{index}']" <>
         " [data-test='address_hash_link']" <> " [data-address-hash='#{checksum}']"
     )
   end
 
   def internal_transaction_address_link(
-        %InternalTransaction{index: index, to_address_hash: address_hash} = internal_transaction,
+        %InternalTransaction{transaction_hash: transaction_hash, index: index, to_address_hash: address_hash},
         :to
       ) do
     css(
-      "[data-internal-transaction-transaction-hash='#{internal_transaction.transaction.hash}'][data-internal-transaction-index='#{index}']" <>
+      "[data-internal-transaction-transaction-hash='#{transaction_hash}'][data-internal-transaction-index='#{index}']" <>
         " [data-test='address_hash_link']" <> " [data-address-hash='#{address_hash}']"
     )
   end

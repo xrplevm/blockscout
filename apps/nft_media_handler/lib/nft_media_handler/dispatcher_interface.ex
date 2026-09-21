@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule NFTMediaHandler.DispatcherInterface do
   @moduledoc """
   Interface to call the Indexer.NFTMediaHandler.Queue.

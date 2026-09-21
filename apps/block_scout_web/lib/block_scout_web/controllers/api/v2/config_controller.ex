@@ -1,13 +1,9 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.ConfigController do
   use BlockScoutWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
-  use Utils.RuntimeEnvHelper,
-    chain_type: [:explorer, :chain_type],
-    chain_identity: [:explorer, :chain_identity]
+  use Utils.RuntimeEnvHelper, chain_type: [:explorer, :chain_type]
 
-  alias Explorer.Chain.CsvExport.Helper, as: CsvHelper
   alias Explorer.Chain.SmartContract
   alias Explorer.Migrator.MigrationStatus
   alias OpenApiSpex.Schema
@@ -50,15 +46,10 @@ defmodule BlockScoutWeb.API.V2.ConfigController do
 
   @spec chain_type_translate_to_openapi_spec_folder_name() :: String.t()
   defp chain_type_translate_to_openapi_spec_folder_name do
-    cond do
-      Application.get_env(:explorer, Explorer.Chain.Mud)[:enabled] ->
-        "mud"
-
-      chain_identity() == {:optimism, :celo} ->
-        "optimism-celo"
-
-      true ->
-        chain_type() || "default"
+    if Application.get_env(:explorer, Explorer.Chain.Mud)[:enabled] do
+      "mud"
+    else
+      chain_type() || "default"
     end
   end
 
@@ -88,17 +79,16 @@ defmodule BlockScoutWeb.API.V2.ConfigController do
     responses: [
       ok:
         {"CSV export limits.", "application/json",
-         %Schema{type: :object, properties: %{limit: %Schema{type: :integer}, async_enabled: %Schema{type: :boolean}}}},
+         %Schema{type: :object, properties: %{limit: %Schema{type: :integer}}}},
       unprocessable_entity: JsonErrorResponse.response()
     ]
 
   def csv_export(conn, _params) do
-    limit = CsvHelper.limit()
-    async_enabled? = CsvHelper.async_enabled?()
+    limit = Application.get_env(:explorer, :csv_export_limit)
 
     conn
     |> put_status(200)
-    |> json(%{limit: limit, async_enabled: async_enabled?})
+    |> json(%{limit: limit})
   end
 
   operation :indexer,

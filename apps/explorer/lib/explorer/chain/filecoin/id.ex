@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Filecoin.IDAddress do
   @moduledoc """
   Handles Filecoin ID addresses, wrapping the `NativeAddress` type.

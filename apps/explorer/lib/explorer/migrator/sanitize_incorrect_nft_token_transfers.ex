@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.SanitizeIncorrectNFTTokenTransfers do
   @moduledoc """
   Delete all token transfers of ERC-721 tokens with deposit/withdrawal signatures

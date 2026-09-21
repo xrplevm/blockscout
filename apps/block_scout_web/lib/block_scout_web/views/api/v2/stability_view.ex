@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.StabilityView do
   alias BlockScoutWeb.API.V2.{Helper, TokenView}
   alias Explorer.Chain.{Address.Reputation, Log, Token, Transaction}

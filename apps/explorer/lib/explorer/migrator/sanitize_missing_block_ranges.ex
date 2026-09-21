@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.SanitizeMissingBlockRanges do
   @moduledoc """
   Remove invalid missing block ranges (from_number < to_number and intersecting ones)

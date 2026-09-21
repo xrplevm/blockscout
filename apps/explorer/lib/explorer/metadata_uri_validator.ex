@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.MetadataURIValidator do
   @moduledoc """
   Validates metadata URI

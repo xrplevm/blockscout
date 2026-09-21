@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 alias Explorer.Chain
 alias Explorer.Chain.{Address, Block, Data, Hash, Transaction}
 

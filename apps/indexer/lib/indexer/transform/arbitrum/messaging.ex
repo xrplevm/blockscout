@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Arbitrum.Messaging do
   @moduledoc """
     Helper functions for transforming data for Arbitrum cross-chain messages.

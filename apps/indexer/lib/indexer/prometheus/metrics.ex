@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Prometheus.Metrics do
   @moduledoc """
   Module responsible for periodically setting indexer metrics.
@@ -12,7 +11,6 @@ defmodule Indexer.Prometheus.Metrics do
   @interval :timer.hours(1)
   @default_metrics_list [
     :missing_blocks_count,
-    :refetch_needed_blocks_count,
     :missing_internal_transactions_count,
     :multichain_search_db_main_export_queue_count,
     :multichain_search_db_export_balances_queue_count,
