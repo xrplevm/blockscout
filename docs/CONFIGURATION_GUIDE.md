@@ -79,7 +79,7 @@ The `version` input is only the Docker image tag (and part of the displayed `BLO
 
 ### The `RELEASE_VERSION` build arg (critical)
 
-The `RELEASE_VERSION` build arg **must exactly match the `version` in `mix.exs`** (currently `11.2.2`). The Dockerfile uses it as a filesystem path — it copies `config_helper.exs` into `/app/releases/${RELEASE_VERSION}/`, and the Elixir release only reads from the directory named after the `mix.exs` version. A mismatched value produces an image that **builds successfully but crashes at boot** with an ENOENT error when it fails to find its release files.
+The `RELEASE_VERSION` build arg **must exactly match the `version` in `mix.exs`** (currently `11.3.1`). The Dockerfile uses it as a filesystem path — it copies `config_helper.exs` into `/app/releases/${RELEASE_VERSION}/`, and the Elixir release only reads from the directory named after the `mix.exs` version. A mismatched value produces an image that **builds successfully but crashes at boot** with an ENOENT error when it fails to find its release files.
 
 The workflow derives `RELEASE_VERSION` from `mix.exs` automatically, so no manual input is needed for it. If you ever modify the workflow or build the image by hand (`docker build --build-arg RELEASE_VERSION=...`), make sure the value matches `mix.exs` — and remember to keep them in sync when bumping the Blockscout version during upstream merges.
 

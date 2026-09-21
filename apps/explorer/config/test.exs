@@ -49,6 +49,7 @@ config :explorer, :proxy,
   caching_implementation_data_enabled: true,
   implementation_data_ttl_via_avg_block_time: false,
   fallback_cached_implementation_data_ttl: :timer.seconds(20),
+  empty_cached_implementation_data_ttl: :timer.seconds(20),
   implementation_data_fetching_timeout: :timer.seconds(20)
 
 account_database_url = System.get_env("TEST_DATABASE_READ_ONLY_API_URL") || database_url
@@ -72,6 +73,7 @@ for repo <- [
       Explorer.Repo.Blackfort,
       Explorer.Repo.BridgedTokens,
       Explorer.Repo.Celo,
+      Explorer.Repo.Eden,
       Explorer.Repo.Filecoin,
       Explorer.Repo.Mud,
       Explorer.Repo.Optimism,
@@ -101,6 +103,9 @@ end
 
 config :logger, :explorer, path: Path.absname("logs/test/explorer.log")
 
+config :explorer, Explorer.Chain.Cache.ContractMethods, enabled: false
+
+config :explorer, Explorer.Chain.Cache.AddressTags, enabled: false, ttl: :timer.minutes(5)
 config :explorer, Explorer.Chain.Fetcher.CheckBytecodeMatchingOnDemand, enabled: false
 config :explorer, Explorer.Chain.Fetcher.FetchValidatorInfoOnDemand, enabled: false
 config :explorer, Explorer.Tags.AddressTag.Cataloger, enabled: false

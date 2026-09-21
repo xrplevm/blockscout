@@ -4,8 +4,12 @@ defmodule BlockScoutWeb.NotifierSubscriberFilterTest do
     async: false
 
   alias BlockScoutWeb.Notifier
-  alias Explorer.Chain.Wei
+  alias Explorer.Chain.{Transaction, Wei}
+  alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.Cache.Counters.AddressesCount
+  alias Explorer.Repo
+
+  defp without_loaded_associations(%Transaction{hash: hash}), do: Repo.get!(Transaction, hash)
 
   defp create_token_transfer(opts \\ []) do
     from_address = opts[:from_address] || insert(:address)
@@ -63,6 +67,72 @@ defmodule BlockScoutWeb.NotifierSubscriberFilterTest do
 
       Notifier.handle_event({:chain_event, :addresses, :realtime, [address]})
     end
+
+    # TODO: delete this test when old UI becomes deprecated
+    test "broadcasts balance to the old UI channel when subscribed to it only" do
+      {:ok, balance} = Wei.cast(1)
+      address = insert(:address, fetched_coin_balance: balance, fetched_coin_balance_block_number: 1)
+
+      topic = "addresses_old:#{address.hash}"
+      @endpoint.subscribe(topic)
+
+      start_supervised!(AddressesCount)
+      AddressesCount.consolidate()
+
+      Notifier.handle_event({:chain_event, :addresses, :realtime, [address]})
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "balance_update",
+                       payload: %{address: %{hash: hash}}
+                     },
+                     :timer.seconds(5)
+
+      assert hash == address.hash
+    end
+
+    # TODO: delete this test when old UI becomes deprecated
+    test "broadcasts balance only to the old UI channel of the subscribed address in a batch" do
+      {:ok, balance} = Wei.cast(1)
+
+      subscribed = insert(:address, fetched_coin_balance: balance, fetched_coin_balance_block_number: 1)
+      unsubscribed = insert(:address, fetched_coin_balance: balance, fetched_coin_balance_block_number: 1)
+
+      subscribed_topic = "addresses_old:#{subscribed.hash}"
+      unsubscribed_topic = "addresses_old:#{unsubscribed.hash}"
+      @endpoint.subscribe(subscribed_topic)
+      @endpoint.subscribe(unsubscribed_topic)
+
+      start_supervised!(AddressesCount)
+      AddressesCount.consolidate()
+
+      Phoenix.PubSub.unsubscribe(BlockScoutWeb.PubSub, unsubscribed_topic)
+
+      Notifier.handle_event({:chain_event, :addresses, :realtime, [subscribed, unsubscribed]})
+
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^subscribed_topic, event: "balance_update"}, :timer.seconds(5)
+      refute_receive %Phoenix.Socket.Broadcast{topic: ^unsubscribed_topic, event: "balance_update"}, 100
+    end
+
+    # TODO: delete this test when old UI becomes deprecated
+    test "broadcasts the old UI address count when subscribed to that channel" do
+      {:ok, balance} = Wei.cast(1)
+      address = insert(:address, fetched_coin_balance: balance, fetched_coin_balance_block_number: 1)
+
+      @endpoint.subscribe("addresses_old:new_address")
+
+      start_supervised!(AddressesCount)
+      AddressesCount.consolidate()
+
+      Notifier.handle_event({:chain_event, :addresses, :realtime, [address]})
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: "addresses_old:new_address",
+                       event: "count",
+                       payload: %{count: _}
+                     },
+                     :timer.seconds(5)
+    end
   end
 
   describe "address_coin_balances event: subscriber filtering" do
@@ -100,6 +170,33 @@ defmodule BlockScoutWeb.NotifierSubscriberFilterTest do
 
       assert_receive %Phoenix.Socket.Broadcast{topic: ^subscribed_topic, event: "coin_balance"}, :timer.seconds(5)
     end
+
+    # TODO: delete this test when old UI becomes deprecated
+    test "broadcasts to the old UI channel when subscribed to it only" do
+      address = insert(:address)
+
+      coin_balance =
+        insert(:address_coin_balance,
+          address: address,
+          address_hash: address.hash,
+          delta: 500
+        )
+
+      topic = "addresses_old:#{address.hash}"
+      @endpoint.subscribe(topic)
+
+      Notifier.handle_event(
+        {:chain_event, :address_coin_balances, :realtime,
+         [%{address_hash: address.hash, block_number: coin_balance.block_number, value: 1}]}
+      )
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "coin_balance",
+                       payload: %{coin_balance: _, block_number: _}
+                     },
+                     :timer.seconds(5)
+    end
   end
 
   describe "address_token_balances event: subscriber filtering" do
@@ -110,6 +207,47 @@ defmodule BlockScoutWeb.NotifierSubscriberFilterTest do
       Notifier.handle_event(
         {:chain_event, :address_token_balances, :realtime, [%{address_hash: address.hash, block_number: block.number}]}
       )
+    end
+
+    test "broadcasts only to subscribed addresses in a batch" do
+      subscribed_address = insert(:address)
+      unsubscribed_address = insert(:address)
+      block = insert(:block)
+
+      subscribed_topic = "addresses:#{subscribed_address.hash}"
+      unsubscribed_topic = "addresses:#{unsubscribed_address.hash}"
+      @endpoint.subscribe(subscribed_topic)
+
+      Notifier.handle_event(
+        {:chain_event, :address_token_balances, :realtime,
+         [
+           %{address_hash: subscribed_address.hash, block_number: block.number},
+           %{address_hash: unsubscribed_address.hash, block_number: block.number}
+         ]}
+      )
+
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^subscribed_topic, event: "token_balance"}, :timer.seconds(5)
+      refute_receive %Phoenix.Socket.Broadcast{topic: ^unsubscribed_topic}, 100
+    end
+
+    # TODO: delete this test when old UI becomes deprecated
+    test "broadcasts to the old UI channel when subscribed to it only" do
+      address = insert(:address)
+      block = insert(:block)
+
+      topic = "addresses_old:#{address.hash}"
+      @endpoint.subscribe(topic)
+
+      Notifier.handle_event(
+        {:chain_event, :address_token_balances, :realtime, [%{address_hash: address.hash, block_number: block.number}]}
+      )
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "token_balance",
+                       payload: %{block_number: _}
+                     },
+                     :timer.seconds(5)
     end
   end
 
@@ -251,15 +389,183 @@ defmodule BlockScoutWeb.NotifierSubscriberFilterTest do
     end
   end
 
+  describe "transactions event: subscriber filtering" do
+    test "handles event without error when no channel has subscribers" do
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+        |> without_loaded_associations()
+
+      Notifier.handle_event({:chain_event, :transactions, :realtime, [transaction]})
+    end
+
+    test "broadcasts the count of the batch to the default channel" do
+      transactions =
+        for _ <- 1..2 do
+          :transaction
+          |> insert()
+          |> with_block()
+          |> without_loaded_associations()
+        end
+
+      @endpoint.subscribe("transactions:new_transaction")
+
+      Notifier.handle_event({:chain_event, :transactions, :realtime, transactions})
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: "transactions:new_transaction",
+                       event: "transaction",
+                       payload: %{transaction: 2}
+                     },
+                     :timer.seconds(5)
+    end
+
+    test "renders the block data of a transaction when the denormalization is finished" do
+      old_denormalization_finished = BackgroundMigrations.get_transactions_denormalization_finished()
+      BackgroundMigrations.set_transactions_denormalization_finished(true)
+
+      on_exit(fn ->
+        BackgroundMigrations.set_transactions_denormalization_finished(old_denormalization_finished)
+      end)
+
+      subscribed_address = insert(:address)
+      block = insert(:block, base_fee_per_gas: 1_000_000_000)
+
+      transaction =
+        :transaction
+        |> insert(from_address: subscribed_address)
+        |> with_block(block)
+        |> without_loaded_associations()
+
+      topic = "addresses:#{subscribed_address.hash}"
+      @endpoint.subscribe(topic)
+
+      Notifier.handle_event({:chain_event, :transactions, :realtime, [transaction]})
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "transaction",
+                       payload: %{transactions: [%{"base_fee_per_gas" => base_fee_per_gas}]}
+                     },
+                     :timer.seconds(5)
+
+      assert Decimal.equal?(Wei.to(base_fee_per_gas, :wei), 1_000_000_000)
+    end
+
+    test "processes only transactions of subscribed addresses in a mixed batch" do
+      subscribed_address = insert(:address)
+
+      subscribed_transaction =
+        :transaction
+        |> insert(from_address: subscribed_address)
+        |> with_block()
+        |> without_loaded_associations()
+
+      unsubscribed_transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+        |> without_loaded_associations()
+
+      subscribed_topic = "addresses:#{subscribed_address.hash}"
+      @endpoint.subscribe(subscribed_topic)
+
+      Notifier.handle_event(
+        {:chain_event, :transactions, :realtime, [subscribed_transaction, unsubscribed_transaction]}
+      )
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^subscribed_topic,
+                       event: "transaction",
+                       payload: %{transactions: [%{"hash" => hash}]}
+                     },
+                     :timer.seconds(5)
+
+      assert hash == subscribed_transaction.hash
+    end
+
+    test "processes pending transactions of subscribed addresses" do
+      subscribed_address = insert(:address)
+
+      pending_transaction =
+        :transaction
+        |> insert(from_address: subscribed_address)
+        |> without_loaded_associations()
+
+      topic = "addresses:#{subscribed_address.hash}"
+      @endpoint.subscribe(topic)
+
+      Notifier.handle_event({:chain_event, :transactions, :realtime, [pending_transaction]})
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "pending_transaction",
+                       payload: %{transactions: _}
+                     },
+                     :timer.seconds(5)
+    end
+
+    # TODO: delete this test when old UI becomes deprecated
+    test "processes transactions of addresses subscribed to the old UI channel" do
+      subscribed_address = insert(:address)
+
+      subscribed_transaction =
+        :transaction
+        |> insert(from_address: subscribed_address)
+        |> with_block()
+        |> without_loaded_associations()
+
+      unsubscribed_transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+        |> without_loaded_associations()
+
+      subscribed_topic = "addresses_old:#{subscribed_address.hash}"
+      @endpoint.subscribe(subscribed_topic)
+
+      Notifier.handle_event(
+        {:chain_event, :transactions, :realtime, [subscribed_transaction, unsubscribed_transaction]}
+      )
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^subscribed_topic,
+                       event: "transaction",
+                       payload: %{transaction: %{hash: hash}}
+                     },
+                     :timer.seconds(5)
+
+      assert hash == subscribed_transaction.hash
+    end
+
+    # TODO: delete this test when old UI becomes deprecated
+    test "processes the whole batch when subscribed to the old UI default channel" do
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+        |> without_loaded_associations()
+
+      @endpoint.subscribe("transactions_old:new_transaction")
+
+      Notifier.handle_event({:chain_event, :transactions, :realtime, [transaction]})
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: "transactions_old:new_transaction",
+                       event: "transaction",
+                       payload: %{transaction: _}
+                     },
+                     :timer.seconds(5)
+    end
+  end
+
   describe "address_current_token_balances event: subscriber filtering" do
     test "handles event without error when address has no subscribers" do
       address = insert(:address)
       token_balance = insert(:address_current_token_balance, address: address)
 
-      Notifier.handle_event(
-        {:chain_event, :address_current_token_balances, :realtime,
-         %{address_current_token_balances: [token_balance], address_hash: address.hash}}
-      )
+      Notifier.handle_event({:chain_event, :address_current_token_balances, :realtime, [token_balance]})
     end
 
     test "processes balances when address has subscribers" do
@@ -275,10 +581,7 @@ defmodule BlockScoutWeb.NotifierSubscriberFilterTest do
       topic = "addresses:#{address.hash}"
       @endpoint.subscribe(topic)
 
-      Notifier.handle_event(
-        {:chain_event, :address_current_token_balances, :realtime,
-         %{address_current_token_balances: [token_balance], address_hash: address.hash}}
-      )
+      Notifier.handle_event({:chain_event, :address_current_token_balances, :realtime, [token_balance]})
 
       assert_receive %Phoenix.Socket.Broadcast{
                        topic: ^topic,

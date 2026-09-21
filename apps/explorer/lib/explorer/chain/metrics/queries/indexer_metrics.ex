@@ -84,6 +84,62 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetrics do
   defp normalize_missing_blocks_count(value), do: value
 
   @doc """
+  Query to get the number of consensus blocks that require refetch
+  """
+  # sobelow_skip ["SQL"]
+  @spec refetch_needed_blocks_count() :: integer()
+  def refetch_needed_blocks_count do
+    block_ranges = RangesHelper.get_block_ranges()
+
+    if block_ranges == [] do
+      0
+    else
+      {range_conditions, params} =
+        Enum.reduce(block_ranges, {[], []}, fn
+          first..last//_, {conditions, acc_params} ->
+            from = min(first, last)
+            to = max(first, last)
+            param_index_from = length(acc_params) + 1
+            param_index_to = length(acc_params) + 2
+
+            condition = "(b.number >= $#{param_index_from}::bigint AND b.number <= $#{param_index_to}::bigint)"
+
+            {[condition | conditions], [to, from | acc_params]}
+
+          start_from, {conditions, acc_params} ->
+            param_index = length(acc_params) + 1
+            condition = "b.number >= $#{param_index}::bigint"
+            {[condition | conditions], [start_from | acc_params]}
+        end)
+
+      range_filter =
+        range_conditions
+        |> Enum.reverse()
+        |> Enum.join(" OR ")
+
+      sql_string = """
+      SELECT COUNT(1) AS refetch_needed_blocks_count
+      FROM blocks b
+      WHERE b.consensus AND b.refetch_needed
+      AND (#{range_filter});
+      """
+
+      case SQL.query(Repo, sql_string, Enum.reverse(params), timeout: :infinity) do
+        {:ok,
+         %Postgrex.Result{
+           command: :select,
+           columns: ["refetch_needed_blocks_count"],
+           rows: [[refetch_needed_blocks_count]]
+         }} ->
+          refetch_needed_blocks_count
+
+        _ ->
+          0
+      end
+    end
+  end
+
+  @doc """
   Query to get the number of missing internal transactions in the DB
   """
   @spec missing_internal_transactions_count() :: integer()
@@ -161,6 +217,63 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetrics do
            rows: [[missing_current_token_balances_count]]
          }} ->
           missing_current_token_balances_count
+
+        _ ->
+          0
+      end
+    end
+  end
+
+  @doc """
+  Query to get the count of address native coin balances with missing values
+  """
+  # sobelow_skip ["SQL"]
+  @spec missing_address_native_coin_balances_count() :: integer()
+  def missing_address_native_coin_balances_count do
+    block_ranges = RangesHelper.get_block_ranges()
+
+    if block_ranges == [] do
+      0
+    else
+      {range_conditions, params} =
+        Enum.reduce(block_ranges, {[], []}, fn
+          first..last//_, {conditions, acc_params} ->
+            from = min(first, last)
+            to = max(first, last)
+            param_index_from = length(acc_params) + 1
+            param_index_to = length(acc_params) + 2
+
+            condition =
+              "(cb.block_number >= $#{param_index_from}::bigint AND cb.block_number <= $#{param_index_to}::bigint)"
+
+            {[condition | conditions], [to, from | acc_params]}
+
+          start_from, {conditions, acc_params} ->
+            param_index = length(acc_params) + 1
+            condition = "cb.block_number >= $#{param_index}::bigint"
+            {[condition | conditions], [start_from | acc_params]}
+        end)
+
+      range_filter =
+        range_conditions
+        |> Enum.reverse()
+        |> Enum.join(" OR ")
+
+      sql_string = """
+      SELECT COUNT(1) as missing_address_native_coin_balances_count
+      FROM address_coin_balances cb
+      WHERE cb.value_fetched_at is NULL
+      AND (#{range_filter});
+      """
+
+      case SQL.query(Repo, sql_string, Enum.reverse(params), timeout: :infinity) do
+        {:ok,
+         %Postgrex.Result{
+           command: :select,
+           columns: ["missing_address_native_coin_balances_count"],
+           rows: [[missing_address_native_coin_balances_count]]
+         }} ->
+          missing_address_native_coin_balances_count
 
         _ ->
           0

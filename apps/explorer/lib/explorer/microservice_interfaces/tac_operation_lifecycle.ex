@@ -24,8 +24,12 @@ defmodule Explorer.MicroserviceInterfaces.TACOperationLifecycle do
       operations_quick_search_url()
       |> http_get_request(query_params)
       |> case do
-        {:ok, %{"items" => operations, "next_page_params" => next_page_params}} ->
-          {:ok, %{items: operations, next_page_params: next_page_params}}
+        {:ok, %{"items" => operations} = response} ->
+          {:ok, %{items: operations, next_page_params: Map.get(response, "next_page_params")}}
+
+        {:ok, unexpected} ->
+          log_error({:unexpected_body, unexpected})
+          {:error, @request_error_msg}
 
         error ->
           error
@@ -46,6 +50,14 @@ defmodule Explorer.MicroserviceInterfaces.TACOperationLifecycle do
         end
 
       {:ok, %{body: _body, status_code: 404}} ->
+        Logger.warning(fn ->
+          [
+            "#{@request_error_msg}: ",
+            url,
+            " returned 404, TAC operations will be omitted from search results"
+          ]
+        end)
+
         {:error, :not_found}
 
       {_, error} ->
@@ -55,17 +67,12 @@ defmodule Explorer.MicroserviceInterfaces.TACOperationLifecycle do
   end
 
   defp log_error(error) do
-    old_truncate = Application.get_env(:logger, :truncate)
-    Logger.configure(truncate: :infinity)
-
     Logger.error(fn ->
       [
         "#{@request_error_msg}: ",
-        inspect(error, limit: :infinity, printable_limit: :infinity)
+        inspect(error)
       ]
     end)
-
-    Logger.configure(truncate: old_truncate)
   end
 
   defp operations_quick_search_url do
@@ -73,6 +80,6 @@ defmodule Explorer.MicroserviceInterfaces.TACOperationLifecycle do
   end
 
   defp base_url do
-    "#{Microservice.base_url(__MODULE__)}/api/v1"
+    "#{Microservice.base_url(__MODULE__)}/api/v2"
   end
 end

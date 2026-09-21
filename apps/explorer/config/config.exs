@@ -23,6 +23,10 @@ config :explorer, Explorer.ChainSpec.GenesisData, enabled: true
 
 config :explorer, Explorer.Chain.Cache.BlockNumber, enabled: true
 
+config :explorer, Explorer.Chain.Cache.ContractMethods, enabled: true
+
+config :explorer, Explorer.Chain.Cache.AddressTags, enabled: true
+
 config :explorer, Explorer.Chain.Cache.Counters.AddressesCoinBalanceSum,
   enabled: true,
   ttl_check_interval: :timer.seconds(1)
@@ -35,9 +39,9 @@ config :explorer, Explorer.Chain.Cache.Counters.AddressesCount,
   enabled: true,
   enable_consolidation: true
 
-config :explorer, Explorer.Chain.Cache.Counters.AddressTransactionsGasUsageSum,
-  enabled: true,
-  enable_consolidation: true
+config :explorer, Explorer.Chain.Cache.Counters.AddressCounters, enabled: true
+
+config :explorer, Explorer.Chain.Cache.Counters.AddressCountersConsolidator, enabled: true
 
 config :explorer, Explorer.Chain.Cache.Counters.AddressTokensUsdSum,
   enabled: true,
@@ -82,21 +86,9 @@ config :explorer, Explorer.Chain.Cache.Counters.Blackfort.ValidatorsCount,
 
 config :explorer, Explorer.Market.Fetcher.Token, enabled: true
 
-config :explorer, Explorer.Chain.Cache.Counters.TokenHoldersCount,
-  enabled: true,
-  enable_consolidation: true
+config :explorer, Explorer.Chain.Cache.Counters.TokenCounters, enabled: true
 
-config :explorer, Explorer.Chain.Cache.Counters.TokenTransfersCount,
-  enabled: true,
-  enable_consolidation: true
-
-config :explorer, Explorer.Chain.Cache.Counters.AddressTransactionsCount,
-  enabled: true,
-  enable_consolidation: true
-
-config :explorer, Explorer.Chain.Cache.Counters.AddressTokenTransfersCount,
-  enabled: true,
-  enable_consolidation: true
+config :explorer, Explorer.Chain.Cache.Counters.TokenCountersConsolidator, enabled: true
 
 config :explorer, Explorer.Chain.Cache.Counters.BlockBurntFeeCount,
   enabled: true,
@@ -142,8 +134,11 @@ for migrator <- [
       Explorer.Migrator.UnescapeQuotesInTokens,
       Explorer.Migrator.UnescapeAmpersandsInTokens,
       Explorer.Migrator.SanitizeDuplicateSmartContractAdditionalSources,
+      Explorer.Migrator.ReindexBlocksWithUncatalogedTokenTransfers,
       Explorer.Migrator.EmptyInternalTransactionsData,
-      Explorer.Migrator.FillInternalTransactionsAddressIds
+      Explorer.Migrator.FillInternalTransactionsAddressIds,
+      Explorer.Migrator.BackfillAddressCounters,
+      Explorer.Migrator.BackfillTokenCounters
     ] do
   config :explorer, migrator, enabled: true
 end
@@ -195,7 +190,9 @@ for index_operation <- [
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsBlockNumberCreatedContractAddressHashIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsCreatedContractAddressHashIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsFromAddressHashPartialIndex,
-      Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsToAddressHashPartialIndex
+      Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsToAddressHashPartialIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressHashFirstTopicSecondTopicBlockNumberIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateAddressCurrentTokenBalancesAddressHashBlockNumberIndex
     ] do
   config :explorer, index_operation, enabled: true
 end
