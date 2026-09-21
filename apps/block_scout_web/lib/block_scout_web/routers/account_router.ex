@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Routers.AccountRouter do
   @moduledoc """
   Router for account-related requests
@@ -55,9 +54,7 @@ defmodule BlockScoutWeb.Routers.AccountRouter do
     plug(OpenApiSpex.Plug.PutApiSpec, module: BlockScoutWeb.Specs.Private)
   end
 
-  pipeline :account_api_v2_no_protect_from_forgery do
-    plug(CheckAccountAPI)
-
+  pipeline :api_v2 do
     plug(
       Plug.Parsers,
       parsers: [:urlencoded, :multipart, :json],
@@ -168,7 +165,7 @@ defmodule BlockScoutWeb.Routers.AccountRouter do
   end
 
   scope "/v2" do
-    pipe_through(:account_api_v2)
+    pipe_through([:api_v2, :account_api_v2])
 
     scope "/tags" do
       get("/address/:address_hash", TagsController, :tags_address)
@@ -178,7 +175,7 @@ defmodule BlockScoutWeb.Routers.AccountRouter do
   end
 
   scope "/v2" do
-    pipe_through(:account_api_v2_no_protect_from_forgery)
+    pipe_through(:api_v2)
 
     post("/authenticate_via_wallet", AuthenticateController, :authenticate_via_wallet)
     get("/authenticate_via_dynamic", AuthenticateController, :authenticate_via_dynamic)

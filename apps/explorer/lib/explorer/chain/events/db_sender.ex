@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Events.DBSender do
   @moduledoc """
   Sends events to Postgres.

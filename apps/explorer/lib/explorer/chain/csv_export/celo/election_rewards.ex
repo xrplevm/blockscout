@@ -1,10 +1,9 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.CsvExport.Address.Celo.ElectionRewards do
   @moduledoc """
   Exports Celo election rewards to a csv file.
   """
   alias Explorer.Chain.Celo.{ElectionReward, Epoch}
-  alias Explorer.Chain.CsvExport.{AsyncHelper, Helper}
+  alias Explorer.Chain.CsvExport.Helper
   alias Explorer.Chain.{Hash, Wei}
 
   @spec export(Hash.Address.t(), String.t() | nil, String.t() | nil, Keyword.t(), any(), any()) :: Enumerable.t()
@@ -19,8 +18,7 @@ defmodule Explorer.Chain.CsvExport.Address.Celo.ElectionRewards do
         [epoch: [:end_processing_block]] => :optional
       },
       paging_options: Helper.paging_options(),
-      api?: true,
-      timeout: AsyncHelper.db_timeout()
+      api?: true
     ]
 
     epoch_range

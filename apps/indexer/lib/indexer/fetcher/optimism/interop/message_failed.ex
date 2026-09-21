@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Optimism.Interop.MessageFailed do
   @moduledoc """
     Fills op_interop_messages DB table with failed messages.

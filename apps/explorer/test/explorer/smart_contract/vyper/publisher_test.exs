@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 if Application.compile_env(:explorer, :chain_type) !== :zksync do
   defmodule Explorer.SmartContract.Vyper.PublisherTest do
     use ExUnit.Case, async: true

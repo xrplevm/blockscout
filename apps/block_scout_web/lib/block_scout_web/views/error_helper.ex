@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.ErrorHelper do
   @moduledoc """
   Conveniences for translating and building error messages.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Uncles do
   @moduledoc """
   List of [uncles](https://ethereum.org/en/glossary).  Uncles are blocks that didn't

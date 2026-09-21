@@ -1,12 +1,18 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.BridgedToken do
   @moduledoc """
     Represents a bridged token.
   """
   use Explorer.Schema
 
+  import Ecto.Changeset
   import EthereumJSONRPC, only: [json_rpc: 2]
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
+
+  import Ecto.Query,
+    only: [
+      from: 2,
+      limit: 2
+    ]
 
   alias ABI.{TypeDecoder, TypeEncoder}
   alias Ecto.Changeset
@@ -229,8 +235,10 @@ defmodule Explorer.Chain.BridgedToken do
         |> Enum.count() > 0
 
       created_from_internal_transaction_query =
-        InternalTransaction
-        |> InternalTransaction.where_address_match_by_hash(:created_contract_address, token_address_hash, [])
+        from(
+          it in InternalTransaction,
+          where: it.created_contract_address_hash == ^token_address_hash
+        )
 
       created_from_internal_transaction =
         created_from_internal_transaction_query
@@ -296,20 +304,16 @@ defmodule Explorer.Chain.BridgedToken do
          mediator
        ) do
     omni_bridge_mediator = Application.get_env(:explorer, __MODULE__)[mediator]
-    %{block_number: block_number, transaction_index: transaction_index} = created_from_internal_transaction_success
+    %{transaction_hash: transaction_hash} = created_from_internal_transaction_success
 
     if omni_bridge_mediator && omni_bridge_mediator !== "" do
       {:ok, omni_bridge_mediator_hash} = Chain.string_to_address_hash(omni_bridge_mediator)
 
       created_by_amb_mediator_query =
-        InternalTransaction
-        |> InternalTransaction.join_address_mapping_query(:to_address)
-        |> where([it], it.block_number == ^block_number)
-        |> where([it], it.transaction_index == ^transaction_index)
-        |> where(
-          [it],
-          it.to_address_hash == ^omni_bridge_mediator_hash or
-            as(:to_address_mapping).address_hash == ^omni_bridge_mediator_hash
+        from(
+          it in InternalTransaction,
+          where: it.transaction_hash == ^transaction_hash,
+          where: it.to_address_hash == ^omni_bridge_mediator_hash
         )
 
       created_by_amb_mediator =
@@ -726,25 +730,21 @@ defmodule Explorer.Chain.BridgedToken do
             |> Decimal.mult(home_token_total_supply)
             |> Decimal.div(token_decimals_divider)
 
-          compute_token_cap_usd(token_hash_str, token_cap)
+          token = Token.get_by_contract_address_hash(token_hash_str, [])
+
+          token_cap_usd =
+            if token && token.fiat_value do
+              token.fiat_value
+              |> Decimal.mult(token_cap)
+            else
+              0
+            end
+
+          {:ok, token_cap_usd}
         else
           _ -> :error
         end
     end
-  end
-
-  defp compute_token_cap_usd(token_hash_str, token_cap) do
-    token = Token.get_by_contract_address_hash(token_hash_str, [])
-
-    token_cap_usd =
-      if token && token.fiat_value do
-        token.fiat_value
-        |> Decimal.mult(token_cap)
-      else
-        0
-      end
-
-    {:ok, token_cap_usd}
   end
 
   defp parse_contract_response(abi_encoded_value, types) when is_list(types) do

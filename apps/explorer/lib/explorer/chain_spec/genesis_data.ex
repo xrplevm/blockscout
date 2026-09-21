@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ChainSpec.GenesisData do
   @moduledoc """
   Handles the genesis data import.

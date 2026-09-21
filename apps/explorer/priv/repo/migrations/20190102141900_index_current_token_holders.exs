@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.IndexCurrentTokenHolders do
   use Ecto.Migration
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.LatestL1BlockNumber do
   @moduledoc """
     Caches latest L1 block number.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.AddressTokenBalanceTokenType do
   @moduledoc """
   Fill empty token_type's for address_token_balances

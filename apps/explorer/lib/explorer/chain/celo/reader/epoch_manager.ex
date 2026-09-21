@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Celo.Reader.EpochManager do
   @moduledoc """
   Functions for interacting with the Celo Epoch Manager contract.

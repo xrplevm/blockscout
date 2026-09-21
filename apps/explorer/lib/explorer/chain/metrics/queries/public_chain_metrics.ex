@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Metrics.Queries.PublicChainMetrics do
   @moduledoc """
   Module for DB queries to get chain metrics exposed at /public-metrics endpoint
@@ -197,10 +196,7 @@ defmodule Explorer.Chain.Metrics.Queries.PublicChainMetrics do
     internal_transactions_query =
       if DenormalizationHelper.transactions_denormalization_finished?() do
         InternalTransaction
-        |> InternalTransaction.join_transaction_query()
-        |> InternalTransaction.join_address_mapping_query(:from_address)
-        |> InternalTransaction.join_address_mapping_query(:to_address)
-        |> InternalTransaction.join_address_mapping_query(:created_contract_address)
+        |> join(:inner, [it], transaction in assoc(it, :transaction))
         |> where([it, transaction], transaction.block_timestamp >= ago(^update_period_hours(), "hour"))
         |> where([it, transaction], transaction.block_consensus == true)
         |> where([it, transaction], transaction.status == ^1)
@@ -208,19 +204,16 @@ defmodule Explorer.Chain.Metrics.Queries.PublicChainMetrics do
           address_hash:
             fragment(
               "UNNEST(ARRAY[?, ?, ?])",
-              coalesce(it.from_address_hash, as(:from_address_mapping).address_hash),
-              coalesce(it.to_address_hash, as(:to_address_mapping).address_hash),
-              coalesce(it.created_contract_address_hash, as(:created_contract_address_mapping).address_hash)
+              it.from_address_hash,
+              it.to_address_hash,
+              it.created_contract_address_hash
             )
         })
         |> wrapped_union_subquery()
       else
         InternalTransaction
-        |> InternalTransaction.join_transaction_query()
-        |> InternalTransaction.join_address_mapping_query(:from_address)
-        |> InternalTransaction.join_address_mapping_query(:to_address)
-        |> InternalTransaction.join_address_mapping_query(:created_contract_address)
-        |> join(:inner, [_it, transaction], block in assoc(transaction, :block))
+        |> join(:inner, [it], transaction in assoc(it, :transaction))
+        |> join(:inner, [transaction], block in assoc(transaction, :block))
         |> where([it, transaction, block], transaction.block_timestamp >= ago(^update_period_hours(), "hour"))
         |> where([it, transaction, block], block.consensus == true)
         |> where([it, transaction, block], transaction.status == ^1)
@@ -228,9 +221,9 @@ defmodule Explorer.Chain.Metrics.Queries.PublicChainMetrics do
           address_hash:
             fragment(
               "UNNEST(ARRAY[?, ?, ?])",
-              coalesce(it.from_address_hash, as(:from_address_mapping).address_hash),
-              coalesce(it.to_address_hash, as(:to_address_mapping).address_hash),
-              coalesce(it.created_contract_address_hash, as(:created_contract_address_mapping).address_hash)
+              it.from_address_hash,
+              it.to_address_hash,
+              it.created_contract_address_hash
             )
         })
         |> wrapped_union_subquery()

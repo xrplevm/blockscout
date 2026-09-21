@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.Proxy.AccountAbstractionController do
   use BlockScoutWeb, :controller
   use OpenApiSpex.ControllerSpecs
@@ -15,7 +14,7 @@ defmodule BlockScoutWeb.API.V2.Proxy.AccountAbstractionController do
 
   plug(OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true)
 
-  tags(["account-abstraction"])
+  tags(["account_abstraction"])
 
   operation :operation,
     summary: "Get a user operation by hash",
@@ -260,7 +259,7 @@ defmodule BlockScoutWeb.API.V2.Proxy.AccountAbstractionController do
   operation :accounts,
     summary: "List of account abstraction wallets",
     description: "Retrieves a list of account abstraction wallets.",
-    parameters: [factory_address_hash_param() | base_params()] ++ define_paging_params(["page_size", "page_token"]),
+    parameters: base_params() ++ define_paging_params(["page_size", "page_token"]),
     responses: [
       ok:
         {"List of account abstraction wallets with pagination.", "application/json",
@@ -288,10 +287,7 @@ defmodule BlockScoutWeb.API.V2.Proxy.AccountAbstractionController do
   operation :bundles,
     summary: "List of recent bundles",
     description: "Retrieves a list of recent bundles.",
-    parameters:
-      base_params() ++
-        [bundler_address_hash_param(), entry_point_address_hash_param()] ++
-        define_paging_params(["page_size", "page_token"]),
+    parameters: base_params() ++ define_paging_params(["page_size", "page_token"]),
     responses: [
       ok:
         {"List of bundles with pagination.", "application/json",
@@ -319,18 +315,7 @@ defmodule BlockScoutWeb.API.V2.Proxy.AccountAbstractionController do
   operation :operations,
     summary: "List of recent user operations",
     description: "Retrieves a list of recent user operations.",
-    parameters:
-      base_params() ++
-        [
-          sender_address_hash_param(),
-          bundler_address_hash_param(),
-          paymaster_address_hash_param(),
-          factory_address_hash_param(),
-          query_transaction_hash_param(),
-          entry_point_address_hash_param(),
-          bundle_index_param(),
-          query_block_number_param()
-        ] ++ define_paging_params(["page_size", "page_token"]),
+    parameters: base_params() ++ define_paging_params(["page_size", "page_token"]),
     responses: [
       ok:
         {"List of user operations with pagination.", "application/json",

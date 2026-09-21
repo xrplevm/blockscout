@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Plug.FetchUserFromSession do
   @moduledoc """
   Fetches a `t:Explorer.Accounts.User.t/0` record if a user id is found in the session.

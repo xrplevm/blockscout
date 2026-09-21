@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 # https://github.com/CircleCI-Public/circleci-demo-elixir-phoenix/blob/a89de33a01df67b6773ac90adc74c34367a4a2d6/test/test_helper.exs#L1-L3
 junit_folder = Mix.Project.build_path() <> "/junit/#{Mix.Project.config()[:app]}"
 File.mkdir_p!(junit_folder)
@@ -30,6 +29,7 @@ Explorer.TestHelper.run_necessary_background_migrations()
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo, :manual)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.Account, :manual)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.PolygonEdge, :manual)
+Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.PolygonZkevm, :manual)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.RSK, :manual)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.Shibarium, :manual)
 Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo.Suave, :manual)

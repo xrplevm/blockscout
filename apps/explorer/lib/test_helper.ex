@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.TestHelper do
   @moduledoc false
 
@@ -28,19 +27,15 @@ defmodule Explorer.TestHelper do
           :ok
 
         _ ->
-          execute_background_migration(background_migration)
+          case background_migration.db_index_operation() do
+            :ok ->
+              background_migration.update_cache()
+              :ok
+
+            :error ->
+              raise "Background migrations failed"
+          end
       end
-    end
-  end
-
-  defp execute_background_migration(background_migration) do
-    case background_migration.db_index_operation() do
-      :ok ->
-        background_migration.update_cache()
-        :ok
-
-      :error ->
-        raise "Background migrations failed"
     end
   end
 

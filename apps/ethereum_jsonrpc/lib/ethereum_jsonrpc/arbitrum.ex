@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Arbitrum do
   @moduledoc """
   Arbitrum specific routines used to fetch and process

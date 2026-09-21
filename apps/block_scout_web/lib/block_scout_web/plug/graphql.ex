@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Plug.GraphQL do
   @moduledoc """
   Default query for GraphiQL interface.

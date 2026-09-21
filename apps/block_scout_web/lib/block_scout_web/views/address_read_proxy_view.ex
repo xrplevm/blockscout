@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressReadProxyView do
   use BlockScoutWeb, :view
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.TransactionsCount do
   @moduledoc """
   Cache for total transactions count.

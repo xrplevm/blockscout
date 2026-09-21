@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.OnDemand.CoinBalanceTest do
   # MUST be `async: false` so that {:shared, pid} is set for connection to allow CoinBalanceFetcher's self-send to have
   # connection allowed immediately.
@@ -166,8 +165,7 @@ defmodule Indexer.Fetcher.OnDemand.CoinBalanceTest do
 
       assert_receive(
         {:chain_event, :addresses, :on_demand,
-         [%{hash: ^address_hash, fetched_coin_balance: ^expected_wei, fetched_coin_balance_block_number: 102}]},
-        1_000
+         [%{hash: ^address_hash, fetched_coin_balance: ^expected_wei, fetched_coin_balance_block_number: 102}]}
       )
     end
 
@@ -185,10 +183,11 @@ defmodule Indexer.Fetcher.OnDemand.CoinBalanceTest do
 
       {:ok, expected_wei} = Wei.cast(2)
 
+      :timer.sleep(100)
+
       assert_receive(
         {:chain_event, :addresses, :on_demand,
-         [%{hash: ^address_hash, fetched_coin_balance: ^expected_wei, fetched_coin_balance_block_number: 103}]},
-        1_000
+         [%{hash: ^address_hash, fetched_coin_balance: ^expected_wei, fetched_coin_balance_block_number: 103}]}
       )
     end
   end

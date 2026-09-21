@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Stats.HotSmartContracts do
   @moduledoc """
   This module defines the HotSmartContracts fetcher for indexing hot contracts.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.MarketHistoryCacheTest do
   use Explorer.DataCase
 

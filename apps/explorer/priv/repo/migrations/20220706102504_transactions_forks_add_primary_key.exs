@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.TransactionsForksAddPrimaryKey do
   use Ecto.Migration
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Transactions do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Transaction.t/0`.
@@ -11,17 +10,7 @@ defmodule Explorer.Chain.Import.Runner.Transactions do
 
   alias Ecto.{Multi, Repo}
   alias EthereumJSONRPC.Utility.RangesHelper
-
-  alias Explorer.Chain.{
-    Block,
-    Hash,
-    Import,
-    PendingBlockOperation,
-    PendingOperationsHelper,
-    PendingTransactionOperation,
-    Transaction
-  }
-
+  alias Explorer.Chain.{Block, Hash, Import, PendingOperationsHelper, PendingTransactionOperation, Transaction}
   alias Explorer.Chain.Import.Runner.TokenTransfers
   alias Explorer.Prometheus.Instrumenter
   alias Explorer.Utility.MissingBlockRange
@@ -77,14 +66,14 @@ defmodule Explorer.Chain.Import.Runner.Transactions do
         :transactions
       )
     end)
-    |> Multi.run(:new_pending_operations, fn repo, %{transactions: transactions} ->
+    |> Multi.run(:new_pending_transaction_operations, fn repo, %{transactions: transactions} ->
       Instrumenter.block_import_stage_runner(
         fn ->
-          new_pending_operations(repo, transactions, insert_options)
+          new_pending_transaction_operations(repo, transactions, insert_options)
         end,
         :block_referencing,
         :transactions,
-        :new_pending_operations
+        :new_pending_transaction_operations
       )
     end)
   end
@@ -116,10 +105,7 @@ defmodule Explorer.Chain.Import.Runner.Transactions do
     on_conflict = Map.get_lazy(options, :on_conflict, &default_on_conflict/0)
 
     # Enforce Transaction ShareLocks order (see docs: sharelocks.md)
-    ordered_changes_list =
-      changes_list
-      |> Enum.sort_by(&{&1.hash, Map.get(&1, :index)})
-      |> Enum.uniq_by(& &1.hash)
+    ordered_changes_list = Enum.sort_by(changes_list, & &1.hash)
 
     Import.insert_changes_list(
       repo,
@@ -133,21 +119,14 @@ defmodule Explorer.Chain.Import.Runner.Transactions do
     )
   end
 
-  defp new_pending_operations(repo, inserted_transactions, %{timeout: timeout, timestamps: timestamps}) do
-    traceable_consensus_transactions =
-      inserted_transactions
-      |> RangesHelper.filter_by_height_range(&RangesHelper.traceable_block_number?(&1.block_number))
-      |> Transaction.filter_non_traceable_transactions()
-
-    traceable_consensus_block_numbers = Enum.map(traceable_consensus_transactions, & &1.block_number) |> Enum.uniq()
-    block_numbers_with_priorities = MissingBlockRange.find_priority_by_numbers(traceable_consensus_block_numbers)
-
+  defp new_pending_transaction_operations(repo, inserted_transactions, %{timeout: timeout, timestamps: timestamps}) do
     case PendingOperationsHelper.pending_operations_type() do
       "transactions" ->
         sorted_pending_ops =
-          traceable_consensus_transactions
+          inserted_transactions
+          |> RangesHelper.filter_by_height_range(&RangesHelper.traceable_block_number?(&1.block_number))
           |> Enum.reject(&is_nil(&1.block_number))
-          |> Enum.map(&%{transaction_hash: &1.hash, priority: Map.get(block_numbers_with_priorities, &1.block_number)})
+          |> Enum.map(&%{transaction_hash: &1.hash})
           |> Enum.sort()
 
         Import.insert_changes_list(
@@ -161,29 +140,8 @@ defmodule Explorer.Chain.Import.Runner.Transactions do
           timestamps: timestamps
         )
 
-      "blocks" ->
-        sorted_pending_ops =
-          traceable_consensus_transactions
-          |> Enum.reject(&is_nil(&1.block_number))
-          |> Enum.map(
-            &%{
-              block_hash: &1.block_hash,
-              block_number: &1.block_number,
-              priority: Map.get(block_numbers_with_priorities, &1.block_number)
-            }
-          )
-          |> Enum.sort()
-
-        Import.insert_changes_list(
-          repo,
-          sorted_pending_ops,
-          conflict_target: :block_hash,
-          on_conflict: :nothing,
-          for: PendingBlockOperation,
-          returning: true,
-          timeout: timeout,
-          timestamps: timestamps
-        )
+      _other_type ->
+        {:ok, []}
     end
   end
 
@@ -283,80 +241,6 @@ defmodule Explorer.Chain.Import.Runner.Transactions do
               transaction.wrapped_r,
               transaction.wrapped_s,
               transaction.wrapped_hash
-            )
-        )
-      end
-
-    {:eden, nil} ->
-      defp default_on_conflict do
-        from(
-          transaction in Transaction,
-          update: [
-            set: [
-              block_hash: fragment("EXCLUDED.block_hash"),
-              old_block_hash: transaction.block_hash,
-              block_number: fragment("EXCLUDED.block_number"),
-              block_consensus: fragment("EXCLUDED.block_consensus"),
-              block_timestamp: fragment("EXCLUDED.block_timestamp"),
-              created_contract_address_hash: fragment("EXCLUDED.created_contract_address_hash"),
-              created_contract_code_indexed_at: fragment("EXCLUDED.created_contract_code_indexed_at"),
-              cumulative_gas_used: fragment("EXCLUDED.cumulative_gas_used"),
-              error: fragment("EXCLUDED.error"),
-              from_address_hash: fragment("EXCLUDED.from_address_hash"),
-              gas: fragment("EXCLUDED.gas"),
-              gas_price: fragment("EXCLUDED.gas_price"),
-              gas_used: fragment("EXCLUDED.gas_used"),
-              index: fragment("EXCLUDED.index"),
-              input: fragment("EXCLUDED.input"),
-              nonce: fragment("EXCLUDED.nonce"),
-              r: fragment("EXCLUDED.r"),
-              s: fragment("EXCLUDED.s"),
-              status: fragment("EXCLUDED.status"),
-              to_address_hash: fragment("EXCLUDED.to_address_hash"),
-              v: fragment("EXCLUDED.v"),
-              value: fragment("EXCLUDED.value"),
-              earliest_processing_start: fragment("EXCLUDED.earliest_processing_start"),
-              revert_reason: fragment("EXCLUDED.revert_reason"),
-              max_priority_fee_per_gas: fragment("EXCLUDED.max_priority_fee_per_gas"),
-              max_fee_per_gas: fragment("EXCLUDED.max_fee_per_gas"),
-              type: fragment("EXCLUDED.type"),
-              fee_payer_address_hash: fragment("EXCLUDED.fee_payer_address_hash"),
-              calls: fragment("EXCLUDED.calls"),
-              # Don't update `hash` as it is part of the primary key and used for the conflict target
-              inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", transaction.inserted_at),
-              updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", transaction.updated_at)
-            ]
-          ],
-          where:
-            fragment(
-              "(EXCLUDED.block_hash, EXCLUDED.block_number, EXCLUDED.block_consensus, EXCLUDED.block_timestamp, EXCLUDED.created_contract_address_hash, EXCLUDED.created_contract_code_indexed_at, EXCLUDED.cumulative_gas_used, EXCLUDED.from_address_hash, EXCLUDED.gas, EXCLUDED.gas_price, EXCLUDED.gas_used, EXCLUDED.index, EXCLUDED.input, EXCLUDED.nonce, EXCLUDED.r, EXCLUDED.s, EXCLUDED.status, EXCLUDED.to_address_hash, EXCLUDED.v, EXCLUDED.value, EXCLUDED.earliest_processing_start, EXCLUDED.revert_reason, EXCLUDED.max_priority_fee_per_gas, EXCLUDED.max_fee_per_gas, EXCLUDED.type, EXCLUDED.fee_payer_address_hash, EXCLUDED.calls) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-              transaction.block_hash,
-              transaction.block_number,
-              transaction.block_consensus,
-              transaction.block_timestamp,
-              transaction.created_contract_address_hash,
-              transaction.created_contract_code_indexed_at,
-              transaction.cumulative_gas_used,
-              transaction.from_address_hash,
-              transaction.gas,
-              transaction.gas_price,
-              transaction.gas_used,
-              transaction.index,
-              transaction.input,
-              transaction.nonce,
-              transaction.r,
-              transaction.s,
-              transaction.status,
-              transaction.to_address_hash,
-              transaction.v,
-              transaction.value,
-              transaction.earliest_processing_start,
-              transaction.revert_reason,
-              transaction.max_priority_fee_per_gas,
-              transaction.max_fee_per_gas,
-              transaction.type,
-              transaction.fee_payer_address_hash,
-              transaction.calls
             )
         )
       end

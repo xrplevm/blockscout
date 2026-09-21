@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Beacon.Blob do
   @moduledoc "Models a data blob broadcasted using eip4844 blob transactions."
 

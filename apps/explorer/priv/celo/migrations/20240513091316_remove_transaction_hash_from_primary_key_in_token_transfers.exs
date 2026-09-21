@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Celo.Migrations.RemoveTransactionHashFromPrimaryKeyInTokenTransfers do
   use Ecto.Migration
 

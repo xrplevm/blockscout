@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
   use Explorer.DataCase, async: false
 
@@ -24,6 +23,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction,
+        block_hash: transaction.block_hash,
         block_number: transaction.block_number,
         index: 0,
         transaction_index: transaction.index,
@@ -46,6 +46,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction,
+        block_hash: transaction.block_hash,
         block_number: transaction.block_number,
         index: 0,
         transaction_index: transaction.index,
@@ -75,6 +76,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction_create,
         transaction: transaction,
+        block_hash: transaction.block_hash,
         block_number: transaction.block_number,
         index: 0,
         transaction_index: transaction.index,
@@ -84,6 +86,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction,
+        block_hash: transaction.block_hash,
         block_number: transaction.block_number,
         index: 1,
         transaction_index: transaction.index,
@@ -113,6 +116,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction_create,
         transaction: transaction,
+        block_hash: transaction.block_hash,
         block_number: transaction.block_number,
         index: 0,
         transaction_index: transaction.index,
@@ -123,6 +127,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction,
+        block_hash: transaction.block_hash,
         block_number: transaction.block_number,
         index: 1,
         transaction_index: transaction.index,
@@ -156,6 +161,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction_1,
+        block_hash: transaction_1.block_hash,
         block_number: transaction_1.block_number,
         index: 0,
         transaction_index: transaction_1.index,
@@ -167,6 +173,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction_2,
+        block_hash: transaction_2.block_hash,
         block_number: transaction_2.block_number,
         index: 0,
         transaction_index: transaction_2.index,
@@ -198,6 +205,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction,
+        block_hash: transaction.block_hash,
         block_number: transaction.block_number,
         index: 0,
         transaction_index: transaction.index,
@@ -226,6 +234,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction,
+        block_hash: transaction.block_hash,
         block_number: transaction.block_number,
         index: 0,
         transaction_index: transaction.index,
@@ -259,6 +268,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction_1,
+        block_hash: transaction_1.block_hash,
         block_number: transaction_1.block_number,
         index: 0,
         transaction_index: transaction_1.index,
@@ -273,6 +283,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction: transaction_2,
+        block_hash: transaction_2.block_hash,
         block_number: transaction_2.block_number,
         index: 0,
         transaction_index: transaction_2.index,
@@ -311,6 +322,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction_hash: transaction_1.hash,
+        block_hash: transaction_1.block_hash,
         block_number: transaction_1.block_number,
         index: 0,
         transaction_index: transaction_1.index,
@@ -325,6 +337,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction_create,
         transaction_hash: transaction_2.hash,
+        block_hash: transaction_2.block_hash,
         block_number: transaction_2.block_number,
         index: 0,
         transaction_index: transaction_2.index,
@@ -334,6 +347,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction_hash: transaction_2.hash,
+        block_hash: transaction_2.block_hash,
         block_number: transaction_2.block_number,
         index: 1,
         transaction_index: transaction_2.index,
@@ -366,6 +380,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction_hash: transaction_1.hash,
+        block_hash: transaction_1.block_hash,
         block_number: transaction_1.block_number,
         index: 0,
         transaction_index: transaction_1.index,
@@ -377,6 +392,7 @@ defmodule Explorer.Migrator.EmptyBytecodeForSelfdestructedSmartContractsTest do
 
       insert(:internal_transaction,
         transaction_hash: transaction_2.hash,
+        block_hash: transaction_2.block_hash,
         block_number: transaction_2.block_number,
         index: 0,
         transaction_index: transaction_2.index,

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.SignedAuthorizationStatus do
   @moduledoc """
   Fetches `status` `t:Explorer.Chain.SignedAuthorization.t/0`.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.Notifier.ForbiddenAddress do
   @moduledoc """
     Check if address is forbidden to notify

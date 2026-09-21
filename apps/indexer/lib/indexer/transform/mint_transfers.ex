@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.MintTransfers do
   @moduledoc """
   Helper functions to parse addresses from mint transfers.

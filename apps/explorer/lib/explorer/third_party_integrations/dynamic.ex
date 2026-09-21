@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.Dynamic do
   @moduledoc """
   Provides integration with Dynamic for JWT-based user authentication.
@@ -15,13 +14,6 @@ defmodule Explorer.ThirdPartyIntegrations.Dynamic do
   alias Explorer.ThirdPartyIntegrations.Dynamic.Token
   alias Ueberauth.Auth
   alias Ueberauth.Auth.{Extra, Info}
-
-  require Logger
-
-  @spec enabled? :: boolean()
-  def enabled? do
-    Application.get_env(:explorer, __MODULE__)[:enabled] || false
-  end
 
   @doc """
   Authenticates a user by verifying a JWT token and extracting identity information from its claims.
@@ -43,18 +35,14 @@ defmodule Explorer.ThirdPartyIntegrations.Dynamic do
   - `{:error, String.t()}` if token verification fails or additional
     authentication is required.
   """
-  @spec get_auth_from_token(String.t()) :: {:ok, Auth.t()} | {:error, String.t()} | {:enabled, false}
+  @spec get_auth_from_token(String.t()) :: {:ok, Auth.t()} | {:error, String.t()}
   def get_auth_from_token(token) do
-    with {:enabled, true} <- {:enabled, enabled?()},
+    with {:enabled, true} <- {:enabled, Application.get_env(:explorer, __MODULE__)[:enabled]},
          {:ok, claims} <- Token.verify_and_validate(token) do
       create_auth(claims)
     else
-      {:error, reason} ->
-        Logger.error("Error while verifying token: #{inspect(reason)}")
-        {:error, "Invalid token"}
-
-      not_enabled ->
-        not_enabled
+      {:enabled, false} -> {:error, "Dynamic integration is disabled"}
+      {:error, reason} -> {:error, inspect(reason)}
     end
   end
 

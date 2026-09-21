@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Stage.TokenReferencing do
   @moduledoc """
   Imports any data that is related to tokens.
@@ -20,21 +19,16 @@ defmodule Explorer.Chain.Import.Stage.TokenReferencing do
   @impl Stage
   def all_runners, do: runners()
 
-  @default_ctb_chunk_size 50
+  @ctb_chunk_size 50
 
   @impl Stage
   def multis(runner_to_changes_list, options) do
     {ctb_multis, remaining_runner_to_changes_list} =
-      Stage.chunk_every(runner_to_changes_list, @ctb_runner, ctb_chunk_size(), options)
+      Stage.chunk_every(runner_to_changes_list, @ctb_runner, @ctb_chunk_size, options)
 
     {final_multi, final_remaining_runner_to_changes_list} =
       Stage.single_multi(@rest_runners, remaining_runner_to_changes_list, options)
 
     {[final_multi | ctb_multis], final_remaining_runner_to_changes_list}
-  end
-
-  defp ctb_chunk_size do
-    Application.get_env(:explorer, :token_balances_import_chunk_size, @default_ctb_chunk_size)
-    |> max(1)
   end
 end

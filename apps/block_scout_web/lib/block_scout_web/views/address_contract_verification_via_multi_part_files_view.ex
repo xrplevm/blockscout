@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressContractVerificationViaMultiPartFilesView do
   use BlockScoutWeb, :view
 

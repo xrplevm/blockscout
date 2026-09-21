@@ -1,18 +1,19 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   @moduledoc """
-  Auth0 Management REST API client for user management.
+    Module for fetching jwt Auth0 Management API (https://auth0.com/docs/api/management/v2) jwt
   """
   require Logger
 
-  alias Explorer.Account.{Authentication, Identity}
-  alias Explorer.{Helper, HttpClient, Vault}
+  alias Explorer.{Account, Helper, HttpClient}
+  alias Explorer.Account.Identity
   alias Explorer.ThirdPartyIntegrations.Auth0.Internal
   alias Explorer.ThirdPartyIntegrations.Dynamic
+  alias Ueberauth.Auth
   alias Ueberauth.Strategy.Auth0.OAuth
 
-  @behaviour Authentication
-
+  @request_siwe_message "Request Sign in with Ethereum message via /api/account/v2/siwe_message"
+  @wrong_nonce "Wrong nonce in message"
+  @misconfiguration_detected "Misconfiguration detected, please contact support."
   @json_content_type [{"Content-type", "application/json"}]
 
   @spec enabled? :: boolean()
@@ -33,10 +34,10 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   """
   @spec get_m2m_jwt() :: nil | String.t()
   def get_m2m_jwt do
-    get_m2m_jwt_inner(Redix.command(:redix, ["GET", m2m_jwt_key()]))
+    get_m2m_jwt_inner(Redix.command(:redix, ["GET", Internal.redis_key()]))
   end
 
-  defp get_m2m_jwt_inner({:ok, token}) when not is_nil(token), do: Vault.decrypt!(token)
+  defp get_m2m_jwt_inner({:ok, token}) when not is_nil(token), do: token
 
   defp get_m2m_jwt_inner(_) do
     config = Application.get_env(:ueberauth, OAuth)
@@ -52,8 +53,7 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
       {:ok, %{status_code: 200, body: body}} ->
         case Jason.decode!(body) do
           %{"access_token" => token, "expires_in" => ttl} ->
-            cache_token(Vault.encrypt!(token), ttl - 1)
-            token
+            cache_token(token, ttl - 1)
 
           _ ->
             nil
@@ -65,12 +65,33 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
     end
   end
 
-  defp cache_token(token, ttl) do
-    Redix.command(:redix, ["SET", m2m_jwt_key(), token, "EX", ttl])
-    token
+  @doc """
+  Generates a key from chain_id and cookie hash for storing in Redis.
+
+  This function combines the chain_id (if available) with the provided hash to
+  create a unique key for Redis storage.
+
+  ## Parameters
+  - `hash`: The hash to be combined with the chain_id
+
+  ## Returns
+  - `String.t()` representing the generated key
+  """
+  @spec cookie_key(binary) :: String.t()
+  def cookie_key(hash) do
+    chain_id = Application.get_env(:block_scout_web, :chain_id)
+
+    if chain_id do
+      chain_id <> "_" <> hash
+    else
+      hash
+    end
   end
 
-  defp m2m_jwt_key, do: Helper.redis_key(Internal.redis_key())
+  defp cache_token(token, ttl) do
+    Redix.command(:redix, ["SET", Internal.redis_key(), token, "EX", ttl])
+    token
+  end
 
   @doc """
   Sends a one-time password (OTP) for linking an email to an existing account.
@@ -86,9 +107,8 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   - `:ok` if the OTP was sent successfully
   - `{:error, String.t()}` error with the description
   - `:error` if there was an unexpected error
-  - `{:format, :email}` if the email format is invalid
   """
-  @impl Authentication
+  @spec send_otp_for_linking(String.t(), String.t()) :: :error | :ok | {:error, String.t()}
   def send_otp_for_linking(email, ip) do
     case Internal.find_users_by_email(email) do
       {:ok, []} ->
@@ -118,7 +138,7 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   - `:error` if there was an unexpected error
   - `{:interval, integer()}` if the user need to wait before sending the OTP
   """
-  @impl Authentication
+  @spec send_otp(String.t(), String.t()) :: :error | :ok | {:interval, integer()}
   def send_otp(email, ip) do
     case Internal.find_users_by_email(email) do
       {:ok, []} ->
@@ -149,7 +169,8 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   - `{:error, String.t()}` error with the description
   - `:error` if there was an unexpected error
   """
-  @impl Authentication
+  @spec link_email(Identity.session(), String.t(), String.t(), String.t()) ::
+          :error | {:ok, Auth.t()} | {:error, String.t()}
   def link_email(%{uid: user_id_without_email, email: nil}, email, otp, ip) do
     case Internal.find_users_by_email(email) do
       {:ok, []} ->
@@ -185,7 +206,7 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   - `{:error, String.t()}` error with the description
   - `:error` if there was an unexpected error
   """
-  @impl Authentication
+  @spec confirm_otp_and_get_auth(String.t(), String.t(), String.t()) :: :error | {:error, String.t()} | {:ok, Auth.t()}
   def confirm_otp_and_get_auth(email, otp, ip) do
     with {:ok, token} <- Internal.confirm_otp(email, otp, ip),
          {:ok, %{"sub" => user_id} = user} <- Internal.get_user_from_token(token),
@@ -220,29 +241,86 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
     do: Internal.update_session_with_address_hash(session)
 
   @doc """
-  Links a web3 wallet address to an existing user account.
+  Generates a Sign-In with Ethereum (SIWE) message for the given address.
 
-  Checks that no other account is already associated with the given address,
-  then updates the user's Auth0 profile with the address and returns updated
-  authentication information.
+  This function creates a SIWE message with a unique nonce, caches the nonce,
+  and returns the formatted message string.
 
   ## Parameters
-  - `user_id`: The Auth0 user ID of the account to update.
-  - `address`: The web3 wallet address to associate with the account.
+  - `address`: The Ethereum address for which to generate the SIWE message
 
   ## Returns
-  - `{:ok, Auth.t()}` if the address was successfully linked.
-  - `{:error, "Account with this address already exists"}` if another account
-    is already using the given address.
-  - `{:error, String.t()}` if a known error occurs.
-  - `:error` if an unexpected error occurs.
+  - `{:ok, String.t()}` containing the generated SIWE message
+  - `{:error, String.t()}` error with the description
   """
-  @impl Authentication
-  def link_address(user_id, address) do
-    with {:user, {:ok, []}} <- {:user, Internal.find_users_by_web3_address(address)},
+  @spec generate_siwe_message(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def generate_siwe_message(address) do
+    nonce = Siwe.generate_nonce()
+    {int_chain_id, _} = Integer.parse(Application.get_env(:block_scout_web, :chain_id))
+
+    message = %Siwe.Message{
+      domain: Helper.get_app_host(),
+      address: address,
+      statement: Application.get_env(:explorer, Account)[:siwe_message],
+      uri:
+        Application.get_env(:block_scout_web, BlockScoutWeb.Endpoint)[:url][:scheme] <>
+          "://" <> Helper.get_app_host(),
+      version: "1",
+      chain_id: int_chain_id,
+      nonce: nonce,
+      issued_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+      expiration_time: DateTime.utc_now() |> DateTime.add(300, :second) |> DateTime.to_iso8601()
+    }
+
+    with {:cache, {:ok, _nonce}} <- {:cache, Internal.cache_nonce_for_address(nonce, address)},
+         {:message, {:ok, message}} <- {:message, Siwe.to_str(message)} do
+      {:ok, message}
+    else
+      {:cache, {:error, error}} ->
+        Logger.error("Error while caching nonce: #{inspect(error)}")
+        {:error, @misconfiguration_detected}
+
+      {:message, {:error, error}} ->
+        Logger.error("Error while generating Sign in with Ethereum Message: #{inspect(error)}")
+        {:error, error}
+    end
+  end
+
+  @doc """
+  Links an Ethereum address to an existing user account.
+
+  This function verifies the SIWE message and signature, checks for existing
+  users with the same address, and updates the user's account with the new
+  address.
+
+  ## Parameters
+  - `user_id`: The ID of the existing user account
+  - `message`: The SIWE message
+  - `signature`: The signature of the SIWE message
+
+  ## Returns
+  - `{:ok, Auth.t()}` if the address was successfully linked
+  - `{:error, String.t()}` error with the description
+  - `:error` if there was an unexpected error
+  """
+  @spec link_address(String.t(), String.t(), String.t()) :: :error | {:error, String.t()} | {:ok, Auth.t()}
+  def link_address(user_id, message, signature) do
+    with {:signature, {:ok, %{nonce: nonce, address: address}}} <-
+           {:signature, message |> String.trim() |> Siwe.parse_if_valid(signature)},
+         {:nonce, {:ok, ^nonce}} <- {:nonce, Internal.get_nonce_for_address(address)},
+         {:user, {:ok, []}} <- {:user, Internal.find_users_by_web3_address(address)},
          {:ok, user} <- Internal.update_user_with_web3_address(user_id, address) do
       {:ok, Internal.create_auth(user)}
     else
+      {:nonce, {:ok, _}} ->
+        {:error, @wrong_nonce}
+
+      {:nonce, _} ->
+        {:error, @request_siwe_message}
+
+      {:signature, error} ->
+        error
+
       {:user, {:ok, _users}} ->
         {:error, "Account with this address already exists"}
 
@@ -255,27 +333,36 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   end
 
   @doc """
-  Finds an existing user by web3 wallet address or creates a new one.
+  Authenticates a user using a Sign-In with Ethereum (SIWE) message and signature.
 
-  Delegates to the Auth0 backend to locate a user whose profile contains the
-  given address. If no user is found, a new Auth0 account is created using the
-  address as the username and the cryptographic signature as the password.
-  On success, returns authentication information for the resolved user.
+  This function verifies the SIWE message and signature, finds or creates a user
+  associated with the Ethereum address, and returns the authentication information.
 
   ## Parameters
-  - `address`: The web3 wallet address used to identify or create the user.
-  - `signature`: The cryptographic signature used as the password when creating
-    a new user.
+  - `message`: The SIWE message
+  - `signature`: The signature of the SIWE message
 
   ## Returns
-  - `{:ok, Auth.t()}` if the user was found or successfully created.
-  - `{:error, String.t()}` if a known error occurs.
-  - `:error` if an unexpected error occurs.
+  - `{:ok, Auth.t()}` if authentication is successful
+  - `{:error, String.t()}` error with the description
+  - `:error` if there was an unexpected error
   """
-  @impl Authentication
-  def find_or_create_web3_user(address, signature) do
-    with {:ok, user} <- Internal.process_web3_user(address, signature) do
+  @spec get_auth_with_web3(String.t(), String.t()) :: :error | {:error, String.t()} | {:ok, Auth.t()}
+  def get_auth_with_web3(message, signature) do
+    with {:signature, {:ok, %{nonce: nonce, address: address}}} <-
+           {:signature, message |> String.trim() |> Siwe.parse_if_valid(signature)},
+         {:nonce, {:ok, ^nonce}} <- {:nonce, Internal.get_nonce_for_address(address)},
+         {:user, {:ok, user}} <- {:user, Internal.process_web3_user(address, signature)} do
       {:ok, Internal.create_auth(user)}
+    else
+      {:nonce, {:ok, nil}} ->
+        {:error, @request_siwe_message}
+
+      {:nonce, {:ok, _}} ->
+        {:error, @wrong_nonce}
+
+      {_step, error} ->
+        error
     end
   end
 end

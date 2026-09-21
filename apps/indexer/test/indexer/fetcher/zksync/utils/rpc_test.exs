@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.ZkSync.Utils.RpcTest do
   use EthereumJSONRPC.Case
   use Explorer.DataCase

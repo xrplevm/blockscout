@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Celo.AggregatedElectionReward do
   @moduledoc """
   Schema for aggregated election rewards in the Celo blockchain.

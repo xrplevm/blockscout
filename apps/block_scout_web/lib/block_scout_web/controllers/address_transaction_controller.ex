@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressTransactionController do
   @moduledoc """
     Display all the Transactions that terminate at this Address.
@@ -67,7 +66,26 @@ defmodule BlockScoutWeb.AddressTransactionController do
 
       items_json =
         Enum.map(results, fn result ->
-          render_address_transaction_item(result, conn, address)
+          case result do
+            {%Chain.Block.Reward{} = emission_reward, %Chain.Block.Reward{} = validator_reward} ->
+              View.render_to_string(
+                TransactionView,
+                "_emission_reward_tile.html",
+                current_address: address,
+                emission_funds: emission_reward,
+                validator: validator_reward
+              )
+
+            %Chain.Transaction{} = transaction ->
+              View.render_to_string(
+                TransactionView,
+                "_tile.html",
+                conn: conn,
+                current_address: address,
+                transaction: transaction,
+                burn_address_hash: @burn_address_hash
+              )
+          end
         end)
 
       json(conn, %{items: items_json, next_page_path: next_page_url})
@@ -141,30 +159,5 @@ defmodule BlockScoutWeb.AddressTransactionController do
             not_found(conn)
         end
     end
-  end
-
-  defp render_address_transaction_item(
-         {%Chain.Block.Reward{} = emission_reward, %Chain.Block.Reward{} = validator_reward},
-         _conn,
-         address
-       ) do
-    View.render_to_string(
-      TransactionView,
-      "_emission_reward_tile.html",
-      current_address: address,
-      emission_funds: emission_reward,
-      validator: validator_reward
-    )
-  end
-
-  defp render_address_transaction_item(%Chain.Transaction{} = transaction, conn, address) do
-    View.render_to_string(
-      TransactionView,
-      "_tile.html",
-      conn: conn,
-      current_address: address,
-      transaction: transaction,
-      burn_address_hash: @burn_address_hash
-    )
   end
 end

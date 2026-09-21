@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressCoinBalanceByDayControllerTest do
   use BlockScoutWeb.ConnCase
 

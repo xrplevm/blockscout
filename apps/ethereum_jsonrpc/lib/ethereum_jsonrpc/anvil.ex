@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Anvil do
   @moduledoc """
   Ethereum JSONRPC methods that are only supported by [Anvil](https://book.getfoundry.sh/anvil/).

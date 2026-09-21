@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.DIA do
   @moduledoc """
   Adapter for fetching exchange rates from https://www.diadata.org/
@@ -58,9 +57,7 @@ defmodule Explorer.Market.Source.DIA do
                  |> URI.append_path("/#{blockchain}")
                  |> URI.append_path("/#{token.contract_address_hash}")
                  |> URI.to_string(),
-                 [],
-                 __MODULE__,
-                 :asset_quotation_token
+                 []
                ) do
             {:ok, data} ->
               token_to_import =
@@ -144,9 +141,7 @@ defmodule Explorer.Market.Source.DIA do
              base_url()
              |> URI.append_path("/assetQuotation/#{blockchain}/#{coin_address_hash}")
              |> URI.to_string(),
-             [],
-             __MODULE__,
-             :asset_quotation_coin
+             []
            ) do
       {:ok,
        %Token{
@@ -160,8 +155,7 @@ defmodule Explorer.Market.Source.DIA do
          symbol: data["Symbol"],
          fiat_value: Source.to_decimal(data["Price"]),
          volume_24h: Source.to_decimal(data["VolumeYesterdayUSD"]),
-         image_url: nil,
-         circulating_supply: nil
+         image_url: nil
        }}
     else
       {:coin, nil} -> {:error, coin_address_hash_not_specified_error}
@@ -180,49 +174,39 @@ defmodule Explorer.Market.Source.DIA do
              |> URI.append_path("/quotedAssets")
              |> URI.append_query("blockchain=#{blockchain}")
              |> URI.to_string(),
-             [],
-             __MODULE__,
-             :quoted_assets
+             []
            ) do
       tokens
-      |> Enum.reduce([], &reduce_dia_token(&1, &2, coin_address_hash))
+      |> Enum.reduce([], fn
+        %{
+          "Asset" => %{
+            "Address" => token_contract_address_hash_string,
+            "Decimals" => decimals
+          }
+        },
+        acc ->
+          case (is_nil(coin_address_hash) ||
+                  String.downcase(token_contract_address_hash_string) != String.downcase(coin_address_hash)) &&
+                 Hash.Address.cast(token_contract_address_hash_string) do
+            {:ok, token_contract_address_hash} ->
+              token = %{
+                contract_address_hash: token_contract_address_hash,
+                decimals: decimals
+              }
+
+              [token | acc]
+
+            _ ->
+              acc
+          end
+
+        _, acc ->
+          acc
+      end)
     else
       nil -> {:error, "Blockchain not specified"}
       {:error, reason} -> {:error, reason}
     end
-  end
-
-  defp reduce_dia_token(
-         %{
-           "Asset" => %{
-             "Address" => token_contract_address_hash_string,
-             "Decimals" => decimals
-           }
-         },
-         acc,
-         coin_address_hash
-       ) do
-    same_as_coin? =
-      !is_nil(coin_address_hash) &&
-        String.downcase(token_contract_address_hash_string) == String.downcase(coin_address_hash)
-
-    if same_as_coin? do
-      acc
-    else
-      case Hash.Address.cast(token_contract_address_hash_string) do
-        {:ok, token_contract_address_hash} -> [build_dia_token(token_contract_address_hash, decimals) | acc]
-        _ -> acc
-      end
-    end
-  end
-
-  defp reduce_dia_token(_, acc, _coin_address_hash), do: acc
-
-  defp build_dia_token(token_contract_address_hash, decimals) do
-    %{
-      contract_address_hash: token_contract_address_hash,
-      decimals: decimals
-    }
   end
 
   defp do_fetch_coin_price_history(previous_days, secondary_coin?) do
@@ -240,13 +224,35 @@ defmodule Explorer.Market.Source.DIA do
              |> URI.append_query("starttime=#{unix_from}")
              |> URI.append_query("endtime=#{unix_now}")
              |> URI.to_string(),
-             [],
-             __MODULE__,
-             :asset_chart_points
+             []
            ) do
       values
       |> Enum.reduce_while(%{}, fn value, acc ->
-        reduce_dia_price_history_entry(value, acc, secondary_coin?)
+        with time when not is_nil(time) <- List.first(value),
+             {:ok, datetime, _} <- DateTime.from_iso8601(time),
+             date = DateTime.to_date(datetime),
+             price when not is_nil(price) <- List.last(value) do
+          {:cont,
+           Map.update(
+             acc,
+             date,
+             %{
+               closing_price: Source.to_decimal(price),
+               date: date,
+               opening_price: Source.to_decimal(price),
+               secondary_coin: secondary_coin?
+             },
+             fn existing_entry ->
+               %{
+                 existing_entry
+                 | opening_price: Source.to_decimal(price)
+               }
+             end
+           )}
+        else
+          _ ->
+            {:halt, {:error, "Wrong format of DIA coin price history response: #{inspect(value)}"}}
+        end
       end)
       |> case do
         {:error, _reason} = error ->
@@ -260,34 +266,6 @@ defmodule Explorer.Market.Source.DIA do
       {:blockchain, nil} -> {:error, "Blockchain not specified"}
       {:ok, _} -> {:ok, []}
       {:error, _reason} = error -> error
-    end
-  end
-
-  defp reduce_dia_price_history_entry(value, acc, secondary_coin?) do
-    with time when not is_nil(time) <- List.first(value),
-         {:ok, datetime, _} <- DateTime.from_iso8601(time),
-         date = DateTime.to_date(datetime),
-         price when not is_nil(price) <- List.last(value) do
-      {:cont,
-       Map.update(
-         acc,
-         date,
-         %{
-           closing_price: Source.to_decimal(price),
-           date: date,
-           opening_price: Source.to_decimal(price),
-           secondary_coin: secondary_coin?
-         },
-         fn existing_entry ->
-           %{
-             existing_entry
-             | opening_price: Source.to_decimal(price)
-           }
-         end
-       )}
-    else
-      _ ->
-        {:halt, {:error, "Wrong format of DIA coin price history response: #{inspect(value)}"}}
     end
   end
 

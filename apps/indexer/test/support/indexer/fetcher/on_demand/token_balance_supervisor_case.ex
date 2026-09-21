@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.OnDemand.TokenBalance.Supervisor.Case do
   alias Indexer.Fetcher.OnDemand.TokenBalance
 

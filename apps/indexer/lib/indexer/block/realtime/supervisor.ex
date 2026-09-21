@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Realtime.Supervisor do
   @moduledoc """
   Supervises realtime block fetcher.

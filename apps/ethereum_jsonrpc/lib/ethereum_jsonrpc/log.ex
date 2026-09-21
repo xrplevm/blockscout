@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Log do
   @moduledoc """
   Log included in return from

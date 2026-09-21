@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Contract do
   @moduledoc """
   Smart contract functions executed by `eth_call`.

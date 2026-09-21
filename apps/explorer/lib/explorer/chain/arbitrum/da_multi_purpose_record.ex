@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.DaMultiPurposeRecord do
   @moduledoc """
     Models a multi purpose record related to Data Availability for Arbitrum.

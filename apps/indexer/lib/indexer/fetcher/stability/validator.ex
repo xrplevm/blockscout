@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Stability.Validator do
   @moduledoc """
   GenServer responsible for updating the list of stability validators in the database.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.SearchViewTest do
   use ExUnit.Case
   alias BlockScoutWeb.SearchView

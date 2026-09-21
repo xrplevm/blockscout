@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Utility.RangesHelperTest do
   use ExUnit.Case, async: true
 

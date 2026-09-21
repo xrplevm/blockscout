@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.Rootstock.LockedBTCCount do
   @moduledoc """
   Caches the number of BTC locked in 2WP on Rootstock chain.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.TokenBalancesTest do
   use EthereumJSONRPC.Case
   use Explorer.DataCase
@@ -6,7 +5,6 @@ defmodule Indexer.TokenBalancesTest do
   doctest Indexer.TokenBalances
 
   alias Indexer.TokenBalances
-  alias Indexer.Fetcher.TokenBalance.Current, as: TokenBalanceCurrent
   alias Indexer.Fetcher.TokenBalance.Historical, as: TokenBalanceHistorical
   alias Explorer.Chain.Hash
 
@@ -19,7 +17,6 @@ defmodule Indexer.TokenBalancesTest do
   describe "fetch_token_balances_from_blockchain/2" do
     setup %{json_rpc_named_arguments: json_rpc_named_arguments} do
       TokenBalanceHistorical.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
-      TokenBalanceCurrent.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
 
       :ok
     end

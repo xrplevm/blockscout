@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.GraphQL.Schema.Query.TokenTransfersTest do
   use BlockScoutWeb.ConnCase
 

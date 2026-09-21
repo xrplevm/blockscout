@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.MoxTest do
   @moduledoc """
   Tests that only work with `EthereumJSONRPC.Mox` because they need precise data back from the network that can't be

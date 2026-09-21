@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.General do
   @moduledoc """
   This module defines the schema for general types used in the API.
@@ -24,7 +23,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   alias Explorer.Chain.InternalTransaction.CallType
   alias OpenApiSpex.{Parameter, Schema}
   @integer_pattern ~r"^-?([1-9][0-9]*|0)$"
-  @non_negative_integer_pattern ~r"^([1-9][0-9]*|0)$"
   @float_pattern ~r"^([1-9][0-9]*|0)(\.[0-9]+)?$"
   @address_hash_pattern ~r"^0x([A-Fa-f0-9]{40})$"
   @full_hash_pattern ~r"^0x([A-Fa-f0-9]{64})$"
@@ -105,24 +103,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       required: true,
       description: "End of the time period (ISO 8601 format) In CSV export"
     }
-  end
-
-  @doc """
-  Returns an optional parameter definition for the start of the time period.
-  Used for endpoints like token holders CSV that don't require a time range.
-  """
-  @spec optional_from_period_param() :: Parameter.t()
-  def optional_from_period_param do
-    %{from_period_param() | required: false}
-  end
-
-  @doc """
-  Returns an optional parameter definition for the end of the time period.
-  Used for endpoints like token holders CSV that don't require a time range.
-  """
-  @spec optional_to_period_param() :: Parameter.t()
-  def optional_to_period_param do
-    %{to_period_param() | required: false}
   end
 
   @doc """
@@ -287,7 +267,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
     %Parameter{
       name: :type,
       in: :query,
-      schema: %Schema{type: :string, enum: ["uncle", "reorg", "block"], default: "block"},
+      schema: %Schema{type: :string, enum: ["uncle", "reorg", "block"]},
       required: false,
       description: """
       Filter by block type:
@@ -494,12 +474,10 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
-  Returns a parameter definition for sorting by specified fields.
+  Returns a parameter definition for sorting transactions by specified fields.
   """
   @spec sort_param([String.t()]) :: Parameter.t()
   def sort_param(sort_fields) do
-    description = sort_description(sort_fields)
-
     %Parameter{
       name: :sort,
       in: :query,
@@ -508,38 +486,20 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
         enum: sort_fields
       },
       required: false,
-      description: description
+      description: """
+      Sort transactions by:
+      * block_number - Sort by block number
+      * value - Sort by transaction value
+      * fee - Sort by transaction fee
+      * balance - Sort by account balance
+      * transactions_count - Sort by number of transactions on address
+      * fiat_value - Sort by fiat value of the token transfer
+      * holders_count - Sort by number of token holders
+      * circulating_market_cap - Sort by circulating market cap of the token
+      Should be used together with `order` parameter.
+      """
     }
   end
-
-  @sort_field_descriptions %{
-    "balance" => "Sort by account balance",
-    "block_number" => "Sort by block number",
-    "circulating_market_cap" => "Sort by circulating market cap of the token",
-    "fee" => "Sort by transaction fee",
-    "fiat_value" => "Sort by fiat value",
-    "holders_count" => "Sort by number of token holders",
-    "key0" => "Sort by MUD record key0",
-    "key1" => "Sort by MUD record key1",
-    "key_bytes" => "Sort by MUD record key_bytes",
-    "total_gas_used" => "Sort by total gas used",
-    "transactions_count" => "Sort by number of transactions",
-    "value" => "Sort by transaction value"
-  }
-
-  defp sort_description(sort_fields) do
-    field_descriptions =
-      sort_fields
-      |> Enum.map_join("\n", fn field -> "* #{field} - #{sort_field_description(field)}" end)
-
-    """
-    Sort results by:
-    #{field_descriptions}
-    Should be used together with `order` parameter.
-    """
-  end
-
-  defp sort_field_description(field), do: Map.get(@sort_field_descriptions, field, "Sort by #{field}")
 
   @doc """
   Returns a parameter definition for sorting order (asc/desc).
@@ -893,122 +853,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
-  Returns a parameter definition for a user operation sender address hash in the query.
-  """
-  @spec sender_address_hash_param() :: Parameter.t()
-  def sender_address_hash_param do
-    %Parameter{
-      name: :sender,
-      in: :query,
-      schema: AddressHash,
-      required: false,
-      description: "User operation sender address hash"
-    }
-  end
-
-  @doc """
-  Returns a parameter definition for a user operation bundler address hash in the query.
-  """
-  @spec bundler_address_hash_param() :: Parameter.t()
-  def bundler_address_hash_param do
-    %Parameter{
-      name: :bundler,
-      in: :query,
-      schema: AddressHash,
-      required: false,
-      description: "User operation bundler address hash"
-    }
-  end
-
-  @doc """
-  Returns a parameter definition for a user operation paymaster address hash in the query.
-  """
-  @spec paymaster_address_hash_param() :: Parameter.t()
-  def paymaster_address_hash_param do
-    %Parameter{
-      name: :paymaster,
-      in: :query,
-      schema: AddressHash,
-      required: false,
-      description: "User operation paymaster address hash"
-    }
-  end
-
-  @doc """
-  Returns a parameter definition for a user operation factory address hash in the query.
-  """
-  @spec factory_address_hash_param() :: Parameter.t()
-  def factory_address_hash_param do
-    %Parameter{
-      name: :factory,
-      in: :query,
-      schema: AddressHash,
-      required: false,
-      description: "User operation factory address hash"
-    }
-  end
-
-  @doc """
-  Returns a parameter definition for a user operation entry point address hash in the query.
-  """
-  @spec entry_point_address_hash_param() :: Parameter.t()
-  def entry_point_address_hash_param do
-    %Parameter{
-      name: :entry_point,
-      in: :query,
-      schema: AddressHash,
-      required: false,
-      description: "User operation entry point address hash"
-    }
-  end
-
-  @doc """
-  Returns a parameter definition for a user operation bundle index in the query.
-  """
-  @spec bundle_index_param() :: Parameter.t()
-  def bundle_index_param do
-    %Parameter{
-      name: :bundle_index,
-      in: :query,
-      schema: %Schema{type: :integer, minimum: 0},
-      required: false,
-      description: "User operation bundle index"
-    }
-  end
-
-  @doc """
-  Returns a parameter definition for a user operation block number in the query.
-  """
-  @spec query_block_number_param() :: Parameter.t()
-  def query_block_number_param do
-    %Parameter{
-      name: :block_number,
-      in: :query,
-      schema: %Schema{type: :integer, minimum: 0},
-      required: false,
-      description: "User operation block number"
-    }
-  end
-
-  @doc """
-  Returns a parameter definition for a UUID in the path.
-  """
-  @spec uuid_param() :: Parameter.t()
-  def uuid_param do
-    %Parameter{
-      name: :uuid_param,
-      in: :path,
-      schema: %Schema{
-        type: :string,
-        format: :uuid,
-        pattern: ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-      },
-      required: true,
-      description: "UUID for CSV export"
-    }
-  end
-
-  @doc """
   Returns a list of base parameters (api_key and key).
   """
   @spec base_params() :: [Parameter.t()]
@@ -1031,7 +875,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
         next_page_params: %Schema{
           type: :object,
           nullable: true,
-          additionalProperties: true,
           example: next_page_params_example
         }
       },
@@ -1108,7 +951,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       in: :query,
       schema: %Schema{type: :integer},
       required: false,
-      description: "Item index for paging"
+      description: "Transaction index for paging"
     },
     "index_nullable" => %Parameter{
       name: :index,
@@ -1116,6 +959,13 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       schema: %Schema{anyOf: [%Schema{type: :integer}, EmptyString, NullString]},
       required: false,
       description: "Transaction index for paging"
+    },
+    "block_index" => %Parameter{
+      name: :block_index,
+      in: :query,
+      schema: %Schema{type: :integer},
+      required: false,
+      description: "Block index for paging"
     },
     "inserted_at" => %Parameter{
       name: :inserted_at,
@@ -1272,13 +1122,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       required: false,
       description: "Smart-contract ID for paging"
     },
-    "number" => %Parameter{
-      name: :number,
-      in: :query,
-      schema: %Schema{type: :integer},
-      required: false,
-      description: "Number for paging"
-    },
     "fetched_coin_balance" => %Parameter{
       name: :fetched_coin_balance,
       in: :query,
@@ -1328,13 +1171,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       schema: IntegerStringNullable,
       required: false,
       description: "Amount for paging"
-    },
-    "account_address_hash" => %Parameter{
-      name: :account_address_hash,
-      in: :query,
-      schema: AddressHash,
-      required: false,
-      description: "Account address hash for paging"
     },
     "associated_account_address_hash" => %Parameter{
       name: :associated_account_address_hash,
@@ -1599,12 +1435,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   """
   @spec integer_pattern() :: Regex.t()
   def integer_pattern, do: @integer_pattern
-
-  @doc """
-  Returns the non-negative integer pattern.
-  """
-  @spec non_negative_integer_pattern() :: Regex.t()
-  def non_negative_integer_pattern, do: @non_negative_integer_pattern
 
   @doc """
   Returns the float pattern.

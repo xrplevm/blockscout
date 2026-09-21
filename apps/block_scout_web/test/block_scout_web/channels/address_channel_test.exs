@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressChannelTest do
   use BlockScoutWeb.ChannelCase,
     # ETS tables are shared in `Explorer.Chain.Cache.Counters.AddressesCount`
@@ -168,6 +167,7 @@ defmodule BlockScoutWeb.AddressChannelTest do
           from_address: address,
           transaction_index: transaction.index,
           index: 0,
+          block_hash: transaction.block_hash,
           block_number: transaction.block_number
         )
 
@@ -184,7 +184,7 @@ defmodule BlockScoutWeb.AddressChannelTest do
                      :timer.seconds(5)
 
       assert address_hash == address.hash
-      assert {transaction_hash, index} == {transaction.hash, internal_transaction.index}
+      assert {transaction_hash, index} == {internal_transaction.transaction_hash, internal_transaction.index}
     end
 
     test "notified of new_internal_transaction for matching to_address", %{address: address, topic: topic} do
@@ -195,9 +195,11 @@ defmodule BlockScoutWeb.AddressChannelTest do
 
       internal_transaction =
         insert(:internal_transaction,
+          transaction: transaction,
           to_address: address,
           transaction_index: transaction.index,
           index: 0,
+          block_hash: transaction.block_hash,
           block_number: transaction.block_number
         )
 
@@ -208,19 +210,13 @@ defmodule BlockScoutWeb.AddressChannelTest do
                        event: "internal_transaction",
                        payload: %{
                          address: %{hash: address_hash},
-                         internal_transaction: %{
-                           block_number: block_number,
-                           transaction_index: transaction_index,
-                           index: index
-                         }
+                         internal_transaction: %{transaction_hash: transaction_hash, index: index}
                        }
                      },
                      :timer.seconds(5)
 
       assert address_hash == address.hash
-
-      assert {block_number, transaction_index, index} ==
-               {internal_transaction.block_number, internal_transaction.transaction_index, internal_transaction.index}
+      assert {transaction_hash, index} == {internal_transaction.transaction_hash, internal_transaction.index}
     end
 
     test "not notified twice of new_internal_transaction if to and from address are equal", %{
@@ -234,10 +230,12 @@ defmodule BlockScoutWeb.AddressChannelTest do
 
       internal_transaction =
         insert(:internal_transaction,
+          transaction: transaction,
           from_address: address,
           to_address: address,
           transaction_index: transaction.index,
           index: 0,
+          block_hash: transaction.block_hash,
           block_number: transaction.block_number
         )
 
@@ -248,13 +246,13 @@ defmodule BlockScoutWeb.AddressChannelTest do
                        event: "internal_transaction",
                        payload: %{
                          address: %{hash: address_hash},
-                         internal_transaction: %{transaction_index: transaction_index, index: index}
+                         internal_transaction: %{transaction_hash: transaction_hash, index: index}
                        }
                      },
                      :timer.seconds(5)
 
       assert address_hash == address.hash
-      assert {transaction_index, index} == {internal_transaction.transaction_index, internal_transaction.index}
+      assert {transaction_hash, index} == {internal_transaction.transaction_hash, internal_transaction.index}
 
       refute_receive _, 100, "Received duplicate broadcast."
     end

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.TransactionError do
   @moduledoc """
   Stores errors for transactions and internal transactions.
@@ -18,31 +17,9 @@ defmodule Explorer.Chain.TransactionError do
     cast(transaction_error, attrs, [:message])
   end
 
-  def id_to_error(nil), do: nil
-
-  def id_to_error(id) do
-    __MODULE__
-    |> where([te], te.id == ^id)
-    |> select([te], te.message)
-    |> Repo.one()
-  end
-
-  def find_or_create(error_message) do
-    [error_message]
-    |> find_or_create_multiple()
-    |> Map.get(error_message)
-  end
-
   def find_or_create_multiple(error_messages) do
-    error_messages
-    |> Enum.uniq()
-    |> Enum.reject(&is_nil/1)
-    |> do_find_or_create_multiple()
-  end
+    filtered_error_messages = Enum.uniq(error_messages)
 
-  defp do_find_or_create_multiple([]), do: %{}
-
-  defp do_find_or_create_multiple(filtered_error_messages) do
     existing_map =
       __MODULE__
       |> where([te], te.message in ^filtered_error_messages)

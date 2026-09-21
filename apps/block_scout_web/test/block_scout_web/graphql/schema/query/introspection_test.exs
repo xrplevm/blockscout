@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schema.Query.IntrospectionTest do
   use BlockScoutWeb.ConnCase
 

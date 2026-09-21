@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.RPC.ContractController do
   use BlockScoutWeb, :controller
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
@@ -46,17 +45,23 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
   def getcontractcreation(conn, %{"contractaddresses" => contract_address_hash_strings} = params) do
     addresses =
       contract_address_hash_strings
-      |> String.split(",", trim: true)
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
+      |> String.split(",")
       |> Enum.take(@addresses_limit)
       |> Enum.map(fn address_hash_string ->
         case validate_address(address_hash_string, params) do
           {:ok, _address_hash, address} ->
+            contract_creation_internal_transaction_with_transaction_association = [
+              contract_creation_internal_transaction: {
+                Address.contract_creation_internal_transaction_preload_query(),
+                :transaction
+              }
+            ]
+
             Address.maybe_preload_smart_contract_associations(
               address,
               [
-                Address.contract_creation_transaction_association()
+                Address.contract_creation_transaction_association(),
+                contract_creation_internal_transaction_with_transaction_association
               ],
               @api_true
             )
@@ -126,32 +131,29 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
   end
 
   def verify_via_sourcify(conn, %{"addressHash" => address_hash} = input) do
-    files = sourcify_files(input)
+    files =
+      if Map.has_key?(input, "files") do
+        input["files"]
+      else
+        []
+      end
 
-    with false <- SmartContract.verified_with_full_match?(address_hash),
-         {:ok, _verified_status} <- Sourcify.check_by_address(address_hash) do
-      get_metadata_and_publish(address_hash, conn)
+    if SmartContract.verified_with_full_match?(address_hash) do
+      render(conn, :error, error: @verified)
     else
-      true -> render(conn, :error, error: @verified)
-      _ -> verify_via_sourcify_with_files(conn, address_hash, files)
-    end
-  end
+      case Sourcify.check_by_address(address_hash) do
+        {:ok, _verified_status} ->
+          get_metadata_and_publish(address_hash, conn)
 
-  defp verify_via_sourcify_with_files(conn, address_hash, files) do
-    with {:ok, files_array} <- prepare_params(files),
-         {:ok, validated_files} <- validate_files(files_array) do
-      verify_and_publish(address_hash, validated_files, conn)
-    else
-      {:error, error} ->
-        render(conn, :error, error: error)
-    end
-  end
-
-  defp sourcify_files(input) do
-    if Map.has_key?(input, "files") do
-      input["files"]
-    else
-      []
+        _ ->
+          with {:ok, files_array} <- prepare_params(files),
+               {:ok, validated_files} <- validate_files(files_array) do
+            verify_and_publish(address_hash, validated_files, conn)
+          else
+            {:error, error} ->
+              render(conn, :error, error: error)
+          end
+      end
     end
   end
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Supply.RSK do
   @moduledoc """
   Defines the supply API for calculating supply for coins from RSK.

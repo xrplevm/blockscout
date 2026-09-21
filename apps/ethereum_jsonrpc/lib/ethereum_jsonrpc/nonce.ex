@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Nonce do
   @moduledoc """
   A single code fetched from `eth_getTransactionCount`.

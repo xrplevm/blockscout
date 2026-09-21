@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Utils.TokenInstanceHelper do
   @moduledoc """
   Auxiliary functions for NFTs

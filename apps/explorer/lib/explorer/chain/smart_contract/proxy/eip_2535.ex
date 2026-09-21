@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.SmartContract.Proxy.EIP2535 do
   @moduledoc """
   Module for fetching proxy implementation from https://eips.ethereum.org/EIPS/eip-2535 (Diamond Proxy)

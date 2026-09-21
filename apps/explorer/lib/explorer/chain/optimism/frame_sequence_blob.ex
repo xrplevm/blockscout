@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Optimism.FrameSequenceBlob do
   @moduledoc """
     Models a blob related to Optimism frame sequence.

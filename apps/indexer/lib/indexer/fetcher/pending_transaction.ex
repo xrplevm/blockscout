@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.PendingTransaction do
   @moduledoc """
   Fetches pending transactions and imports them.

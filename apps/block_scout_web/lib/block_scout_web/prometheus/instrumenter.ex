@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Prometheus.Instrumenter do
   @moduledoc """
   BlockScoutWeb metrics for `Prometheus`.

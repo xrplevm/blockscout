@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Application do
   @moduledoc """
   Starts `:hackney_pool` `:ethereum_jsonrpc`.

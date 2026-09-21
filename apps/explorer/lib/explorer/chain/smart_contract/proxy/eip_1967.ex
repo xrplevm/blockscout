@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.SmartContract.Proxy.EIP1967 do
   @moduledoc """
   Module for fetching proxy implementation from https://eips.ethereum.org/EIPS/eip-1967 (Proxy Storage Slots)
@@ -45,19 +44,17 @@ defmodule Explorer.Chain.SmartContract.Proxy.EIP1967 do
   def resolve_implementations(_proxy_address, proxy_type, prefetched_values) do
     with {:ok, value} <- Map.fetch(prefetched_values, :implementation_slot),
          {:ok, stored_address_hash} <- Proxy.extract_address_hash(value) do
-      resolve_stored_implementation(proxy_type, stored_address_hash)
+      if proxy_type == :eip1967_beacon do
+        with {:ok, value} <- Proxy.fetch_value({:call, @implementation_signature}, stored_address_hash),
+             {:ok, implementation_address_hash} <- Proxy.extract_address_hash(value) do
+          {:ok, [implementation_address_hash]}
+        end
+      else
+        {:ok, [stored_address_hash]}
+      end
     else
       :error -> :error
       _ -> nil
     end
   end
-
-  defp resolve_stored_implementation(:eip1967_beacon, stored_address_hash) do
-    with {:ok, value} <- Proxy.fetch_value({:call, @implementation_signature}, stored_address_hash),
-         {:ok, implementation_address_hash} <- Proxy.extract_address_hash(value) do
-      {:ok, [implementation_address_hash]}
-    end
-  end
-
-  defp resolve_stored_implementation(_, stored_address_hash), do: {:ok, [stored_address_hash]}
 end

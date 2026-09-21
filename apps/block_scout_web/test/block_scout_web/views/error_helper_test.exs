@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.ErrorHelperTest do
   use BlockScoutWeb.ConnCase, async: true
   import Phoenix.HTML

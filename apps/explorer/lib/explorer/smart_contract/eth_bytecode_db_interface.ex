@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.EthBytecodeDBInterface do
   @moduledoc """
     Adapter for interaction with https://github.com/blockscout/blockscout-rs/tree/main/eth-bytecode-db

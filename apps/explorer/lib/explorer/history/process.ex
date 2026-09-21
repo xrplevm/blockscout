@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.History.Process do
   @moduledoc """
   Creates the GenServer process used by a Historian to compile_history and to save_records.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.ZilliqaView do
   @moduledoc """
   View functions for rendering Zilliqa-related data in JSON format.

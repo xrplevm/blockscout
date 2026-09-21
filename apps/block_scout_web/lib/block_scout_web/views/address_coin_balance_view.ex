@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressCoinBalanceView do
   use BlockScoutWeb, :view
 

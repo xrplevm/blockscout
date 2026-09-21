@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.TransactionBlockConsensus do
   @moduledoc """
   Fixes transactions block_consensus field

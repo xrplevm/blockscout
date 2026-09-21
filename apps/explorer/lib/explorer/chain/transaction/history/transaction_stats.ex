@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Transaction.History.TransactionStats do
   @moduledoc """
   Represents daily chain performance stats

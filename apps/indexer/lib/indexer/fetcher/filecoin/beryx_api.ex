@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Filecoin.BeryxAPI do
   @moduledoc """
   Interacts with the Beryx API to fetch account information based on an Ethereum

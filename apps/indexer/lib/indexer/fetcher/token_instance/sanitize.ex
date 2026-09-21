@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenInstance.Sanitize do
   @moduledoc """
   Fetches information about a token instance.

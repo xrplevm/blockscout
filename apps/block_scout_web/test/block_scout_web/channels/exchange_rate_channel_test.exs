@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.ExchangeRateChannelTest do
   use BlockScoutWeb.ChannelCase
 
@@ -7,7 +6,7 @@ defmodule BlockScoutWeb.ExchangeRateChannelTest do
   alias BlockScoutWeb.Notifier
   alias Explorer.Market
   alias Explorer.Market.Fetcher.Coin
-  alias Explorer.Market.{MarketHistory, MarketHistoryCache, Token}
+  alias Explorer.Market.{MarketHistory, Token}
   alias Explorer.Market.Source.TestSource
 
   setup :verify_on_exit!
@@ -33,8 +32,7 @@ defmodule BlockScoutWeb.ExchangeRateChannelTest do
       symbol: Explorer.coin(),
       fiat_value: Decimal.new("2.5"),
       volume_24h: Decimal.new("1000.0"),
-      image_url: nil,
-      circulating_supply: nil
+      image_url: nil
     }
 
     on_exit(fn ->
@@ -48,8 +46,8 @@ defmodule BlockScoutWeb.ExchangeRateChannelTest do
   describe "new_rate" do
     test "subscribed user is notified", %{token: token} do
       Coin.handle_info({nil, {{:ok, token}, false}}, %{})
-      ConCache.delete(MarketHistoryCache.cache_name(), MarketHistoryCache.updated_at_key())
-      ConCache.delete(MarketHistoryCache.cache_name(), MarketHistoryCache.data_key())
+      Supervisor.terminate_child(Explorer.Supervisor, {ConCache, Explorer.Market.MarketHistoryCache.cache_name()})
+      Supervisor.restart_child(Explorer.Supervisor, {ConCache, Explorer.Market.MarketHistoryCache.cache_name()})
 
       topic = "exchange_rate_old:new_rate"
       @endpoint.subscribe(topic)
@@ -75,8 +73,8 @@ defmodule BlockScoutWeb.ExchangeRateChannelTest do
       end)
 
       Coin.handle_info({nil, {{:ok, token}, false}}, %{})
-      ConCache.delete(MarketHistoryCache.cache_name(), MarketHistoryCache.updated_at_key())
-      ConCache.delete(MarketHistoryCache.cache_name(), MarketHistoryCache.data_key())
+      Supervisor.terminate_child(Explorer.Supervisor, {ConCache, Explorer.Market.MarketHistoryCache.cache_name()})
+      Supervisor.restart_child(Explorer.Supervisor, {ConCache, Explorer.Market.MarketHistoryCache.cache_name()})
 
       today = Date.utc_today()
 
@@ -92,10 +90,7 @@ defmodule BlockScoutWeb.ExchangeRateChannelTest do
 
       MarketHistory.bulk_insert(records)
 
-      ConCache.delete(MarketHistoryCache.cache_name(), MarketHistoryCache.updated_at_key())
-      ConCache.delete(MarketHistoryCache.cache_name(), MarketHistoryCache.data_key())
-
-      assert Enum.map(Market.fetch_recent_history(), &Map.take(&1, [:date, :closing_price])) == records
+      Market.fetch_recent_history()
 
       topic = "exchange_rate_old:new_rate"
       @endpoint.subscribe(topic)

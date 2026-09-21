@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Beacon.Migrations.CreateBlobsTables do
   use Ecto.Migration
 

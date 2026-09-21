@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.WebSocket.Registration do
   @moduledoc """
   When a caller registers for responses to asynchronous frame responses.

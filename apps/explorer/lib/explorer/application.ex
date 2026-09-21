@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Application do
   @moduledoc """
   This is the Application module for Explorer.
@@ -6,7 +5,7 @@ defmodule Explorer.Application do
 
   use Application
 
-  alias Explorer.{Admin, Helper}
+  alias Explorer.Admin
 
   alias Explorer.Chain.Cache.{
     Accounts,
@@ -26,33 +25,26 @@ defmodule Explorer.Application do
     AddressesCoinBalanceSumMinusBurnt,
     AddressTabsElementsCount,
     BlocksCount,
+    GasUsageSum,
     PendingBlockOperationCount,
     PendingTransactionOperationCount,
     TransactionsCount
   }
 
-  alias Explorer.Chain.Cache.AddressTags, as: AddressTagsCache
-  alias Explorer.Chain.Cache.ContractMethods, as: ContractMethodsCache
   alias Explorer.Chain.Optimism.InteropMessage, as: OptimismInteropMessage
   alias Explorer.Chain.Supply.RSK
 
   alias Explorer.Market.MarketHistoryCache
-  alias Explorer.MicroserviceInterfaces.{HttpClient, MultichainSearch}
+  alias Explorer.MicroserviceInterfaces.MultichainSearch
   alias Explorer.Prometheus.Instrumenter
   alias Explorer.Repo.PrometheusLogger
-  alias Explorer.Stats.HotSmartContractsCache
   alias Explorer.Utility.Hammer
-  alias Oban.Telemetry, as: ObanTelemetry
   alias Utils.ConfigHelper
 
   @impl Application
   def start(_type, _args) do
     PrometheusLogger.setup()
     Instrumenter.setup()
-
-    if Application.get_env(:explorer, Oban, [])[:enabled] && Explorer.mode() in [:api, :all] do
-      ObanTelemetry.attach_default_logger()
-    end
 
     :telemetry.attach(
       "prometheus-ecto",
@@ -61,7 +53,56 @@ defmodule Explorer.Application do
       %{}
     )
 
-    children = children()
+    # Children to start in all environments
+    base_children = [
+      Explorer.Repo,
+      Explorer.Repo.Replica1,
+      Explorer.Vault,
+      Supervisor.child_spec({SpandexDatadog.ApiServer, datadog_opts()}, id: SpandexDatadog.ApiServer),
+      Supervisor.child_spec({Task.Supervisor, name: Explorer.HistoryTaskSupervisor},
+        id: Explorer.HistoryTaskSupervisor
+      ),
+      Supervisor.child_spec({Task.Supervisor, name: Explorer.MarketTaskSupervisor}, id: Explorer.MarketTaskSupervisor),
+      Supervisor.child_spec({Task.Supervisor, name: Explorer.GenesisDataTaskSupervisor}, id: GenesisDataTaskSupervisor),
+      Supervisor.child_spec({Task.Supervisor, name: Explorer.TaskSupervisor}, id: Explorer.TaskSupervisor),
+      Supervisor.child_spec({Task.Supervisor, name: Explorer.LookUpSmartContractSourcesTaskSupervisor},
+        id: LookUpSmartContractSourcesTaskSupervisor
+      ),
+      Supervisor.child_spec({Task.Supervisor, name: Explorer.WETHMigratorSupervisor}, id: WETHMigratorSupervisor),
+      Explorer.SmartContract.SolcDownloader,
+      Explorer.SmartContract.VyperDownloader,
+      Explorer.Chain.Health.Monitor,
+      {Registry, keys: :duplicate, name: Registry.ChainEvents, id: Registry.ChainEvents},
+      {Admin.Recovery, [[], [name: Admin.Recovery]]},
+      Accounts,
+      AddressesCoinBalanceSum,
+      AddressesCoinBalanceSumMinusBurnt,
+      BackgroundMigrations,
+      BlocksCount,
+      BlockNumber,
+      Blocks,
+      ChainId,
+      GasPriceOracle,
+      GasUsageSum,
+      PendingBlockOperationCount,
+      PendingTransactionOperationCount,
+      TransactionsCount,
+      StateChanges,
+      Transactions,
+      Uncles,
+      AddressTabsElementsCount,
+      con_cache_child_spec(MarketHistoryCache.cache_name()),
+      con_cache_child_spec(RSK.cache_name(), ttl_check_interval: :timer.minutes(1), global_ttl: :timer.minutes(30)),
+      {Redix, redix_opts()},
+      {Explorer.Utility.ReplicaAccessibilityManager, []},
+      :hackney_pool.child_spec(:default,
+        recv_timeout: 60_000,
+        timeout: 60_000,
+        max_connections: Application.get_env(:explorer, :hackney_default_pool_size)
+      )
+    ]
+
+    children = base_children ++ configurable_children()
 
     opts = [strategy: :one_for_one, name: Explorer.Supervisor, max_restarts: 1_000]
 
@@ -72,135 +113,47 @@ defmodule Explorer.Application do
     end
   end
 
-  # The child list of the supervision tree for the current mode, exposed so a
-  # test can check that every entry is something a supervisor accepts. The
-  # mode- and chain-type-dependent helpers return `[]` for children that do not
-  # apply, and a bare `[]` crashes the supervisor unless the list holding it is
-  # flattened first — so those helpers belong in `configurable_children/0`.
-  @doc false
-  @spec children() :: [Supervisor.child_spec() | {module(), term()} | module()]
-  def children do
-    base_children() ++ configurable_children()
-  end
-
-  # Children to start in all environments
-  defp base_children do
-    [
-      Explorer.Repo,
-      Explorer.Repo.Replica1,
-      Explorer.Vault,
-      Supervisor.child_spec({SpandexDatadog.ApiServer, datadog_opts()}, id: SpandexDatadog.ApiServer),
-      Supervisor.child_spec({Task.Supervisor, name: Explorer.HistoryTaskSupervisor},
-        id: Explorer.HistoryTaskSupervisor
-      ),
-      Supervisor.child_spec({Task.Supervisor, name: Explorer.MarketTaskSupervisor},
-        id: Explorer.MarketTaskSupervisor
-      ),
-      Supervisor.child_spec({Task.Supervisor, name: Explorer.GenesisDataTaskSupervisor},
-        id: GenesisDataTaskSupervisor
-      ),
-      Supervisor.child_spec({Task.Supervisor, name: Explorer.TaskSupervisor}, id: Explorer.TaskSupervisor),
-      Supervisor.child_spec({Task.Supervisor, name: Explorer.LookUpSmartContractSourcesTaskSupervisor},
-        id: LookUpSmartContractSourcesTaskSupervisor
-      ),
-      Supervisor.child_spec({Task.Supervisor, name: Explorer.WETHMigratorSupervisor}, id: WETHMigratorSupervisor),
-      {Registry, keys: :duplicate, name: Registry.ChainEvents, id: Registry.ChainEvents},
-      Explorer.Chain.Cache.Propagator,
-      Accounts,
-      AddressesCoinBalanceSum,
-      AddressesCoinBalanceSumMinusBurnt,
-      BackgroundMigrations,
-      BlocksCount,
-      BlockNumber,
-      Blocks,
-      ChainId,
-      GasPriceOracle,
-      PendingBlockOperationCount,
-      PendingTransactionOperationCount,
-      TransactionsCount,
-      StateChanges,
-      Transactions,
-      Uncles,
-      AddressTabsElementsCount,
-      con_cache_child_spec(MarketHistoryCache.cache_name()),
-      con_cache_child_spec(HotSmartContractsCache.cache_name(),
-        ttl_check_interval: :timer.seconds(1),
-        global_ttl: :infinity
-      ),
-      con_cache_child_spec(RSK.cache_name(), ttl_check_interval: :timer.minutes(1), global_ttl: :timer.minutes(30)),
-      con_cache_child_spec(ContractMethodsCache.cache_name(),
-        ttl_check_interval: :timer.minutes(1),
-        global_ttl: :infinity
-      ),
-      {Redix, redix_opts()},
-      {Explorer.Utility.ReplicaAccessibilityManager, []},
-      :hackney_pool.child_spec(:default,
-        recv_timeout: 60_000,
-        timeout: 60_000,
-        max_connections: Application.get_env(:explorer, :hackney_default_pool_size)
-      ),
-      Explorer.Promo.Autoscout
-    ] ++ HttpClient.pool_child_specs()
-  end
-
   defp configurable_children do
     configurable_children_set =
       [
-        configure(Explorer.Chain.Health.Monitor),
-        only_in_mode(Explorer.SmartContract.SolcDownloader, :api),
-        only_in_mode(Explorer.SmartContract.VyperDownloader, :api),
-        only_in_mode({Admin.Recovery, [[], [name: Admin.Recovery]]}, :api),
-        # only the web layer reads public address tags; this list is flattened,
-        # so the `[]` returned outside API mode is dropped rather than passed
-        # to the supervisor
-        AddressTagsCache.cache_name()
-        |> con_cache_child_spec(
-          ttl_check_interval: :timer.minutes(1),
-          global_ttl: :infinity
-        )
-        |> only_in_mode(:api),
-        configure(Explorer.Utility.VersionUpgrade),
-        configure_mode_dependent_process(Explorer.Utility.VersionConstantsUpdater, :indexer),
         configure_mode_dependent_process(Explorer.Market.Fetcher.Coin, :api),
         configure_mode_dependent_process(Explorer.Market.Fetcher.Token, :indexer),
-        configure_mode_dependent_process(Explorer.Market.Fetcher.TokenList, :indexer),
         configure_mode_dependent_process(Explorer.Market.Fetcher.History, :indexer),
         configure_mode_dependent_process(Explorer.Market, :api),
-        configure_mode_dependent_process(Explorer.ChainSpec.GenesisData, :indexer),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.ContractsCount, :indexer),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.NewContractsCount, :indexer),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.VerifiedContractsCount, :indexer),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.NewVerifiedContractsCount, :indexer),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.WithdrawalsSum, :indexer),
+        configure(Explorer.ChainSpec.GenesisData),
+        configure(Explorer.Chain.Cache.Counters.ContractsCount),
+        configure(Explorer.Chain.Cache.Counters.NewContractsCount),
+        configure(Explorer.Chain.Cache.Counters.VerifiedContractsCount),
+        configure(Explorer.Chain.Cache.Counters.NewVerifiedContractsCount),
+        configure(Explorer.Chain.Cache.TransactionActionTokensData),
+        configure(Explorer.Chain.Cache.TransactionActionUniswapPools),
+        configure(Explorer.Chain.Cache.Counters.WithdrawalsSum),
         configure_mode_dependent_process(Explorer.Chain.Transaction.History.Historian, :indexer),
         configure(Explorer.Chain.Events.Listener),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.AddressesCount, :api),
-        configure(Explorer.Chain.Cache.Counters.AddressCounters),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.AddressCountersConsolidator, :indexer),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.AddressTokensUsdSum, :api),
-        configure(Explorer.Chain.Cache.Counters.TokenCounters),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.TokenCountersConsolidator, :indexer),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.BlockBurntFeeCount, :api),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.BlockPriorityFeeCount, :api),
+        configure(Explorer.Chain.Cache.Counters.AddressesCount),
+        configure(Explorer.Chain.Cache.Counters.AddressTransactionsCount),
+        configure(Explorer.Chain.Cache.Counters.AddressTokenTransfersCount),
+        configure(Explorer.Chain.Cache.Counters.AddressTransactionsGasUsageSum),
+        configure(Explorer.Chain.Cache.Counters.AddressTokensUsdSum),
+        configure(Explorer.Chain.Cache.Counters.TokenHoldersCount),
+        configure(Explorer.Chain.Cache.Counters.TokenTransfersCount),
+        configure(Explorer.Chain.Cache.Counters.BlockBurntFeeCount),
+        configure(Explorer.Chain.Cache.Counters.BlockPriorityFeeCount),
         configure(Explorer.Chain.Cache.Counters.AverageBlockTime),
-        Explorer.Chain.Cache.Counters.Optimism.LastOutputRootSizeCount
-        |> configure_mode_dependent_process(:indexer)
-        |> configure_chain_type_dependent_process(:optimism),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.NewPendingTransactionsCount, :indexer),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.Transactions24hCount, :indexer),
-        configure_mode_dependent_process(Explorer.Validator.MetadataProcessor, :indexer),
-        configure_mode_dependent_process(Explorer.Tags.AddressTag.Cataloger, :indexer),
-        configure_mode_dependent_process(Explorer.SmartContract.CertifiedSmartContractCataloger, :indexer),
-        configure_mode_dependent_process(MinMissingBlockNumber, :indexer),
-        configure_mode_dependent_process(Explorer.Chain.Fetcher.CheckBytecodeMatchingOnDemand, :api),
+        configure(Explorer.Chain.Cache.Counters.Optimism.LastOutputRootSizeCount),
+        configure(Explorer.Chain.Cache.Counters.NewPendingTransactionsCount),
+        configure(Explorer.Chain.Cache.Counters.Transactions24hCount),
+        configure(Explorer.Validator.MetadataProcessor),
+        configure(Explorer.Tags.AddressTag.Cataloger),
+        configure(Explorer.SmartContract.CertifiedSmartContractCataloger),
+        configure(MinMissingBlockNumber),
+        configure(Explorer.Chain.Fetcher.CheckBytecodeMatchingOnDemand),
         configure(Explorer.Chain.Fetcher.FetchValidatorInfoOnDemand),
-        configure_mode_dependent_process(Explorer.TokenInstanceOwnerAddressMigration.Supervisor, :indexer),
-        Explorer.Chain.Fetcher.LookUpSmartContractSourcesOnDemand
-        |> configure_sc_microservice()
-        |> only_in_mode(:api),
-        configure_mode_dependent_process(Explorer.Chain.Cache.Counters.Rootstock.LockedBTCCount, :api),
-        configure_mode_dependent_process(Explorer.Chain.Cache.OptimismFinalizationPeriod, :api),
-        configure_mode_dependent_process(Explorer.Chain.Cache.CeloEpochs, :api),
+        configure(Explorer.TokenInstanceOwnerAddressMigration.Supervisor),
+        configure_sc_microservice(Explorer.Chain.Fetcher.LookUpSmartContractSourcesOnDemand),
+        configure(Explorer.Chain.Cache.Counters.Rootstock.LockedBTCCount),
+        configure(Explorer.Chain.Cache.OptimismFinalizationPeriod),
+        configure(Explorer.Chain.Cache.CeloEpochs),
         configure_mode_dependent_process(Explorer.Migrator.TransactionsDenormalization, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.AddressCurrentTokenBalanceTokenType, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.AddressTokenBalanceTokenType, :indexer),
@@ -212,8 +165,7 @@ defmodule Explorer.Application do
         configure_mode_dependent_process(Explorer.Migrator.TokenTransferBlockConsensus, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.RestoreOmittedWETHTransfers, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.FilecoinPendingAddressOperations, :indexer),
-        configure_mode_dependent_process(Explorer.Migrator.BackfillAddressCounters, :indexer),
-        configure_mode_dependent_process(Explorer.Migrator.BackfillTokenCounters, :indexer),
+        configure_mode_dependent_process(Explorer.Migrator.SmartContractLanguage, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.CeloL2Epochs, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.CeloAccounts, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.CeloAggregatedElectionRewards, :indexer),
@@ -223,23 +175,19 @@ defmodule Explorer.Application do
         |> configure_multichain_search_microservice(),
         configure_mode_dependent_process(Explorer.Migrator.ArbitrumDaRecordsNormalization, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.ShrinkInternalTransactions, :indexer),
-        Explorer.Chain.Cache.Counters.Blackfort.ValidatorsCount
-        |> configure_chain_type_dependent_process(:blackfort)
-        |> only_in_mode(:indexer),
-        Explorer.Chain.Cache.Counters.Stability.ValidatorsCount
-        |> configure_chain_type_dependent_process(:stability)
-        |> only_in_mode(:indexer),
-        Explorer.Chain.Cache.LatestL1BlockNumber
-        |> configure_chain_type_dependent_process([
+        configure_chain_type_dependent_process(Explorer.Chain.Cache.Counters.Blackfort.ValidatorsCount, :blackfort),
+        configure_chain_type_dependent_process(Explorer.Chain.Cache.Counters.Stability.ValidatorsCount, :stability),
+        configure_chain_type_dependent_process(Explorer.Chain.Cache.LatestL1BlockNumber, [
           :optimism,
+          :polygon_zkevm,
           :scroll,
           :shibarium
-        ])
-        |> only_in_mode(:indexer),
+        ]),
         configure_chain_type_dependent_con_cache(),
         Explorer.Migrator.SanitizeDuplicatedLogIndexLogs
         |> configure_mode_dependent_process(:indexer)
         |> configure_chain_type_dependent_process([
+          :polygon_zkevm,
           :rsk,
           :filecoin
         ]),
@@ -248,24 +196,22 @@ defmodule Explorer.Application do
         configure_mode_dependent_process(Explorer.Migrator.SanitizeVerifiedAddresses, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.SanitizeEmptyContractCodeAddresses, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.ReindexInternalTransactionsWithIncompatibleStatus, :indexer),
+        configure_mode_dependent_process(Explorer.Migrator.ReindexDuplicatedInternalTransactions, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.MergeAdjacentMissingBlockRanges, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.UnescapeQuotesInTokens, :indexer),
-        configure_mode_dependent_process(Explorer.Migrator.UnescapeAmpersandsInTokens, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.ReindexBlocksWithMissingTransactions, :indexer),
-        configure_mode_dependent_process(Explorer.Migrator.ReindexBlocksWithUncatalogedTokenTransfers, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.SanitizeDuplicateSmartContractAdditionalSources, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.DeleteZeroValueInternalTransactions, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.EmptyInternalTransactionsData, :indexer),
-        configure_mode_dependent_process(Explorer.Migrator.FillInternalTransactionsAddressIds, :indexer),
         configure_mode_dependent_process(
           Explorer.Migrator.HeavyDbIndexOperation.CreateAddressesVerifiedIndex,
           :indexer
         ),
+        configure_mode_dependent_process(Explorer.Migrator.HeavyDbIndexOperation.CreateLogsBlockHashIndex, :indexer),
         configure_mode_dependent_process(
           Explorer.Migrator.HeavyDbIndexOperation.DropLogsBlockNumberAscIndexAscIndex,
           :indexer
         ),
-        configure_mode_dependent_process(Explorer.Migrator.HeavyDbIndexOperation.CreateLogsBlockHashIndex, :indexer),
         configure_mode_dependent_process(
           Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressHashBlockNumberDescIndexDescIndex,
           :indexer
@@ -376,7 +322,7 @@ defmodule Explorer.Application do
           :indexer
         ),
         configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.DropTransactionsOperatorFeeConstantIndex,
+          Explorer.Migrator.HeavyDbIndexOperation.CreateTransactionsOperatorFeeConstantIndex,
           :indexer
         ),
         configure_mode_dependent_process(
@@ -392,18 +338,6 @@ defmodule Explorer.Application do
           :indexer
         ),
         configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateTokensOrdMcapFiatHolderNameIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateTokensOrdFiatHolderNameIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateTokensOrdHolderNameIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
           Explorer.Migrator.HeavyDbIndexOperation.UpdateInternalTransactionsPrimaryKey,
           :indexer
         ),
@@ -411,77 +345,14 @@ defmodule Explorer.Application do
           Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsBlockHashTransactionIndexIndexIndex,
           :indexer
         ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateTransactionsCreatedContractAddressHashWPendingIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.DropTransactionsCreatedContractAddressHashWithPendingIndexA,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsFromAddressIdPartialIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsToAddressIdPartialIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsCreatedContractAddressIdIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsBlockNumberCreatedContractAddressIdPartialIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.RemoveInternalTransactionsBlockHashTransactionHashBlockIndexError,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsBlockNumberCreatedContractAddressHashIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsCreatedContractAddressHashIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsFromAddressHashPartialIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsToAddressHashPartialIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateAddressesHashContractCodeNotNullIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressHashFirstTopicSecondTopicBlockNumberIndex,
-          :indexer
-        ),
-        configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateAddressCurrentTokenBalancesAddressHashBlockNumberIndex,
-          :indexer
-        ),
-        Explorer.Migrator.RefetchContractCodes
-        |> configure_mode_dependent_process(:indexer)
-        |> configure_chain_type_dependent_process(:zksync),
-        configure_mode_dependent_process(Explorer.Chain.Fetcher.AddressesBlacklist, :api),
-        configure_mode_dependent_process(Explorer.Chain.Cache.ScamAddresses, :api),
-        only_in_mode(Explorer.Migrator.SwitchPendingOperations, :indexer),
+        Explorer.Migrator.RefetchContractCodes |> configure() |> configure_chain_type_dependent_process(:zksync),
+        configure(Explorer.Chain.Fetcher.AddressesBlacklist),
+        Explorer.Migrator.SwitchPendingOperations,
         configure_mode_dependent_process(Explorer.Utility.RateLimiter, :api),
         Hammer.child_for_supervisor() |> configure_mode_dependent_process(:api),
         configure_mode_dependent_process(Explorer.ThirdPartyIntegrations.Dynamic.Strategy, :api),
         # keep at the end
-        configure_libcluster(),
-        configure_mode_dependent_process(
-          {Oban, :explorer |> Application.fetch_env!(Oban) |> Keyword.delete(:enabled)},
-          :api
-        )
+        configure_libcluster()
       ]
       |> List.flatten()
 
@@ -499,6 +370,7 @@ defmodule Explorer.Application do
         Explorer.Repo.Filecoin,
         Explorer.Repo.Optimism,
         Explorer.Repo.PolygonEdge,
+        Explorer.Repo.PolygonZkevm,
         Explorer.Repo.RSK,
         Explorer.Repo.Scroll,
         Explorer.Repo.Shibarium,
@@ -583,11 +455,7 @@ defmodule Explorer.Application do
   end
 
   defp configure_mode_dependent_process(process, mode) do
-    process |> configure() |> only_in_mode(mode)
-  end
-
-  defp only_in_mode(process, mode) do
-    if Explorer.mode() in [mode, :all] do
+    if should_start?(process) and Explorer.mode() in [mode, :all] do
       process
     else
       []
@@ -651,14 +519,7 @@ defmodule Explorer.Application do
   end
 
   defp redix_opts do
-    "ACCOUNT_REDIS_URL"
-    |> ConfigHelper.parse_url_env_var("redis://127.0.0.1:6379")
-    |> Helper.redix_opts(
-      String.downcase(ConfigHelper.safe_get_env("ACCOUNT_REDIS_SSL_ENABLED", "false")) == "true",
-      ConfigHelper.safe_get_env("ACCOUNT_REDIS_SENTINEL_URLS", ""),
-      ConfigHelper.safe_get_env("ACCOUNT_REDIS_SENTINEL_MASTER_NAME", "")
-    )
-    |> Keyword.merge(name: :redix)
+    {ConfigHelper.parse_url_env_var("ACCOUNT_REDIS_URL", "redis://127.0.0.1:6379"), [name: :redix]}
   end
 
   defp configure_libcluster do

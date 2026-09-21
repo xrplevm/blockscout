@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Scroll.Batch do
   @moduledoc """
     Models a batch for Scroll.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Validator.MetadataProcessor do
   @moduledoc """
   module to periodically retrieve and update metadata belonging to validators

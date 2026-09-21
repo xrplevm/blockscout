@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Celo.EpochBlockOperations.Supervisor.Case do
   alias Indexer.Fetcher.Celo.EpochBlockOperations
 

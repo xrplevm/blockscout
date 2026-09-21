@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Celo.Account do
   @moduledoc """
   Represents a Celo blockchain account with associated metadata, and locked gold

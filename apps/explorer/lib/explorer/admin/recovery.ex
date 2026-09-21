@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Admin.Recovery do
   @moduledoc """
   Generates a recovery key to configure the application as an administrator.

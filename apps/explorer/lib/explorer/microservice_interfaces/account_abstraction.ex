@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.MicroserviceInterfaces.AccountAbstraction do
   @moduledoc """
     Interface to interact with Blockscout Account Abstraction (EIP-4337) microservice
@@ -146,20 +145,17 @@ defmodule Explorer.MicroserviceInterfaces.AccountAbstraction do
         {status_code, response_json}
 
       {_, %{body: body, status_code: status_code} = error} ->
-        Logger.error(fn ->
-          [
-            "Error while sending request to Account Abstraction microservice url: #{url}: ",
-            inspect(error)
-          ]
-        end)
+        old_truncate = Application.get_env(:logger, :truncate)
+        Logger.configure(truncate: :infinity)
 
-        Logger.debug(fn ->
+        Logger.error(fn ->
           [
             "Error while sending request to Account Abstraction microservice url: #{url}: ",
             inspect(error, limit: :infinity, printable_limit: :infinity)
           ]
         end)
 
+        Logger.configure(truncate: old_truncate)
         {:ok, response_json} = Jason.decode(body)
         {status_code, response_json}
 

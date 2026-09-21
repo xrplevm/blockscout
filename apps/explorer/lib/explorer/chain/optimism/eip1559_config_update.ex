@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Optimism.EIP1559ConfigUpdate do
   @moduledoc "Models EIP-1559 config updates for Optimism (introduced by Holocene upgrade)."
 

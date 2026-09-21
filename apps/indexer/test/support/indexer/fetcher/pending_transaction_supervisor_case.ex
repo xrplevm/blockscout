@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.PendingTransaction.Supervisor.Case do
   alias Indexer.Fetcher.PendingTransaction
 

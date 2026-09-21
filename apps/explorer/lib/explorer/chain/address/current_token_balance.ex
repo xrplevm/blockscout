@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Address.CurrentTokenBalance do
   @moduledoc """
   Represents the current token balance from addresses according to the last block.
@@ -15,10 +14,9 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   import Explorer.Chain.SmartContract.Proxy.Models.Implementation, only: [proxy_implementations_association: 0]
 
   alias Explorer.{Chain, PagingOptions, Repo}
-  alias Explorer.Chain.{Address, Block, Hash, Token}
+  alias Explorer.Chain.{Address, Block, CurrencyHelper, Hash, Token}
   alias Explorer.Chain.Address.TokenBalance
   alias Explorer.Chain.Cache.BackgroundMigrations
-  alias Explorer.Utility.MissingBalanceOfToken
 
   @default_paging_options %PagingOptions{page_size: 50}
 
@@ -178,17 +176,15 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   end
 
   @doc """
-  Builds an `t:Ecto.Query.t/0` to fetch the current token balances of the given addresses (include unfetched)
-  with `block_number` older than the given stale balance window.
+  Builds an `t:Ecto.Query.t/0` to fetch the current token balances of the given addresses (include unfetched).
   """
-  def last_token_balances_include_unfetched(address_hashes, stale_balance_window) when is_list(address_hashes) do
+  def last_token_balances_include_unfetched(address_hashes) do
     fiat_balance = fiat_value_query()
 
     from(
       ctb in __MODULE__,
       where: ctb.address_hash in ^address_hashes,
       where: ctb.token_type != "ERC-7984",
-      where: ctb.block_number < ^stale_balance_window,
       left_join: t in assoc(ctb, :token),
       on: ctb.token_contract_address_hash == t.contract_address_hash,
       preload: [token: t],
@@ -344,6 +340,28 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   end
 
   @doc """
+  Converts CurrentTokenBalances to CSV format. Used in `BlockScoutWeb.API.V2.CsvExportController.export_token_holders/2`
+  """
+  @spec to_csv_format([t()], Token.t()) :: (any(), any() -> {:halted, any()} | {:suspended, any(), (any() -> any())})
+  def to_csv_format(holders, token) do
+    row_names = [
+      "HolderAddress",
+      "Balance"
+    ]
+
+    holders_list =
+      holders
+      |> Stream.map(fn ctb ->
+        [
+          Address.checksum(ctb.address_hash),
+          ctb.value |> CurrencyHelper.divide_decimals(token.decimals) |> Decimal.to_string(:xsd)
+        ]
+      end)
+
+    Stream.concat([row_names], holders_list)
+  end
+
+  @doc """
   Returns a stream of all current token balances that weren't fetched values.
   """
   @spec stream_unfetched_current_token_balances(
@@ -354,7 +372,6 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
         when accumulator: term()
   def stream_unfetched_current_token_balances(initial, reducer, limited? \\ false) when is_function(reducer, 2) do
     unfetched_current_token_balances()
-    |> MissingBalanceOfToken.filter_token_balances_query()
     |> TokenBalance.add_token_balances_fetcher_limit(limited?)
     |> Repo.stream_reduce(initial, reducer)
   end

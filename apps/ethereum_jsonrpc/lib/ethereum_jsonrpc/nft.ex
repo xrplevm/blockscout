@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.NFT do
   @moduledoc """
     Module responsible for requesting token_uri and uri methods which needed for NFT metadata fetching

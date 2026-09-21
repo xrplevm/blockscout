@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Celo.Legacy.Account.Reader do
   @moduledoc """
   Reads Celo account data from core smart contracts.

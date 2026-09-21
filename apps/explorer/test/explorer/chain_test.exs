@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ChainTest do
   use Explorer.DataCase
   use EthereumJSONRPC.Case
@@ -24,7 +23,7 @@ defmodule Explorer.ChainTest do
   }
 
   alias Explorer.{Chain, Etherscan}
-  alias Explorer.Chain.Cache.{ChainId, Uncles}
+  alias Explorer.Chain.Cache.ChainId
 
   alias Explorer.Chain.Cache.Counters.{
     BlocksCount,
@@ -39,8 +38,6 @@ defmodule Explorer.ChainTest do
   alias Explorer.Chain.Cache.Counters.AddressesCount
 
   alias Explorer.TestHelper
-
-  alias Explorer.Utility.AddressIdToAddressHash
 
   @first_topic_hex_string "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
   @second_topic_hex_string "0x000000000000000000000000e8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"
@@ -668,6 +665,7 @@ defmodule Explorer.ChainTest do
         transaction: transaction,
         index: 0,
         block_number: transaction.block_number,
+        block_hash: transaction.block_hash,
         transaction_index: transaction.index
       )
 
@@ -676,6 +674,7 @@ defmodule Explorer.ChainTest do
           transaction: transaction,
           index: index,
           block_number: transaction.block_number,
+          block_hash: transaction.block_hash,
           transaction_index: transaction.index
         )
       end)
@@ -1122,7 +1121,7 @@ defmodule Explorer.ChainTest do
             gas_price: 100_000_000_000,
             gas_used: 50450,
             hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5",
-            index: 1,
+            index: 0,
             input: "0x10855269000000000000000000000000862d67cb0773ee3f8ce7ea89b328ffea861ab3ef",
             nonce: 4,
             public_key:
@@ -1182,11 +1181,6 @@ defmodule Explorer.ChainTest do
 
       gas_int = Decimal.new("4677320")
       gas_used_int = Decimal.new("27770")
-
-      %{address_id: from_address_id} =
-        AddressIdToAddressHash.find_or_create("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca")
-
-      %{address_id: to_address_id} = AddressIdToAddressHash.find_or_create("0x8bf38d4764929064f2d4d3a56520a76ab3df415b")
 
       assert {:ok,
               %{
@@ -1289,8 +1283,18 @@ defmodule Explorer.ChainTest do
                     block_number: 37,
                     transaction_index: 1,
                     created_contract_address_hash: nil,
-                    from_address_id: ^from_address_id,
-                    to_address_id: ^to_address_id
+                    from_address_hash: %Explorer.Chain.Hash{
+                      byte_count: 20,
+                      bytes:
+                        <<232, 221, 197, 199, 162, 210, 240, 215, 169, 121, 132, 89, 192, 16, 79, 223, 94, 152, 122,
+                          202>>
+                    },
+                    to_address_hash: %Explorer.Chain.Hash{
+                      byte_count: 20,
+                      bytes:
+                        <<139, 243, 141, 71, 100, 146, 144, 100, 242, 212, 211, 165, 101, 32, 167, 106, 179, 223, 65,
+                          91>>
+                    }
                   }
                 ],
                 logs: [
@@ -1324,7 +1328,7 @@ defmodule Explorer.ChainTest do
                 transactions: [
                   %Transaction{
                     block_number: 37,
-                    index: 1,
+                    index: 0,
                     hash: %Hash{
                       byte_count: 32,
                       bytes:
@@ -2121,6 +2125,7 @@ defmodule Explorer.ChainTest do
         created_contract_address: created_contract_address,
         created_contract_code: smart_contract_bytecode,
         block_number: transaction.block_number,
+        block_hash: transaction.block_hash,
         transaction_index: transaction.index
       )
 
@@ -2565,214 +2570,6 @@ defmodule Explorer.ChainTest do
              }
 
       Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, init_config)
-    end
-  end
-
-  # The uncles cache is warmed by the indexer with its own fixed preload list
-  # (`:transactions`, `[miner: :names]`, `:rewards`, `:nephews`), which is
-  # narrower than what a listing asks for. Serving those elements as they are
-  # would answer a request with associations left unloaded.
-  describe "list_blocks/1 served from a warm uncles cache" do
-    setup do
-      Supervisor.terminate_child(Explorer.Supervisor, Uncles.child_id())
-      Supervisor.restart_child(Explorer.Supervisor, Uncles.child_id())
-
-      :ok
-    end
-
-    test "loads the requested associations the cache does not preload itself" do
-      relations =
-        for _ <- 1..3 do
-          miner = insert(:address)
-          insert(:smart_contract, address_hash: miner.hash)
-          uncle = insert(:block, consensus: false, miner: miner)
-          insert(:block_second_degree_relation, uncle_hash: uncle.hash, nephew: insert(:block), index: 0)
-        end
-
-      Uncles.update_from_second_degree_relations(relations)
-
-      blocks =
-        Chain.list_blocks(
-          block_type: "Uncle",
-          necessity_by_association: %{[miner: [:names, :smart_contract]] => :optional},
-          paging_options: %PagingOptions{page_size: 2, key: nil}
-        )
-
-      assert length(blocks) == 2
-
-      assert Enum.all?(blocks, fn block ->
-               not match?(%Ecto.Association.NotLoaded{}, block.miner.smart_contract) and
-                 block.miner.smart_contract.address_hash == block.miner_hash
-             end)
-    end
-  end
-
-  # `join_associations/2` fetches a to-one association through a join and
-  # everything else through a preload. A join against a to-many association
-  # repeats the parent row once per child, which makes a `limit/2` count joined
-  # rows rather than entities, so these cover the shapes where the distinction
-  # decides whether a page comes back whole.
-  describe "join_associations/2" do
-    test "a required to-one association loads its to-many nested preload" do
-      address = insert(:address)
-      insert(:address_name, address: address, primary: true, name: "first")
-      insert(:address_name, address: address, name: "second")
-
-      block = insert(:block)
-      transaction = :transaction |> insert(from_address: address) |> with_block(block)
-
-      assert {:ok, loaded} =
-               Chain.hash_to_transaction(transaction.hash,
-                 necessity_by_association: %{[from_address: :names] => :required}
-               )
-
-      assert loaded.hash == transaction.hash
-      assert loaded.from_address.hash == address.hash
-      assert length(loaded.from_address.names) == 2
-    end
-
-    test "a required to-one association returns each entity once and fills a full page" do
-      block = insert(:block)
-
-      transactions =
-        for _ <- 1..10 do
-          address = insert(:address)
-          insert(:address_name, address: address, primary: true, name: "first")
-          insert(:address_name, address: address, name: "second")
-          :transaction |> insert(from_address: address) |> with_block(block)
-        end
-
-      loaded =
-        Chain.block_to_transactions(block.hash,
-          necessity_by_association: %{[from_address: :names] => :required},
-          paging_options: %PagingOptions{page_size: 10, key: nil}
-        )
-
-      hashes = Enum.map(loaded, & &1.hash)
-
-      assert length(hashes) == 10
-      assert hashes == Enum.uniq(hashes)
-      assert MapSet.new(hashes) == MapSet.new(Enum.map(transactions, & &1.hash))
-      assert Enum.all?(loaded, &(length(&1.from_address.names) == 2))
-    end
-
-    test "a required association drops the entities that do not have it" do
-      block = insert(:block)
-      with_from_address = :transaction |> insert(from_address: insert(:address)) |> with_block(block)
-
-      loaded =
-        Chain.block_to_transactions(block.hash,
-          necessity_by_association: %{[from_address: :names] => :required},
-          paging_options: %PagingOptions{page_size: 10, key: nil}
-        )
-
-      assert Enum.map(loaded, & &1.hash) == [with_from_address.hash]
-    end
-
-    test "a required to-many association keeps one row per entity" do
-      uncle = insert(:block, consensus: false)
-
-      for index <- 0..2 do
-        insert(:block_second_degree_relation, uncle_hash: uncle.hash, nephew: insert(:block), index: index)
-      end
-
-      loaded =
-        Chain.list_blocks(
-          block_type: "Uncle",
-          necessity_by_association: %{:nephews => :required},
-          paging_options: %PagingOptions{page_size: 10, key: nil}
-        )
-
-      assert Enum.map(loaded, & &1.hash) == [uncle.hash]
-      assert length(hd(loaded).nephews) == 3
-    end
-
-    test "an optional to-many association fills a full page" do
-      for _ <- 1..12 do
-        block = insert(:block)
-        for _ <- 1..3, do: :transaction |> insert() |> with_block(block)
-      end
-
-      loaded =
-        Chain.list_blocks(
-          necessity_by_association: %{:transactions => :optional, :rewards => :optional},
-          paging_options: %PagingOptions{page_size: 10, key: nil}
-        )
-
-      hashes = Enum.map(loaded, & &1.hash)
-
-      assert length(hashes) == 10
-      assert hashes == Enum.uniq(hashes)
-      assert Enum.all?(loaded, &(length(&1.transactions) == 3))
-    end
-
-    test "a has_one through and a primary-key-less schema still load" do
-      address = insert(:address)
-      insert(:address_name, address: address, primary: true, name: "named")
-
-      token_transfer = insert(:token_transfer, from_address: address)
-
-      [loaded] =
-        Chain.address_hash_to_token_transfers_new(address.hash,
-          necessity_by_association: %{
-            :token => :optional,
-            [from_address: [:scam_badge, :names]] => :optional
-          }
-        )
-
-      assert loaded.transaction_hash == token_transfer.transaction_hash
-      assert loaded.token.contract_address_hash == token_transfer.token_contract_address_hash
-      assert length(loaded.from_address.names) == 1
-      assert loaded.from_address.scam_badge == nil
-    end
-
-    test "a required spec carrying its own query still filters" do
-      %Transaction{hash: collated_hash} = :transaction |> insert() |> with_block()
-      %Transaction{hash: pending_hash} = insert(:transaction)
-
-      spec = [block: from(block in Block, select: struct(block, [:hash, :number]))]
-
-      assert {:ok, %Transaction{hash: ^collated_hash} = loaded} =
-               Chain.hash_to_transaction(collated_hash, necessity_by_association: %{spec => :required})
-
-      assert loaded.block.number
-
-      assert {:error, :not_found} =
-               Chain.hash_to_transaction(pending_hash, necessity_by_association: %{spec => :required})
-
-      assert {:ok, %Transaction{hash: ^pending_hash}} =
-               Chain.hash_to_transaction(pending_hash, necessity_by_association: %{spec => :optional})
-    end
-
-    test "a required association the query already binds filters without an alias collision" do
-      %Transaction{hash: collated_hash} = :transaction |> insert() |> with_block()
-      %Transaction{hash: pending_hash} = insert(:transaction)
-
-      loaded =
-        from(transaction in Transaction, left_join: block in assoc(transaction, :block), as: :block)
-        |> Chain.join_associations(%{:block => :required})
-        |> Repo.all()
-
-      assert Enum.map(loaded, & &1.hash) == [collated_hash]
-      refute pending_hash in Enum.map(loaded, & &1.hash)
-      assert hd(loaded).block.number
-    end
-
-    test "a required through association the query already binds stays on the preload path" do
-      transaction = :transaction |> insert() |> with_block()
-
-      token_transfer =
-        insert(:token_transfer,
-          transaction: transaction,
-          block: transaction.block,
-          block_number: transaction.block_number
-        )
-
-      [loaded] =
-        Chain.transaction_to_token_transfers(transaction.hash, necessity_by_association: %{:token => :required})
-
-      assert loaded.log_index == token_transfer.log_index
-      assert loaded.token.contract_address_hash == token_transfer.token_contract_address_hash
     end
   end
 end

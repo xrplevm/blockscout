@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule String.Chars.Explorer.Chain.AddressTest do
   use ExUnit.Case, async: true
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Celo.Epoch do
   @moduledoc """
   Schema for Celo blockchain epochs.

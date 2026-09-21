@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.ZkSync.Discovery.BatchesData do
   @moduledoc """
     Provides main functionality to extract data for batches and associated with them

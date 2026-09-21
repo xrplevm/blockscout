@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Blocks do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Block.t/0`.
@@ -20,6 +19,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
     BlockNumberHelper,
     DenormalizationHelper,
     Import,
+    PendingBlockOperation,
     PendingOperationsHelper,
     SmartContract,
     Token,
@@ -30,8 +30,6 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
 
   alias Explorer.Chain.Block.Reward
   alias Explorer.Chain.Cache.BlockNumber
-  alias Explorer.Chain.Cache.Counters.{AddressCounters, AddressCountersConsolidator, TokenCounters}
-  alias Explorer.Chain.Cache.Counters.TokenCountersConsolidator
   alias Explorer.Chain.Import.Runner
   alias Explorer.Chain.Import.Runner.Address.CurrentTokenBalances
   alias Explorer.Chain.Import.Runner.{Addresses, TokenInstances, Tokens}
@@ -39,7 +37,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
   alias Explorer.Chain.Zilliqa.Zrc2.TokenTransfer, as: Zrc2TokenTransfer
   alias Explorer.Prometheus.Instrumenter
   alias Explorer.Repo, as: ExplorerRepo
-  alias Explorer.Utility.{CountersRefetchBlock, MissingBlockRange}
+  alias Explorer.Utility.MissingBlockRange
 
   alias Explorer.Chain.Celo.AggregatedElectionReward, as: CeloAggregatedElectionReward
   alias Explorer.Chain.Celo.ElectionReward, as: CeloElectionReward
@@ -97,17 +95,6 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         :lose_consensus
       )
     end)
-    |> Multi.run(:counters_refetched_block_numbers, fn repo, _ ->
-      Instrumenter.block_import_stage_runner(
-        fn ->
-          # Note, needs to be executed before `blocks` which resets `refetch_needed`
-          counters_refetched_block_numbers(repo, changes_list, insert_options)
-        end,
-        :address_referencing,
-        :blocks,
-        :counters_refetched_block_numbers
-      )
-    end)
     |> Multi.run(:blocks, fn repo, _ ->
       Instrumenter.block_import_stage_runner(
         fn ->
@@ -117,6 +104,16 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         :address_referencing,
         :blocks,
         :blocks
+      )
+    end)
+    |> Multi.run(:new_pending_block_operations, fn repo, %{blocks: blocks} ->
+      Instrumenter.block_import_stage_runner(
+        fn ->
+          new_pending_block_operations(repo, blocks, insert_options)
+        end,
+        :address_referencing,
+        :blocks,
+        :new_pending_block_operations
       )
     end)
     |> Multi.run(:uncle_fetched_block_second_degree_relations, fn repo, _ ->
@@ -172,58 +169,6 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         :derive_transaction_forks
       )
     end)
-    |> Multi.run(:delete_address_token_balances, fn repo, %{lose_consensus: non_consensus_blocks} ->
-      Instrumenter.block_import_stage_runner(
-        fn -> delete_address_token_balances(repo, non_consensus_blocks, insert_options) end,
-        :address_referencing,
-        :blocks,
-        :delete_address_token_balances
-      )
-    end)
-    |> Multi.run(:select_address_current_token_balances_for_delete, fn repo, %{lose_consensus: non_consensus_blocks} ->
-      Instrumenter.block_import_stage_runner(
-        fn -> select_address_current_token_balances_for_delete(repo, non_consensus_blocks, insert_options) end,
-        :address_referencing,
-        :blocks,
-        :select_address_current_token_balances_for_delete
-      )
-    end)
-    |> Multi.run(:derive_address_current_token_balances, fn repo,
-                                                            %{
-                                                              select_address_current_token_balances_for_delete:
-                                                                address_current_token_balances_for_delete
-                                                            } ->
-      Instrumenter.block_import_stage_runner(
-        fn ->
-          derive_address_current_token_balances(repo, address_current_token_balances_for_delete, insert_options)
-        end,
-        :address_referencing,
-        :blocks,
-        :derive_address_current_token_balances
-      )
-    end)
-    |> Multi.run(:delete_address_current_token_balances, fn repo, %{lose_consensus: non_consensus_blocks} ->
-      Instrumenter.block_import_stage_runner(
-        fn -> delete_address_current_token_balances(repo, non_consensus_blocks, insert_options) end,
-        :address_referencing,
-        :blocks,
-        :delete_address_current_token_balances
-      )
-    end)
-    |> Multi.run(:insert_derived_address_current_token_balances, fn repo,
-                                                                    %{
-                                                                      derive_address_current_token_balances:
-                                                                        derived_address_current_token_balances
-                                                                    } ->
-      Instrumenter.block_import_stage_runner(
-        fn ->
-          insert_derived_address_current_token_balances(repo, derived_address_current_token_balances, insert_options)
-        end,
-        :address_referencing,
-        :blocks,
-        :insert_derived_address_current_token_balances
-      )
-    end)
     |> Multi.run(:delete_address_coin_balances, fn repo, %{lose_consensus: non_consensus_blocks} ->
       Instrumenter.block_import_stage_runner(
         fn -> delete_address_coin_balances(repo, non_consensus_blocks, insert_options) end,
@@ -239,6 +184,34 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         :address_referencing,
         :blocks,
         :derive_address_fetched_coin_balances
+      )
+    end)
+    |> Multi.run(:delete_address_token_balances, fn repo, %{lose_consensus: non_consensus_blocks} ->
+      Instrumenter.block_import_stage_runner(
+        fn -> delete_address_token_balances(repo, non_consensus_blocks, insert_options) end,
+        :address_referencing,
+        :blocks,
+        :delete_address_token_balances
+      )
+    end)
+    |> Multi.run(:delete_address_current_token_balances, fn repo, %{lose_consensus: non_consensus_blocks} ->
+      Instrumenter.block_import_stage_runner(
+        fn -> delete_address_current_token_balances(repo, non_consensus_blocks, insert_options) end,
+        :address_referencing,
+        :blocks,
+        :delete_address_current_token_balances
+      )
+    end)
+    |> Multi.run(:derive_address_current_token_balances, fn repo,
+                                                            %{
+                                                              delete_address_current_token_balances:
+                                                                deleted_address_current_token_balances
+                                                            } ->
+      Instrumenter.block_import_stage_runner(
+        fn -> derive_address_current_token_balances(repo, deleted_address_current_token_balances, insert_options) end,
+        :address_referencing,
+        :blocks,
+        :derive_address_current_token_balances
       )
     end)
     |> Multi.run(:save_internal_transactions_for_delete, fn repo, %{lose_consensus: non_consensus_blocks} ->
@@ -257,28 +230,14 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         :update_token_instances_owner
       )
     end)
-    |> Multi.run(:counters_corrections, fn repo,
-                                           %{
-                                             counters_refetched_block_numbers: refetched_block_numbers,
-                                             fork_transactions: forked_transactions
-                                           } ->
-      Instrumenter.block_import_stage_runner(
-        fn ->
-          counters_corrections(repo, refetched_block_numbers, forked_transactions, insert_options)
-        end,
-        :address_referencing,
-        :blocks,
-        :counters_corrections
-      )
-    end)
     |> Multi.run(:blocks_update_token_holder_counts, fn repo,
                                                         %{
                                                           delete_address_current_token_balances: deleted,
-                                                          insert_derived_address_current_token_balances: inserted
+                                                          derive_address_current_token_balances: inserted
                                                         } ->
       Instrumenter.block_import_stage_runner(
         fn ->
-          deltas = CurrentTokenBalances.token_holder_count_deltas(repo, %{deleted: deleted, inserted: inserted})
+          deltas = CurrentTokenBalances.token_holder_count_deltas(%{deleted: deleted, inserted: inserted})
           Tokens.update_holder_counts_with_deltas(repo, deltas, insert_options)
         end,
         :address_referencing,
@@ -305,146 +264,6 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
 
   @impl Runner
   def timeout, do: @timeout
-
-  # Detects which of the incoming blocks are re-imports of blocks queued for a
-  # re-fetch: their stored row still has `refetch_needed` set (the upcoming
-  # `blocks` upsert resets it). Blocks already present in the
-  # `counters_refetch_blocks` queue are skipped — their current content
-  # was never added to the counters, so there is nothing to subtract.
-  defp counters_refetched_block_numbers(repo, blocks_changes, %{timeout: timeout}) do
-    hashes = blocks_changes |> Enum.map(& &1.hash) |> Enum.uniq()
-
-    refetched_numbers =
-      repo.all(
-        from(block in Block,
-          where: block.hash in ^hashes and block.refetch_needed == true,
-          select: block.number
-        ),
-        timeout: timeout
-      )
-
-    case refetched_numbers do
-      [] ->
-        {:ok, []}
-
-      _ ->
-        pending_numbers =
-          repo.all(
-            from(refetch_block in CountersRefetchBlock,
-              where: refetch_block.block_number in ^refetched_numbers,
-              select: refetch_block.block_number
-            ),
-            timeout: timeout
-          )
-
-        {:ok, refetched_numbers -- pending_numbers}
-    end
-  rescue
-    postgrex_error in Postgrex.Error ->
-      {:error, %{exception: postgrex_error}}
-  end
-
-  # Corrects the incremental address and token counters for content changing
-  # under already-consolidated ranges:
-  #
-  # * deep reorgs — participants of forked transactions and of their token
-  #   transfers whose `counters_updated_at` watermark covers the forked block
-  #   get their watermark reset for a full recalculation (reorgs within the
-  #   consolidation safety lag never satisfy the condition). Token watermarks
-  #   need no fork handling: token transfer rows of forked blocks stay
-  #   physically present (only `block_consensus` flips) and the token counter
-  #   counts physical rows;
-  # * block re-fetches — the old content of the re-imported blocks is
-  #   subtracted from the already-covered address and token counters while it
-  #   is still in the DB, and the block numbers are queued in
-  #   `counters_refetch_blocks` so that
-  #   `Explorer.Chain.Cache.Counters.Consolidation` adds the re-imported
-  #   content back once the re-fetch completes. Content of forked transactions
-  #   is excluded (`block_number` already nulled) — those addresses are
-  #   covered by the watermark reset.
-  defp counters_corrections(repo, refetched_block_numbers, forked_transactions, %{
-         timeout: timeout,
-         timestamps: timestamps
-       }) do
-    reset_bytes = reset_watermarks_for_forked(repo, forked_transactions, timeout)
-
-    {subtracted_address_bytes, subtracted_token_bytes} =
-      subtract_refetched_blocks_content(repo, refetched_block_numbers, timeout, timestamps)
-
-    AddressCounters.invalidate(reset_bytes ++ subtracted_address_bytes)
-    TokenCounters.invalidate(subtracted_token_bytes)
-
-    {:ok, %{reset: reset_bytes, refetched_block_numbers: refetched_block_numbers}}
-  rescue
-    postgrex_error in Postgrex.Error ->
-      {:error, %{exception: postgrex_error}}
-  end
-
-  defp reset_watermarks_for_forked(_repo, [], _timeout), do: []
-
-  defp reset_watermarks_for_forked(repo, forked_transactions, timeout) do
-    forked_hashes = Enum.map(forked_transactions, & &1.hash)
-
-    forked_token_transfers =
-      repo.all(
-        from(token_transfer in TokenTransfer,
-          where: token_transfer.transaction_hash in ^forked_hashes,
-          select: struct(token_transfer, [:block_number, :from_address_hash, :to_address_hash])
-        ),
-        timeout: timeout
-      )
-
-    (forked_transactions ++ forked_token_transfers)
-    |> Enum.flat_map(fn row ->
-      for address_hash <- [row.from_address_hash, row.to_address_hash],
-          not is_nil(address_hash) and not is_nil(row.block_number),
-          do: {address_hash.bytes, row.block_number}
-    end)
-    |> Enum.reduce(%{}, fn {bytes, block_number}, acc ->
-      Map.update(acc, bytes, block_number, &min(&1, block_number))
-    end)
-    |> AddressCountersConsolidator.reset_covered_watermarks(repo)
-  end
-
-  defp subtract_refetched_blocks_content(_repo, [], _timeout, _timestamps), do: {[], []}
-
-  defp subtract_refetched_blocks_content(repo, block_numbers, timeout, timestamps) do
-    transactions =
-      repo.all(
-        from(transaction in Transaction,
-          where: transaction.block_number in ^block_numbers,
-          select: struct(transaction, [:block_number, :from_address_hash, :to_address_hash, :gas_used])
-        ),
-        timeout: timeout
-      )
-
-    token_transfers =
-      repo.all(
-        from(token_transfer in TokenTransfer,
-          where: token_transfer.block_number in ^block_numbers,
-          select:
-            struct(token_transfer, [:block_number, :from_address_hash, :to_address_hash, :token_contract_address_hash])
-        ),
-        timeout: timeout
-      )
-
-    updated_address_bytes =
-      AddressCountersConsolidator.apply_covered_deltas(transactions, token_transfers, :negative, repo)
-
-    updated_token_bytes = TokenCountersConsolidator.apply_covered_transfer_deltas(token_transfers, :negative, repo)
-
-    # Enforce CountersRefetchBlock ShareLocks order (see docs: sharelocks.md)
-    repo.insert_all(
-      CountersRefetchBlock,
-      block_numbers
-      |> Enum.sort()
-      |> Enum.map(&%{block_number: &1, inserted_at: timestamps.inserted_at, updated_at: timestamps.updated_at}),
-      on_conflict: :nothing,
-      timeout: timeout
-    )
-
-    {updated_address_bytes, updated_token_bytes}
-  end
 
   defp fork_transactions(%{
          repo: repo,
@@ -702,12 +521,10 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
 
   defp on_conflict_chain_type_extension(_), do: nil
 
-  defp consensus_block_identifiers(blocks_changes) when is_list(blocks_changes) do
+  defp consensus_block_numbers(blocks_changes) when is_list(blocks_changes) do
     blocks_changes
     |> Enum.filter(& &1.consensus)
-    |> Enum.reduce({[], []}, fn block_change, {numbers, hashes} ->
-      {[block_change.number | numbers], [block_change.hash | hashes]}
-    end)
+    |> Enum.map(& &1.number)
   end
 
   # Handles block consensus loss.
@@ -730,7 +547,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
          } = _opts
        ) do
     hashes = Enum.map(changes_list, & &1.hash)
-    {consensus_block_numbers, consensus_hashes} = consensus_block_identifiers(changes_list)
+    consensus_block_numbers = consensus_block_numbers(changes_list)
 
     acquire_query =
       from(
@@ -779,7 +596,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         join: s in subquery(acquire_query),
         on: transaction.block_hash == s.hash,
         # we don't want to remove consensus from blocks that will be upserted
-        where: transaction.block_hash not in ^consensus_hashes
+        where: transaction.block_hash not in ^hashes
       ),
       [set: [block_consensus: false, updated_at: updated_at]],
       timeout: timeout
@@ -789,9 +606,9 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
       from(
         token_transfer in TokenTransfer,
         join: s in subquery(acquire_query),
-        on: token_transfer.block_number == s.number and token_transfer.block_hash == s.hash,
+        on: token_transfer.block_number == s.number,
         # we don't want to remove consensus from blocks that will be upserted
-        where: token_transfer.block_hash not in ^consensus_hashes
+        where: token_transfer.block_hash not in ^hashes
       ),
       [set: [block_consensus: false, updated_at: updated_at]],
       timeout: timeout
@@ -804,7 +621,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         join: s in subquery(acquire_query),
         on: t.block_hash == s.hash,
         # we don't want to remove contract code from blocks that will be upserted
-        where: t.block_hash not in ^consensus_hashes,
+        where: t.block_hash not in ^hashes,
         where: not is_nil(t.created_contract_address_hash),
         select: t.created_contract_address_hash
       )
@@ -833,8 +650,8 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         from(
           zrc2_token_transfer in Zrc2TokenTransfer,
           join: s in subquery(acquire_query),
-          on: zrc2_token_transfer.block_number == s.number and zrc2_token_transfer.block_hash == s.hash,
-          where: zrc2_token_transfer.block_hash not in ^consensus_hashes
+          on: zrc2_token_transfer.block_number == s.number,
+          where: zrc2_token_transfer.block_hash not in ^hashes
         ),
         timeout: timeout
       )
@@ -874,6 +691,32 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         }
 
     lose_consensus(repo, blocks_changes, opts)
+  end
+
+  defp new_pending_block_operations(repo, inserted_blocks, %{timeout: timeout, timestamps: timestamps}) do
+    case PendingOperationsHelper.pending_operations_type() do
+      "blocks" ->
+        sorted_pending_ops =
+          inserted_blocks
+          |> RangesHelper.filter_by_height_range(&RangesHelper.traceable_block_number?(&1.number))
+          |> Enum.filter(& &1.consensus)
+          |> Enum.map(&%{block_hash: &1.hash, block_number: &1.number})
+          |> Enum.sort()
+
+        Import.insert_changes_list(
+          repo,
+          sorted_pending_ops,
+          conflict_target: :block_hash,
+          on_conflict: :nothing,
+          for: PendingBlockOperation,
+          returning: true,
+          timeout: timeout,
+          timestamps: timestamps
+        )
+
+      _other_type ->
+        {:ok, []}
+    end
   end
 
   defp delete_address_coin_balances(_repo, [], _options), do: {:ok, []}
@@ -984,27 +827,6 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
     end
   end
 
-  defp select_address_current_token_balances_for_delete(_, [], _), do: {:ok, []}
-
-  defp select_address_current_token_balances_for_delete(repo, non_consensus_blocks, %{timeout: timeout}) do
-    non_consensus_block_numbers = Enum.map(non_consensus_blocks, fn {number, _hash} -> number end)
-
-    query =
-      from(ctb in Address.CurrentTokenBalance,
-        select:
-          map(ctb, [
-            :address_hash,
-            :token_contract_address_hash,
-            :token_id,
-            :token_type,
-            :value
-          ]),
-        where: ctb.block_number in ^non_consensus_block_numbers
-      )
-
-    {:ok, repo.all(query, timeout: timeout)}
-  end
-
   defp delete_address_current_token_balances(_, [], _), do: {:ok, []}
 
   defp delete_address_current_token_balances(repo, non_consensus_blocks, %{timeout: timeout}) do
@@ -1030,7 +852,6 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
             :address_hash,
             :token_contract_address_hash,
             :token_id,
-            :token_type,
             # Used to determine if `address_hash` was a holder of `token_contract_address_hash` before
 
             # `address_current_token_balance` is deleted in `update_tokens_holder_count`.
@@ -1055,7 +876,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
   defp derive_address_current_token_balances(
          repo,
          deleted_address_current_token_balances,
-         %{timeout: timeout}
+         %{timeout: timeout} = options
        )
        when is_list(deleted_address_current_token_balances) do
     base_query =
@@ -1080,12 +901,10 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         deleted_address_current_token_balances
       )
 
-    {:ok, repo.all(query, timeout: timeout)}
-  end
+    current_token_balances =
+      query
+      |> repo.all()
 
-  defp insert_derived_address_current_token_balances(_, [], _), do: {:ok, []}
-
-  defp insert_derived_address_current_token_balances(repo, current_token_balances, %{timeout: timeout} = options) do
     timestamps = Import.timestamps()
 
     result =
@@ -1098,10 +917,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
       )
 
     derived_address_current_token_balances =
-      Enum.map(
-        result,
-        &Map.take(&1, [:address_hash, :token_contract_address_hash, :token_id, :token_type, :block_number, :value])
-      )
+      Enum.map(result, &Map.take(&1, [:address_hash, :token_contract_address_hash, :token_id, :block_number, :value]))
 
     {:ok, derived_address_current_token_balances}
   end
@@ -1134,7 +950,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
   defp update_token_instances_owner(repo, forked_transaction_hashes, options) do
     forked_transaction_hashes
     |> forked_token_transfers_query()
-    |> repo.all(timeout: options[:timeout])
+    |> repo.all()
     |> process_forked_token_transfers(repo, options)
   end
 
@@ -1183,7 +999,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
 
     changes =
       derived_token_transfers_query
-      |> repo.all(timeout: options[:timeout])
+      |> repo.all()
       |> Enum.reduce(changes_initial, fn tt, acc ->
         token_id = List.first(tt.token_ids)
         current_key = {tt.token_contract_address_hash, token_id}

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.Utils.Db.Common do
   @moduledoc """
     Provides chain-agnostic database utility functions for block-related operations.

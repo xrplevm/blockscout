@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.TokenTransferController do
   use BlockScoutWeb, :controller
   use OpenApiSpex.ControllerSpecs
@@ -18,7 +17,8 @@ defmodule BlockScoutWeb.API.V2.TokenTransferController do
       token_transfers_types_options: 1
     ]
 
-  import Explorer.Chain.Address.MetadataPreloader, only: [maybe_preload_ens_and_metadata: 2]
+  import Explorer.MicroserviceInterfaces.BENS, only: [maybe_preload_ens: 1]
+  import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata: 1]
   import Explorer.PagingOptions, only: [default_paging_options: 0]
 
   alias Explorer.Chain.Token.Instance
@@ -27,7 +27,7 @@ defmodule BlockScoutWeb.API.V2.TokenTransferController do
 
   plug(OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true)
 
-  tags(["token-transfers"])
+  tags(["token_transfers"])
 
   @api_true [api?: true]
 
@@ -105,9 +105,7 @@ defmodule BlockScoutWeb.API.V2.TokenTransferController do
     |> put_status(200)
     |> render(:token_transfers, %{
       token_transfers:
-        token_transfers
-        |> Instance.preload_nft(@api_true)
-        |> maybe_preload_ens_and_metadata(:token_transfers),
+        token_transfers |> Instance.preload_nft(@api_true) |> maybe_preload_ens() |> maybe_preload_metadata(),
       decoded_transactions_map: decoded_transactions_map,
       next_page_params: next_page_params
     })

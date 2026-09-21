@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.OnDemand.TokenInstanceMetadataRefetch do
   @moduledoc """
   Re-fetches token instance metadata.

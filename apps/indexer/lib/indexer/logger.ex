@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Logger do
   @moduledoc """
   Helper for `Logger`.

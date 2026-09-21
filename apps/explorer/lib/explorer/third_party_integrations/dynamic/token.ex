@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.Dynamic.Token do
   @moduledoc """
   JWT token verification for Dynamic.xyz

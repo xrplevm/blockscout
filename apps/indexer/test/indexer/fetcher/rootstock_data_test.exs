@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 if Application.compile_env(:explorer, :chain_type) == :rsk do
   defmodule Indexer.Fetcher.RootstockDataTest do
     use EthereumJSONRPC.Case

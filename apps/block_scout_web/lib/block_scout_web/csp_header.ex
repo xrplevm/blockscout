@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.CSPHeader do
   @moduledoc """
   Plug to set content-security-policy with websocket endpoints

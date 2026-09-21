@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Beacon.Deposit.Status do
   @moduledoc """
   Fetches the status of beacon deposits.

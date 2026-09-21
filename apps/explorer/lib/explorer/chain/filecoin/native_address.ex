@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Filecoin.NativeAddress do
   @moduledoc """
   Handles Filecoin addresses by parsing, validating, and converting them to and

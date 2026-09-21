@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Block.Reward.AddressType do
   @moduledoc """
   Block reward address types

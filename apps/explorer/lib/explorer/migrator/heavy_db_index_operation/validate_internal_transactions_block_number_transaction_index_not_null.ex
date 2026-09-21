@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation.ValidateInternalTransactionsBlockNumberTransactionIndexNotNull do
   @moduledoc """
   Validate `NOT NULL` constraints for `internal_transactions` (`block_number`, `transaction_index`).

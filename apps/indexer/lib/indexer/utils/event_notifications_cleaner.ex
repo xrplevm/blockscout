@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Utils.EventNotificationsCleaner do
   @moduledoc """
   Module is responsible for cleaning up event notifications from the database.

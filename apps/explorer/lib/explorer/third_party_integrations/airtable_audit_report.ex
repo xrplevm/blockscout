@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.AirTableAuditReport do
   @moduledoc """
     Module is responsible for submitting audit reports to AirTable

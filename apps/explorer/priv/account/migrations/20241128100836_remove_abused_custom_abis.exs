@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Account.Migrations.RemoveAbusedCustomAbis do
   use Ecto.Migration
 

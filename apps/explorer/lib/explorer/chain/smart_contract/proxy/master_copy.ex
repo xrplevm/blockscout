@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.SmartContract.Proxy.MasterCopy do
   @moduledoc """
   Module for fetching master-copy proxy implementation

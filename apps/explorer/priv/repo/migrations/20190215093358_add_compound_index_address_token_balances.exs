@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.AddCompoundIndexAddressTokenBalances do
   use Ecto.Migration
 

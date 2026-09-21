@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Stability.Migrations.AddStabilityValidators do
   use Ecto.Migration
 

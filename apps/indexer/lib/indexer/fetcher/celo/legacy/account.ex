@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Celo.Legacy.Account do
   @moduledoc """
   Asynchronously fetches Celo blockchain account data from event logs and

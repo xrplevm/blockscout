@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule NFTMediaHandler.Image.Resizer do
   @moduledoc """
   Resizes an image

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ChainSpec.Parity.ImporterTest do
   use Explorer.DataCase
 

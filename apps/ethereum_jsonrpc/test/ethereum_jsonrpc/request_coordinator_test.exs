@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.RequestCoordinatorTest do
   use ExUnit.Case
   use EthereumJSONRPC.Case

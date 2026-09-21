@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Celo.TransactionGasTokens do
   @moduledoc """
   Helper functions for extracting tokens specified as gas fee currency.

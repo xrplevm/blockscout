@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Optimism.Interop.Helper do
   @moduledoc """
     Auxiliary common functions for OP Interop indexers.

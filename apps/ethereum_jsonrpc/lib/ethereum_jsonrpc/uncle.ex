@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Uncle do
   @moduledoc """
   [Uncle](https://ethereum.org/en/glossary).

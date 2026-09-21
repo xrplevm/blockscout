@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.CurrencyHelper do
   @moduledoc """
   Helper functions for interacting with `t:BlockScoutWeb.ExchangeRates.USD.t/0` values.

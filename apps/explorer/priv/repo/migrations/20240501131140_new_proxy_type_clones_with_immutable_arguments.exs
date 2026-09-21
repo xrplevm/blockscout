@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.NewProxyTypeClonesWithImmutableArguments do
   use Ecto.Migration
 

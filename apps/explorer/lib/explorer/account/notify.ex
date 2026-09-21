@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.Notify do
   @moduledoc """
     Interface for notifier, for import and call from other modules
@@ -6,7 +5,6 @@ defmodule Explorer.Account.Notify do
 
   alias Explorer.Account
   alias Explorer.Account.Notifier.Notify
-  alias Explorer.ThirdPartyIntegrations.{Auth0, Dynamic, Keycloak}
 
   require Logger
 
@@ -26,13 +24,15 @@ defmodule Explorer.Account.Notify do
   end
 
   defp check_envs do
-    check_authentication_provider()
+    check_auth0()
     check_sendgrid()
   end
 
-  defp check_authentication_provider do
-    Auth0.enabled?() || Keycloak.enabled?() || Dynamic.enabled?() ||
-      raise "No authentication provider configured"
+  defp check_auth0 do
+    (Application.get_env(:ueberauth, Ueberauth.Strategy.Auth0.OAuth)[:client_id] &&
+       Application.get_env(:ueberauth, Ueberauth.Strategy.Auth0.OAuth)[:client_secret] &&
+       Application.get_env(:ueberauth, Ueberauth.Strategy.Auth0.OAuth)[:domain]) ||
+      raise "Auth0 not configured"
   end
 
   defp check_sendgrid do

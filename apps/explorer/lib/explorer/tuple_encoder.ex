@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule TupleEncoder do
   @moduledoc """
     Implementation of Jason.Encoder for Tuple

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.BatchBlock do
   @moduledoc """
     Models a list of blocks related to a batch for Arbitrum.

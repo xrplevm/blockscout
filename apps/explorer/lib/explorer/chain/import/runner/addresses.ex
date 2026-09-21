@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Addresses do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Address.t/0`.

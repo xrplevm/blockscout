@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenTotalSupplyUpdater do
   @moduledoc """
   Periodically updates tokens total_supply

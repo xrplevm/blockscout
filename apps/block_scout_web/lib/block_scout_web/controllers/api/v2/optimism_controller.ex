@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.OptimismController do
   use BlockScoutWeb, :controller
   use OpenApiSpex.ControllerSpecs
@@ -36,8 +35,6 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   action_fallback(BlockScoutWeb.API.V2.FallbackController)
 
   plug(OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true)
-
-  tags(["optimism"])
 
   @api_true [api?: true]
 
@@ -474,7 +471,13 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
           _ -> nil
         end
 
-      transfer_token = fetch_transfer_token(msg.transfer_token_address_hash)
+      transfer_token =
+        if not is_nil(msg.transfer_token_address_hash) do
+          case Token.get_by_contract_address_hash(msg.transfer_token_address_hash, @api_true) do
+            nil -> %{contract_address_hash: msg.transfer_token_address_hash, symbol: nil, decimals: nil}
+            t -> %{contract_address_hash: t.contract_address_hash, symbol: t.symbol, decimals: t.decimals}
+          end
+        end
 
       message =
         msg
@@ -493,15 +496,6 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
         |> put_view(ApiView)
         |> put_status(:not_found)
         |> render(:message, %{message: "Invalid message id or the message with such id is not found"})
-    end
-  end
-
-  defp fetch_transfer_token(nil), do: nil
-
-  defp fetch_transfer_token(transfer_token_address_hash) do
-    case Token.get_by_contract_address_hash(transfer_token_address_hash, @api_true) do
-      nil -> %{contract_address_hash: transfer_token_address_hash, symbol: nil, decimals: nil}
-      t -> %{contract_address_hash: t.contract_address_hash, symbol: t.symbol, decimals: t.decimals}
     end
   end
 

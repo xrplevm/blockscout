@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.CoinBalance.Catchup.Supervisor.Case do
   alias Indexer.Fetcher.CoinBalance.Catchup
 

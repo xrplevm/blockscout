@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Plug.CheckChainType do
   @moduledoc """
   A plug that restricts access to routes based on the current chain type.

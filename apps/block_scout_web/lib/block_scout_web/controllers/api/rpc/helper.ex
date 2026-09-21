@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.RPC.Helper do
   @moduledoc """
   Small helpers for RPC api controllers.

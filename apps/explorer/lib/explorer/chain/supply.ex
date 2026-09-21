@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Supply do
   @moduledoc """
   Behaviour for API needed to calculate data related to a chain's supply.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.TransactionView do
   use BlockScoutWeb, :view
 
@@ -9,7 +8,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   alias BlockScoutWeb.API.V2.{ApiView, Helper, InternalTransactionView, TokenTransferView, TokenView}
 
-  alias BlockScoutWeb.Models.{GetAddressTags, GetTransactionTags}
+  alias BlockScoutWeb.Models.GetTransactionTags
   alias BlockScoutWeb.{TransactionStateView, TransactionView}
   alias Ecto.Association.NotLoaded
   alias Explorer.{Chain, Market}
@@ -27,7 +26,6 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
   }
 
   alias Explorer.Chain.Block.Reward
-  alias Explorer.Chain.Cache.BlockNumber
   alias Explorer.Chain.Cache.Counters.AverageBlockTime
   alias Explorer.Chain.SmartContract.Proxy.Models.Implementation, as: ProxyImplementation
   alias Explorer.Chain.Transaction.StateChange
@@ -47,8 +45,17 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
         conn: conn,
         watchlist_names: watchlist_names
       }) do
+    block_height = Chain.block_height(@api_true)
+    decoded_transactions = Transaction.decode_transactions(transactions, true, @api_true)
+
     %{
-      "items" => prepare_transactions(transactions, conn, watchlist_names),
+      "items" =>
+        transactions
+        |> with_chain_type_transformations()
+        |> Enum.zip(decoded_transactions)
+        |> Enum.map(fn {transaction, decoded_input} ->
+          prepare_transaction(transaction, conn, false, block_height, watchlist_names, decoded_input)
+        end),
       "next_page_params" => next_page_params
     }
   end
@@ -58,12 +65,29 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
         conn: conn,
         watchlist_names: watchlist_names
       }) do
-    prepare_transactions(transactions, conn, watchlist_names)
+    block_height = Chain.block_height(@api_true)
+    decoded_transactions = Transaction.decode_transactions(transactions, true, @api_true)
+
+    transactions
+    |> with_chain_type_transformations()
+    |> Enum.zip(decoded_transactions)
+    |> Enum.map(fn {transaction, decoded_input} ->
+      prepare_transaction(transaction, conn, false, block_height, watchlist_names, decoded_input)
+    end)
   end
 
   def render("transactions.json", %{transactions: transactions, next_page_params: next_page_params, conn: conn}) do
+    block_height = Chain.block_height(@api_true)
+    decoded_transactions = Transaction.decode_transactions(transactions, true, @api_true)
+
     %{
-      "items" => prepare_transactions(transactions, conn, nil),
+      "items" =>
+        transactions
+        |> with_chain_type_transformations()
+        |> Enum.zip(decoded_transactions)
+        |> Enum.map(fn {transaction, decoded_input} ->
+          prepare_transaction(transaction, conn, false, block_height, decoded_input)
+        end),
       "next_page_params" => next_page_params
     }
   end
@@ -75,32 +99,24 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
   end
 
   def render("transactions.json", %{transactions: transactions, conn: conn}) do
-    prepare_transactions(transactions, conn, nil)
+    block_height = Chain.block_height(@api_true)
+    decoded_transactions = Transaction.decode_transactions(transactions, true, @api_true)
+
+    transactions
+    |> with_chain_type_transformations()
+    |> Enum.zip(decoded_transactions)
+    |> Enum.map(fn {transaction, decoded_input} ->
+      prepare_transaction(transaction, conn, false, block_height, decoded_input)
+    end)
   end
 
   def render("transaction.json", %{transaction: transaction, conn: conn}) do
-    block_height = BlockNumber.get_max()
+    block_height = Chain.block_height(@api_true)
     [decoded_input] = Transaction.decode_transactions([transaction], false, @api_true)
 
     transaction
     |> with_chain_type_transformations()
-    |> prepare_transaction(conn, true, block_height, nil, decoded_input, nil)
-  end
-
-  def render("preview.json", %{transaction: transaction, decode_input: decode_input}) do
-    decoded_input =
-      if decode_input do
-        [decoded] = Transaction.decode_transactions([transaction], true, @api_true)
-        decoded
-      end
-
-    %{
-      "status" => transaction.status,
-      "timestamp" => block_timestamp(transaction),
-      "method" => Transaction.method_name(transaction, decoded_input),
-      "from" => preview_address(transaction.from_address, transaction.from_address_hash),
-      "to" => preview_address(transaction.to_address, transaction.to_address_hash)
-    }
+    |> prepare_transaction(conn, true, block_height, decoded_input)
   end
 
   def render("raw_trace.json", %{raw_traces: raw_traces}) do
@@ -144,6 +160,10 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
   def render("token_transfer.json", %{token_transfer: token_transfer, conn: conn}) do
     [decoded_transaction] = Transaction.decode_transactions([token_transfer.transaction], true, @api_true)
     TokenTransferView.prepare_token_transfer(token_transfer, conn, decoded_transaction)
+  end
+
+  def render("transaction_actions.json", %{actions: actions}) do
+    Enum.map(actions, &prepare_transaction_action(&1))
   end
 
   def render("internal_transactions.json", %{
@@ -216,34 +236,6 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     signed_authorizations
     |> Enum.sort_by(& &1.index, :asc)
     |> Enum.map(&prepare_signed_authorization/1)
-  end
-
-  @doc """
-  Renders FHE operations for a transaction as JSON.
-
-  Returns a map with items (list of operation objects), total_hcu, max_depth_hcu,
-  and operation_count. Each item includes log_index, operation, type, fhe_type,
-  is_scalar, hcu_cost, hcu_depth, caller, inputs, result, and block_number.
-
-  ## Parameters
-  - `assigns` - Map with `:operations` (list of FheOperation.t()), `:total_hcu`,
-    `:max_depth_hcu`, and `:operation_count`.
-
-  ## Returns
-  - Map with "items", "total_hcu", "max_depth_hcu", "operation_count" keys.
-  """
-  def render("fhe_operations.json", %{
-        operations: operations,
-        total_hcu: total_hcu,
-        max_depth_hcu: max_depth_hcu,
-        operation_count: operation_count
-      }) do
-    %{
-      "items" => Enum.map(operations, &prepare_fhe_operation/1),
-      "total_hcu" => total_hcu,
-      "max_depth_hcu" => max_depth_hcu,
-      "operation_count" => operation_count
-    }
   end
 
   @doc """
@@ -425,36 +417,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     end
   end
 
-  defp prepare_transactions(transactions, conn, watchlist_names) do
-    block_height = BlockNumber.get_max()
-    decoded_transactions = Transaction.decode_transactions(transactions, true, @api_true)
-    historic_exchange_rates = historic_exchange_rates(transactions)
-
-    transactions
-    |> with_chain_type_transformations()
-    |> Enum.zip(decoded_transactions)
-    |> Enum.map(fn {transaction, decoded_input} ->
-      prepare_transaction(
-        transaction,
-        conn,
-        false,
-        block_height,
-        watchlist_names,
-        decoded_input,
-        historic_exchange_rates
-      )
-    end)
-  end
-
-  defp prepare_transaction(
-         transaction,
-         conn,
-         single_transaction?,
-         block_height,
-         watchlist_names,
-         decoded_input,
-         historic_exchange_rates
-       )
+  defp prepare_transaction(transaction, conn, single_transaction?, block_height, watchlist_names \\ nil, decoded_input)
 
   defp prepare_transaction(
          {%Reward{} = emission_reward, %Reward{} = validator_reward},
@@ -462,8 +425,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
          single_transaction?,
          _block_height,
          _watchlist_names,
-         _decoded_input,
-         _historic_exchange_rates
+         _decoded_input
        ) do
     %{
       "emission_reward" => emission_reward.reward,
@@ -492,10 +454,9 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
          single_transaction?,
          block_height,
          watchlist_names,
-         decoded_input,
-         historic_exchange_rates
+         decoded_input
        ) do
-    base_fee_per_gas = base_fee_per_gas(transaction)
+    base_fee_per_gas = transaction.block && transaction.block.base_fee_per_gas
     max_priority_fee_per_gas = transaction.max_priority_fee_per_gas
     max_fee_per_gas = transaction.max_fee_per_gas
 
@@ -509,13 +470,6 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
     block_timestamp = block_timestamp(transaction)
 
-    tags_data =
-      if single_transaction? do
-        batched_address_tags(transaction, conn)
-      else
-        watchlist_names
-      end
-
     result = %{
       "hash" => transaction.hash,
       "result" => status,
@@ -528,7 +482,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
           transaction.from_address,
           transaction.from_address_hash,
           single_transaction?,
-          tags_data
+          watchlist_names
         ),
       "to" =>
         Helper.address_with_info(
@@ -536,7 +490,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
           transaction.to_address,
           transaction.to_address_hash,
           single_transaction?,
-          tags_data
+          watchlist_names
         ),
       "created_contract" =>
         Helper.address_with_info(
@@ -544,20 +498,20 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
           transaction.created_contract_address,
           transaction.created_contract_address_hash,
           single_transaction?,
-          tags_data
+          watchlist_names
         ),
       "confirmations" => transaction.block |> Chain.confirmations(block_height: block_height) |> format_confirmations(),
       "confirmation_duration" => processing_time_duration(transaction),
       "value" => transaction.value,
       "fee" => transaction |> Transaction.fee(:wei) |> format_fee(),
-      "gas_price" => gas_price_for_display(transaction),
+      "gas_price" => transaction.gas_price || Transaction.effective_gas_price(transaction),
       "type" => transaction.type,
       "gas_used" => transaction.gas_used,
       "gas_limit" => transaction.gas,
       "max_fee_per_gas" => transaction.max_fee_per_gas,
       "max_priority_fee_per_gas" => transaction.max_priority_fee_per_gas,
       "base_fee_per_gas" => base_fee_per_gas,
-      "priority_fee" => priority_fee_display(priority_fee_per_gas, transaction),
+      "priority_fee" => priority_fee_per_gas && Wei.mult(priority_fee_per_gas, transaction.gas_used),
       "transaction_burnt_fee" => burnt_fees(transaction, base_fee_per_gas),
       "nonce" => transaction.nonce,
       "position" => transaction.index,
@@ -566,51 +520,20 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
       "decoded_input" => decoded_input_data,
       "token_transfers" => token_transfers(transaction.token_transfers, conn, single_transaction?),
       "token_transfers_overflow" => token_transfers_overflow(transaction.token_transfers, single_transaction?),
+      "actions" => transaction_actions(transaction.transaction_actions),
       "exchange_rate" => Market.get_coin_exchange_rate().fiat_value,
-      "historic_exchange_rate" => historic_exchange_rate(block_timestamp, historic_exchange_rates),
+      "historic_exchange_rate" => historic_exchange_rate(block_timestamp),
       "method" => Transaction.method_name(transaction, decoded_input),
       "transaction_types" => transaction_types(transaction),
       "transaction_tag" =>
         GetTransactionTags.get_transaction_tags(transaction.hash, current_user(single_transaction? && conn)),
       "has_error_in_internal_transactions" => transaction.has_error_in_internal_transactions,
       "authorization_list" => authorization_list(transaction.signed_authorizations),
-      "is_pending_update" => transaction_pending_update?(transaction),
-      "fhe_operations_count" => fhe_operations_count_display(transaction)
+      "is_pending_update" => transaction.block && transaction.block.refetch_needed
     }
 
     result
     |> with_chain_type_fields(transaction, single_transaction?, conn, watchlist_names)
-  end
-
-  defp base_fee_per_gas(transaction) do
-    transaction.block && transaction.block.base_fee_per_gas
-  end
-
-  # Fetches tags for from/to/created addresses with one query per tag type
-  # instead of up to three queries per address.
-  defp batched_address_tags(transaction, conn) do
-    address_hashes =
-      [transaction.from_address_hash, transaction.to_address_hash, transaction.created_contract_address_hash]
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq()
-
-    {:address_tags, GetAddressTags.get_address_tags_batch(address_hashes, current_user(conn), @api_true)}
-  end
-
-  defp gas_price_for_display(transaction) do
-    transaction.gas_price || Transaction.effective_gas_price(transaction)
-  end
-
-  defp priority_fee_display(priority_fee_per_gas, transaction) do
-    priority_fee_per_gas && Wei.mult(priority_fee_per_gas, transaction.gas_used)
-  end
-
-  defp transaction_pending_update?(transaction) do
-    transaction.block && transaction.block.refetch_needed
-  end
-
-  defp fhe_operations_count_display(transaction) do
-    transaction.fhe_operations_count || 0
   end
 
   # Calculates burnt fees for a transaction.
@@ -646,6 +569,15 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   def token_transfers_overflow(token_transfers, _),
     do: Enum.count(token_transfers) > Chain.get_token_transfers_per_transaction_preview_count()
+
+  def transaction_actions(%NotLoaded{}), do: []
+
+  @doc """
+    Renders transaction actions
+  """
+  def transaction_actions(actions) do
+    render("transaction_actions.json", %{actions: actions})
+  end
 
   @doc """
     Renders the authorization list for a transaction.
@@ -804,52 +736,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
                | :token_transfer
                | :blob_transaction
                | :set_code_transaction
-               | :sponsored_transaction
-               | :op_stack_l1_attributes_transaction
-               | :op_stack_post_exec_transaction
-  def transaction_types(transaction, types \\ [], stage \\ :op_stack_l1_attributes_transaction)
-
-  def transaction_types(
-        %Transaction{type: type, index: index} = transaction,
-        types,
-        :op_stack_l1_attributes_transaction
-      ) do
-    types =
-      if chain_type() == :optimism and type == 0x7E and index == 0 do
-        [:op_stack_l1_attributes_transaction | types]
-      else
-        types
-      end
-
-    transaction_types(transaction, types, :op_stack_post_exec_transaction)
-  end
-
-  def transaction_types(
-        %Transaction{type: type} = transaction,
-        types,
-        :op_stack_post_exec_transaction
-      ) do
-    types =
-      if chain_type() == :optimism and type == 0x7D do
-        [:op_stack_post_exec_transaction | types]
-      else
-        types
-      end
-
-    transaction_types(transaction, types, :sponsored_transaction)
-  end
-
-  def transaction_types(%Transaction{type: type} = transaction, types, :sponsored_transaction) do
-    # Eden sponsored (batched) transaction type
-    types =
-      if chain_type() == :eden and type == 118 do
-        [:sponsored_transaction | types]
-      else
-        types
-      end
-
-    transaction_types(transaction, types, :set_code_transaction)
-  end
+  def transaction_types(transaction, types \\ [], stage \\ :set_code_transaction)
 
   def transaction_types(%Transaction{type: type} = transaction, types, :set_code_transaction) do
     # EIP-7702 set code transaction type
@@ -967,26 +854,6 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
   def block_timestamp(%Block{} = block), do: block.timestamp
   def block_timestamp(_), do: nil
 
-  defp preview_address(%Address{} = address, _hash) do
-    %{
-      "hash" => Address.checksum(address),
-      "name" => Helper.address_name(address),
-      "ens_domain_name" => address.ens_domain_name,
-      "metadata" => address.metadata
-    }
-  end
-
-  defp preview_address(_, nil), do: nil
-
-  defp preview_address(_, hash) do
-    %{
-      "hash" => Address.checksum(hash),
-      "name" => nil,
-      "ens_domain_name" => nil,
-      "metadata" => nil
-    }
-  end
-
   defp prepare_state_change(%StateChange{} = state_change) do
     coin_or_transfer =
       if state_change.coin_or_token_transfers == :coin,
@@ -1037,41 +904,6 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     Map.merge(map, %{"change" => change})
   end
 
-  defp historic_exchange_rates(transactions) do
-    cutoff = DateTime.shift(DateTime.utc_now(), day: -1)
-
-    dates =
-      transactions
-      |> Enum.flat_map(&historic_exchange_rate_dates(&1, cutoff))
-      |> Enum.uniq()
-
-    Market.get_coin_exchange_rates_at_dates(dates, @api_true)
-  end
-
-  defp historic_exchange_rate_dates(%Transaction{} = transaction, cutoff) do
-    transaction
-    |> block_timestamp()
-    |> historic_exchange_rate_dates(cutoff)
-  end
-
-  defp historic_exchange_rate_dates(%DateTime{} = timestamp, cutoff) do
-    if DateTime.before?(timestamp, cutoff), do: [DateTime.to_date(timestamp)], else: []
-  end
-
-  defp historic_exchange_rate_dates(_, _cutoff), do: []
-
-  defp historic_exchange_rate(block_timestamp, nil), do: historic_exchange_rate(block_timestamp)
-  defp historic_exchange_rate(nil, _historic_exchange_rates), do: nil
-
-  defp historic_exchange_rate(block_timestamp, historic_exchange_rates) do
-    historic_exchange_rates
-    |> Map.get(DateTime.to_date(block_timestamp))
-    |> case do
-      %{fiat_value: fiat_value} -> fiat_value
-      nil -> nil
-    end
-  end
-
   defp historic_exchange_rate(nil), do: nil
 
   defp historic_exchange_rate(block_timestamp) do
@@ -1111,6 +943,18 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     )
   end
 
+  defp do_with_chain_type_fields(
+         result,
+         :polygon_zkevm,
+         transaction,
+         true = _single_transaction?,
+         _conn,
+         _watchlist_names
+       ) do
+    # credo:disable-for-next-line Credo.Check.Design.AliasUsage
+    BlockScoutWeb.API.V2.PolygonZkevmView.extend_transaction_json_response(result, transaction)
+  end
+
   defp do_with_chain_type_fields(result, :zksync, transaction, true = _single_transaction?, _conn, _watchlist_names) do
     # credo:disable-for-next-line Credo.Check.Design.AliasUsage
     BlockScoutWeb.API.V2.ZkSyncView.extend_transaction_json_response(result, transaction)
@@ -1136,17 +980,6 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     BlockScoutWeb.API.V2.SuaveView.extend_transaction_json_response(
       transaction,
       result,
-      single_transaction?,
-      conn,
-      watchlist_names
-    )
-  end
-
-  defp do_with_chain_type_fields(result, :eden, transaction, single_transaction?, conn, watchlist_names) do
-    # credo:disable-for-next-line Credo.Check.Design.AliasUsage
-    BlockScoutWeb.API.V2.EdenView.extend_transaction_json_response(
-      result,
-      transaction,
       single_transaction?,
       conn,
       watchlist_names
@@ -1193,30 +1026,5 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
          _watchlist_names
        ) do
     result
-  end
-
-  defp prepare_fhe_operation(operation) do
-    caller_info =
-      if operation.caller do
-        # operation.caller is an Explorer.Chain.Hash struct
-        address_hash = operation.caller
-        Helper.address_with_info(nil, %{hash: address_hash}, address_hash, false)
-      else
-        nil
-      end
-
-    %{
-      "log_index" => operation.log_index,
-      "operation" => operation.operation,
-      "type" => operation.operation_type,
-      "fhe_type" => operation.fhe_type,
-      "is_scalar" => operation.is_scalar,
-      "hcu_cost" => operation.hcu_cost,
-      "hcu_depth" => operation.hcu_depth,
-      "caller" => caller_info,
-      "inputs" => operation.input_handles,
-      "result" => "0x" <> Base.encode16(operation.result_handle, case: :lower),
-      "block_number" => operation.block_number
-    }
   end
 end

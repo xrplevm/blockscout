@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Transaction.Fork do
   @moduledoc """
   A transaction fork has the same `hash` as a `t:Explorer.Chain.Transaction.t/0`, but associates that `hash` with a

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Scroll.Batches do
   @moduledoc """
   Bulk imports `Explorer.Chain.Scroll.Batch`.

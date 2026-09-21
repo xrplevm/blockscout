@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.SanitizeErc1155TokenBalancesWithoutTokenIds do
   @moduledoc """
   Deletes token balances of ERC-1155 tokens with empty token_id.

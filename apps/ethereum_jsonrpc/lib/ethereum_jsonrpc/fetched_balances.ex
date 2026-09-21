@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.FetchedBalances do
   @moduledoc """
   Balance params and errors from a batch request from `eth_getBalance`.

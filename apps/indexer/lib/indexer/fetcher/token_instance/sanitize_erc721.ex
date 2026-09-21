@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenInstance.SanitizeERC721 do
   @moduledoc """
     This fetcher is stands for creating token instances which wasn't inserted yet and index meta for them.

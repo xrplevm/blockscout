@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.UncleBlock.Supervisor.Case do
   alias Indexer.Fetcher.UncleBlock
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.SolidityScan do
   @moduledoc """
   Module for SolidityScan integration https://apidoc.solidityscan.com/solidityscan-security-api/solidityscan-other-apis/quickscan-api-v1

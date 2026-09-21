@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.ZkSync.Utils.Db do
   @moduledoc """
     Common functions to simplify DB routines for Indexer.Fetcher.ZkSync fetchers

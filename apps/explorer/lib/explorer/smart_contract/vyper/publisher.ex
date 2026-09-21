@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.Vyper.Publisher do
   @moduledoc """
   Module responsible to control Vyper contract verification.
@@ -105,8 +104,7 @@ defmodule Explorer.SmartContract.Vyper.Publisher do
       |> Map.put("compiler_version", compiler_version)
       |> Map.put("constructor_arguments", constructor_arguments)
       |> Map.put("contract_source_code", contract_source_code)
-      # external_libraries is not used in vyper, but updating if we'll use it in the future
-      |> Map.put("external_libraries", source["libraries"] || cast_libraries(compiler_settings["libraries"] || %{}))
+      |> Map.put("external_libraries", cast_libraries(compiler_settings["libraries"] || %{}))
       |> Map.put("name", contract_name)
       |> Map.put("file_path", if(save_file_path?, do: file_name))
       |> Map.put("secondary_sources", secondary_sources)

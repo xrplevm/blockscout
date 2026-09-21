@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Address.Response.ChainTypeCustomizations do
   @moduledoc false
   require OpenApiSpex

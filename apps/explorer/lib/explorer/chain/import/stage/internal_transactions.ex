@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Stage.InternalTransactions do
   @moduledoc """
   Imports the rest of the data.

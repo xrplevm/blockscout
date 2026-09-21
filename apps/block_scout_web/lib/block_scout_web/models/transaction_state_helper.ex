@@ -1,10 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Models.TransactionStateHelper do
   @moduledoc """
     Transaction state changes related functions
   """
-
-  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
   import Explorer.PagingOptions, only: [default_paging_options: 0]
@@ -12,16 +9,7 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
   import Explorer.Chain.SmartContract.Proxy.Models.Implementation, only: [proxy_implementations_association: 0]
 
   alias Explorer.{Chain, PagingOptions, Repo}
-
-  alias Explorer.Chain.{
-    Address.CoinBalance,
-    BlockNumberHelper,
-    DenormalizationHelper,
-    InternalTransaction,
-    Transaction,
-    Wei
-  }
-
+  alias Explorer.Chain.{Address.CoinBalance, BlockNumberHelper, InternalTransaction, Transaction, Wei}
   alias Explorer.Chain.Cache.StateChanges
   alias Explorer.Chain.Transaction.StateChange
   alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
@@ -76,25 +64,22 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
         api?: Keyword.get(options, :api?, false)
       )
       |> Enum.filter(&(&1.index <= transaction.index))
-      |> Repo.preload([:token_transfers])
-      |> Transaction.preload_internal_transactions()
+      |> Repo.preload([:token_transfers, :internal_transactions])
 
     transaction =
       block_transactions
       |> Enum.find(&(&1.hash == transaction.hash))
       |> Repo.preload(
-        [
-          token_transfers: [
-            token: reputation_association(),
-            from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
-            to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
-          ],
-          block: [miner: [:names, :smart_contract, proxy_implementations_association()]],
+        token_transfers: [
+          token: reputation_association(),
           from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
           to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
-        ] ++ chain_type_address_preloads()
-      )
-      |> Transaction.preload_internal_transactions(
+        ],
+        internal_transactions: [
+          from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
+          to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
+        ],
+        block: [miner: [:names, :smart_contract, proxy_implementations_association()]],
         from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
         to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
       )
@@ -119,7 +104,8 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
   end
 
   defp transaction_to_coin_balances(transaction, previous_block_number, options) do
-    initial_coin_balances =
+    Enum.reduce(
+      transaction.internal_transactions,
       %{
         transaction.from_address_hash =>
           {transaction.from_address, coin_balance(transaction.from_address_hash, previous_block_number, options)},
@@ -127,80 +113,9 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
           {transaction.to_address, coin_balance(transaction.to_address_hash, previous_block_number, options)},
         transaction.block.miner_hash =>
           {transaction.block.miner, coin_balance(transaction.block.miner_hash, previous_block_number, options)}
-      }
-      |> put_fee_payer_coin_balance(transaction, previous_block_number, options)
-      |> put_calls_recipients_coin_balances(transaction, previous_block_number, options)
-
-    Enum.reduce(
-      transaction.internal_transactions,
-      initial_coin_balances,
+      },
       &internal_transaction_to_coin_balances(&1, previous_block_number, options, &2)
     )
-  end
-
-  if @chain_type == :eden do
-    defp put_fee_payer_coin_balance(
-           coin_balances,
-           %Transaction{fee_payer_address_hash: fee_payer_address_hash} = transaction,
-           previous_block_number,
-           options
-         )
-         when not is_nil(fee_payer_address_hash) do
-      Map.put_new_lazy(coin_balances, fee_payer_address_hash, fn ->
-        {transaction.fee_payer_address, coin_balance(fee_payer_address_hash, previous_block_number, options)}
-      end)
-    end
-  end
-
-  defp put_fee_payer_coin_balance(coin_balances, _transaction, _previous_block_number, _options), do: coin_balances
-
-  if @chain_type == :eden do
-    alias Explorer.Chain.Address
-
-    defp put_calls_recipients_coin_balances(coin_balances, transaction, previous_block_number, options) do
-      transaction
-      |> Transaction.calls_value_by_recipient()
-      |> Map.keys()
-      |> Enum.reject(&Map.has_key?(coin_balances, &1))
-      |> case do
-        [] ->
-          coin_balances
-
-        address_hashes ->
-          addresses = hashes_to_addresses(address_hashes, options)
-
-          Enum.reduce(address_hashes, coin_balances, fn address_hash, acc ->
-            Map.put(
-              acc,
-              address_hash,
-              {addresses[address_hash] || %Address{hash: address_hash},
-               coin_balance(address_hash, previous_block_number, options)}
-            )
-          end)
-      end
-    end
-
-    defp hashes_to_addresses(address_hashes, options) do
-      address_hashes
-      |> Chain.hashes_to_addresses(options)
-      |> Chain.select_repo(options).preload([
-        :scam_badge,
-        :names,
-        :smart_contract,
-        proxy_implementations_association()
-      ])
-      |> Map.new(&{&1.hash, &1})
-    end
-  else
-    defp put_calls_recipients_coin_balances(coin_balances, _transaction, _previous_block_number, _options),
-      do: coin_balances
-  end
-
-  if @chain_type == :eden do
-    defp chain_type_address_preloads,
-      do: [fee_payer_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]]
-  else
-    defp chain_type_address_preloads, do: []
   end
 
   defp internal_transaction_to_coin_balances(
@@ -280,48 +195,36 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
   end
 
   defp token_transfers_to_balances_reducer(transfer, balances, prev_block, options) do
-    token_type =
-      if DenormalizationHelper.tt_denormalization_finished?() do
-        transfer.token_type
-      else
-        transfer.token && transfer.token.type
-      end
+    from = transfer.from_address
+    to = transfer.to_address
+    token_hash = transfer.token_contract_address_hash
 
-    # Skip ERC-7984 (confidential) transfers - we can't track encrypted balances
-    if token_type == "ERC-7984" do
-      balances
-    else
-      from = transfer.from_address
-      to = transfer.to_address
-      token_hash = transfer.token_contract_address_hash
+    balances
+    |> case do
+      # from address already in the map
+      %{^from => %{^token_hash => _}} = balances ->
+        balances
 
-      balances
-      |> case do
-        # from address already in the map
-        %{^from => %{^token_hash => _}} = balances ->
-          balances
+      # we need to add from address into the map
+      balances ->
+        put_in(
+          balances,
+          Enum.map([from, token_hash], &Access.key(&1, %{})),
+          token_balances(from.hash, transfer, prev_block, options)
+        )
+    end
+    |> case do
+      # to address already in the map
+      %{^to => %{^token_hash => _}} = balances ->
+        balances
 
-        # we need to add from address into the map
-        balances ->
-          put_in(
-            balances,
-            Enum.map([from, token_hash], &Access.key(&1, %{})),
-            token_balances(from.hash, transfer, prev_block, options)
-          )
-      end
-      |> case do
-        # to address already in the map
-        %{^to => %{^token_hash => _}} = balances ->
-          balances
-
-        # we need to add to address into the map
-        balances ->
-          put_in(
-            balances,
-            Enum.map([to, token_hash], &Access.key(&1, %{})),
-            token_balances(to.hash, transfer, prev_block, options)
-          )
-      end
+      # we need to add to address into the map
+      balances ->
+        put_in(
+          balances,
+          Enum.map([to, token_hash], &Access.key(&1, %{})),
+          token_balances(to.hash, transfer, prev_block, options)
+        )
     end
   end
 end

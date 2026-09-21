@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Zilliqa.ScillaSmartContracts do
   @moduledoc """
   Marks Scilla smart contracts as verified on the Zilliqa blockchain. These

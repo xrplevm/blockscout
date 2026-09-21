@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.SigProviderInterface do
   @moduledoc """
     Adapter for decoding events and function calls with https://github.com/blockscout/blockscout-rs/tree/main/sig-provider
@@ -9,7 +8,7 @@ defmodule Explorer.SmartContract.SigProviderInterface do
   require Logger
 
   @request_error_msg "Error while sending request to sig-provider"
-  @post_timeout :timer.seconds(30)
+  @post_timeout :timer.seconds(60)
 
   @spec decode_function_call(map()) :: {:ok, list()} | {:error, any}
   def decode_function_call(input) do
@@ -87,13 +86,17 @@ defmodule Explorer.SmartContract.SigProviderInterface do
         {:error, body}
 
       {:error, error} ->
+        old_truncate = Application.get_env(:logger, :truncate)
+        Logger.configure(truncate: :infinity)
+
         Logger.error(fn ->
           [
             "Error while sending request to sig-provider url: #{url}: ",
-            inspect(error)
+            inspect(error, limit: :infinity, printable_limit: :infinity)
           ]
         end)
 
+        Logger.configure(truncate: old_truncate)
         {:error, @request_error_msg}
     end
   end
@@ -106,20 +109,17 @@ defmodule Explorer.SmartContract.SigProviderInterface do
         body |> Jason.decode()
 
       error ->
+        old_truncate = Application.get_env(:logger, :truncate)
+        Logger.configure(truncate: :infinity)
+
         Logger.error(fn ->
           [
-            "Error while sending request to sig-provider url: #{url} ",
-            inspect(error)
-          ]
-        end)
-
-        Logger.debug(fn ->
-          [
             "Error while sending request to sig-provider url: #{url}, body: #{inspect(body, limit: :infinity, printable_limit: :infinity)}: ",
-            inspect(error)
+            inspect(error, limit: :infinity, printable_limit: :infinity)
           ]
         end)
 
+        Logger.configure(truncate: old_truncate)
         {:error, @request_error_msg}
     end
   end

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Scroll.BridgeL2 do
   @moduledoc """
   The module for scanning Scroll RPC node on L2 for the message logs (events), parsing them,
@@ -22,11 +21,11 @@ defmodule Indexer.Fetcher.Scroll.BridgeL2 do
 
   import Ecto.Query
 
+  alias Explorer.Chain.RollupReorgMonitorQueue
   alias Explorer.Chain.Scroll.{Bridge, Reader}
   alias Explorer.Repo
   alias Indexer.Fetcher.Scroll.Bridge, as: BridgeFetcher
   alias Indexer.Helper
-  alias Indexer.RollupReorgMonitorQueue
 
   @fetcher_name :scroll_bridge_l2
 
@@ -151,6 +150,6 @@ defmodule Indexer.Fetcher.Scroll.BridgeL2 do
       )
     end
 
-    RollupReorgMonitorQueue.push(reorg_block, __MODULE__)
+    RollupReorgMonitorQueue.reorg_block_push(reorg_block, __MODULE__)
   end
 end

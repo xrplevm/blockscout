@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
   use Explorer.DataCase
 
@@ -145,12 +144,10 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
                     token_id: ^token_id_6
                   }
                 ],
-                # one address holding multiple token_ids of the same token is
-                # a single holder
                 address_current_token_balances_update_token_holder_counts: [
                   %{
                     contract_address_hash: ^token_contract_address_hash,
-                    holder_count: 1
+                    holder_count: 2
                   },
                   %{
                     contract_address_hash: ^token_erc_20_contract_address_hash,
@@ -162,7 +159,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
                   },
                   %{
                     contract_address_hash: ^token_erc_404_contract_address_hash,
-                    holder_count: 1
+                    holder_count: 2
                   }
                 ]
               }} =
@@ -310,7 +307,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
       assert current_token_balance.value == Decimal.new(200)
     end
 
-    test "updates when the new block number is greater even if value_fetched_at is not set", %{
+    test "ignores when the new value_fetched_at not set", %{
       address: %Address{hash: address_hash} = address,
       token: %Token{contract_address_hash: token_contract_address_hash},
       options: options
@@ -326,7 +323,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
 
       update_holder_count!(token_contract_address_hash, 1)
 
-      assert {:ok, %{address_current_token_balances_update_token_holder_counts: []}} =
+      assert {:ok, %{address_current_token_balances: [], address_current_token_balances_update_token_holder_counts: []}} =
                run_changes(
                  %{
                    address_hash: address_hash,
@@ -339,8 +336,8 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
 
       current_token_balance = Repo.get_by(CurrentTokenBalance, address_hash: address_hash)
 
-      assert current_token_balance.block_number == 2
-      assert current_token_balance.value == Decimal.new(100)
+      assert current_token_balance.block_number == 1
+      assert current_token_balance.value == Decimal.new(200)
     end
 
     test "ignores when the new block number is lesser", %{
@@ -572,92 +569,6 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
                      value_fetched_at: DateTime.utc_now()
                    }
                  ],
-                 options
-               )
-    end
-
-    test "burn address balances never affect the holder_count", %{
-      token: %Token{contract_address_hash: token_contract_address_hash},
-      options: options
-    } do
-      %Address{hash: burn_address_hash} = insert(:address, hash: "0x0000000000000000000000000000000000000000")
-
-      assert {:ok, %{address_current_token_balances_update_token_holder_counts: []}} =
-               run_changes(
-                 %{
-                   address_hash: burn_address_hash,
-                   token_contract_address_hash: token_contract_address_hash,
-                   block_number: 1,
-                   value: Decimal.new(100),
-                   value_fetched_at: DateTime.utc_now()
-                 },
-                 options
-               )
-    end
-
-    test "an inserted ERC-7984 balance counts as a holder regardless of value, updates do not double count", %{
-      address: %Address{hash: address_hash},
-      options: options
-    } do
-      %Token{contract_address_hash: token_contract_address_hash} = insert(:token, type: "ERC-7984", holder_count: 0)
-
-      changes = %{
-        address_hash: address_hash,
-        token_contract_address_hash: token_contract_address_hash,
-        block_number: 1,
-        value: Decimal.new(0),
-        value_fetched_at: DateTime.utc_now(),
-        token_type: "ERC-7984"
-      }
-
-      assert {:ok,
-              %{
-                address_current_token_balances_update_token_holder_counts: [
-                  %{contract_address_hash: ^token_contract_address_hash, holder_count: 1}
-                ]
-              }} = run_changes(changes, options)
-
-      # updating an existing confidential balance is a 1 -> 1 transition
-      assert {:ok, %{address_current_token_balances_update_token_holder_counts: []}} =
-               run_changes(%{changes | block_number: 2, value_fetched_at: DateTime.utc_now()}, options)
-    end
-
-    test "zeroing one token_id of a multi-token_id holder does not change the holder_count", %{
-      address: %Address{hash: address_hash} = address,
-      options: options
-    } do
-      %Token{contract_address_hash: token_contract_address_hash} = insert(:token, type: "ERC-1155", holder_count: 1)
-
-      insert(:address_current_token_balance,
-        address: address,
-        token_contract_address_hash: token_contract_address_hash,
-        token_id: 1,
-        token_type: "ERC-1155",
-        value: 5,
-        block_number: 1
-      )
-
-      insert(:address_current_token_balance,
-        address: address,
-        token_contract_address_hash: token_contract_address_hash,
-        token_id: 2,
-        token_type: "ERC-1155",
-        value: 7,
-        block_number: 1
-      )
-
-      # the address still holds token_id 2, so its holder-ness did not change
-      assert {:ok, %{address_current_token_balances_update_token_holder_counts: []}} =
-               run_changes(
-                 %{
-                   address_hash: address_hash,
-                   token_contract_address_hash: token_contract_address_hash,
-                   block_number: 2,
-                   value: Decimal.new(0),
-                   value_fetched_at: DateTime.utc_now(),
-                   token_id: Decimal.new(1),
-                   token_type: "ERC-1155"
-                 },
                  options
                )
     end

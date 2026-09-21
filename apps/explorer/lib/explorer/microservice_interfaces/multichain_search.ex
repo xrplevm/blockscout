@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
   @moduledoc """
   Module to interact with Multichain search microservice
@@ -24,12 +23,6 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
 
   @max_concurrency 5
   @post_timeout :timer.minutes(5)
-
-  # Max rows per `insert_all` into the export queues. A single chunk from
-  # `extract_batch_import_params_into_chunks/1` places all block and transaction hashes in
-  # its main data, which for a large refetch batch can exceed the Postgres bind-parameter
-  # limit (65535) in one statement, so the inserts are split into sub-batches.
-  @export_queue_insert_chunk_size 5_000
 
   @doc """
   Processes a batch import of data by splitting the input parameters into chunks and sending each chunk as an HTTP POST request to a configured microservice endpoint.
@@ -147,7 +140,7 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
   """
   @spec batch_export_token_info([
           %{
-            :address_hash => Hash.Address.t() | binary(),
+            :address_hash => binary(),
             :data_type => :metadata | :total_supply | :counters | :market_data,
             :data => map()
           }
@@ -349,14 +342,14 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
 
     {prepared_main_data, prepared_balances_data} = prepare_export_data_for_queue(data_to_retry)
 
-    insert_all_in_chunks(
+    Repo.insert_all(
       MainExportQueue,
       Helper.add_timestamps(prepared_main_data),
       on_conflict: MainExportQueue.default_on_conflict(),
       conflict_target: [:hash, :hash_type]
     )
 
-    insert_all_in_chunks(
+    Repo.insert_all(
       BalancesExportQueue,
       Helper.add_timestamps(prepared_balances_data),
       on_conflict: BalancesExportQueue.default_on_conflict(),
@@ -437,7 +430,7 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
     - A map ready to send to Multichain service via HTTP.
   """
   @spec token_info_queue_item_to_http_item(%{
-          :address_hash => Hash.Address.t() | binary(),
+          :address_hash => binary(),
           :data_type => :metadata | :total_supply | :counters | :market_data,
           :data => map()
         }) ::
@@ -445,7 +438,7 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
           | %{:address_hash => String.t(), :counters => map()}
           | %{:address_hash => String.t(), :price_data => map()}
   def token_info_queue_item_to_http_item(item_from_db_queue) do
-    token = %{address_hash: item_from_db_queue.address_hash |> cast_address_hash!() |> Hash.to_string()}
+    token = %{address_hash: "0x" <> Base.encode16(item_from_db_queue.address_hash, case: :lower)}
 
     case item_from_db_queue.data_type do
       :metadata -> Map.put(token, :metadata, item_from_db_queue.data)
@@ -470,12 +463,12 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
           | %{:address_hash => String.t(), :counters => map()}
           | %{:address_hash => String.t(), :price_data => map()}
         ) :: %{
-          :address_hash => Hash.Address.t(),
+          :address_hash => binary(),
           :data_type => :metadata | :total_supply | :counters | :market_data,
           :data => map()
         }
   def token_info_http_item_to_queue_item(%{address_hash: "0x" <> address_string} = http_item) do
-    address_hash = cast_address_hash!("0x" <> address_string)
+    {:ok, address_hash} = Base.decode16(address_string, case: :mixed)
 
     metadata = Map.get(http_item, :metadata)
 
@@ -580,9 +573,9 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
       |> Enum.each(fn data_chunk ->
         {prepared_main_data, prepared_balances_data} = prepare_export_data_for_queue(data_chunk)
 
-        insert_all_in_chunks(MainExportQueue, Helper.add_timestamps(prepared_main_data), on_conflict: :nothing)
+        Repo.insert_all(MainExportQueue, Helper.add_timestamps(prepared_main_data), on_conflict: :nothing)
 
-        insert_all_in_chunks(BalancesExportQueue, Helper.add_timestamps(prepared_balances_data),
+        Repo.insert_all(BalancesExportQueue, Helper.add_timestamps(prepared_balances_data),
           on_conflict: {:replace, [:value, :updated_at]},
           conflict_target:
             {:unsafe_fragment,
@@ -594,17 +587,6 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
     else
       :ignore
     end
-  end
-
-  # Inserts already-timestamped export-queue rows in sub-batches bounded by
-  # `@export_queue_insert_chunk_size`, so a large list never exceeds the Postgres
-  # bind-parameter limit in a single `insert_all`. `opts` (e.g. `:on_conflict`,
-  # `:conflict_target`) are passed through unchanged to each `Repo.insert_all/3` call.
-  @spec insert_all_in_chunks(module(), [map()], keyword()) :: :ok
-  defp insert_all_in_chunks(queue_schema, entries, opts) do
-    entries
-    |> Enum.chunk_every(@export_queue_insert_chunk_size)
-    |> Enum.each(&Repo.insert_all(queue_schema, &1, opts))
   end
 
   @doc """
@@ -764,10 +746,7 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
     # - `:ok` if the data is accepted for insertion.
     # - `:ignore` if the Multichain service is not used.
   """
-  @spec send_token_info_to_queue(
-          %{(Hash.Address.t() | binary()) => map()},
-          :metadata | :total_supply | :counters | :market_data
-        ) ::
+  @spec send_token_info_to_queue(%{binary() => map()}, :metadata | :total_supply | :counters | :market_data) ::
           :ok | :ignore
   def send_token_info_to_queue(entries, entries_type) do
     if enabled?() do
@@ -789,26 +768,19 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
   end
 
   @spec extract_token_info_entries_into_chunks(
-          %{(Hash.Address.t() | binary()) => map()},
+          %{binary() => map()},
           :metadata | :total_supply | :counters | :market_data
         ) :: list()
   defp extract_token_info_entries_into_chunks(entries, entries_type) do
     entries
     |> Enum.map(fn {address_hash, data} ->
       %{
-        address_hash: cast_address_hash!(address_hash),
+        address_hash: address_hash,
         data_type: entries_type,
         data: data
       }
     end)
     |> Enum.chunk_every(token_info_chunk_size())
-  end
-
-  defp cast_address_hash!(address_hash) do
-    case Hash.Address.cast(address_hash) do
-      {:ok, cast_address_hash} -> cast_address_hash
-      :error -> raise ArgumentError, "invalid token info address_hash: #{inspect(address_hash)}"
-    end
   end
 
   @doc """
@@ -909,12 +881,7 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
         }
       end)
 
-    # `ON CONFLICT DO UPDATE` fails with a cardinality violation if one `insert_all`
-    # statement carries two rows with the same conflict key, so dedupe on it here.
-    main_queue =
-      (hashes_to_queue ++ addresses_to_queue)
-      |> Enum.sort_by(&{&1.hash, &1.hash_type})
-      |> Enum.uniq_by(&{&1.hash, &1.hash_type})
+    main_queue = hashes_to_queue ++ addresses_to_queue
 
     balances_queue = compose_balances_queue(address_coin_balances, address_token_balances)
 
@@ -959,12 +926,7 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
         }
       end)
 
-    # Conflict target of the balances queue is
-    # `(address_hash, token_contract_address_hash_or_native, COALESCE(token_id, -1))`;
-    # duplicates within one `insert_all` would raise a cardinality violation.
-    (coin_balances_queue ++ token_balances_queue)
-    |> Enum.sort_by(&{&1.address_hash, &1.token_contract_address_hash_or_native, &1[:token_id]})
-    |> Enum.uniq_by(&{&1.address_hash, &1.token_contract_address_hash_or_native, &1[:token_id]})
+    coin_balances_queue ++ token_balances_queue
   end
 
   @spec http_post_request(String.t(), map()) :: {:ok, any()} | {:error, String.t()}
@@ -1063,21 +1025,18 @@ defmodule Explorer.MicroserviceInterfaces.MultichainSearch do
 
     block_transaction_hashes = block_hashes ++ transaction_hashes
 
-    # Dedupe by hash only: the same address can arrive several times with different
-    # non-key fields (e.g. coin balance read at different moments), and duplicates would
-    # later violate the export queues' unique constraints within a single `insert_all`.
     indexed_addresses_chunks =
       addresses
       |> Enum.sort_by(& &1.hash)
-      |> Enum.uniq_by(& &1.hash)
+      |> Enum.uniq()
       |> Enum.chunk_every(addresses_chunk_size())
       |> Enum.with_index()
 
     indexed_address_coin_balances_chunks =
       address_coin_balances
-      |> Enum.reject(&is_nil(&1.value))
       |> Enum.sort_by(& &1.address_hash)
-      |> Enum.uniq_by(& &1.address_hash)
+      |> Enum.uniq()
+      |> Enum.reject(&is_nil(&1.value))
       |> Enum.chunk_every(addresses_chunk_size())
       |> Enum.with_index()
 

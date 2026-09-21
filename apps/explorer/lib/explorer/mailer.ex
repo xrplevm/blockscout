@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Mailer do
   @moduledoc """
     Base module for mail sending

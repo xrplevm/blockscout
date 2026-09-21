@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Filecoin do
   @moduledoc """
   Ethereum JSONRPC methods that are only supported by Filecoin.

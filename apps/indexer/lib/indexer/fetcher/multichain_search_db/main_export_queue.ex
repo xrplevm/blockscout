@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.MultichainSearchDb.MainExportQueue do
   @moduledoc """
   Exports blockchain data to Multichain Search DB service from the queue.

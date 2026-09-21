@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Block.Countdown do
   @moduledoc """
   This module defines the schema for block countdown response from /api/v2/blocks/:block_number/countdown.
@@ -11,40 +10,44 @@ defmodule BlockScoutWeb.Schemas.API.V2.Block.Countdown do
     title: "BlockCountdown",
     description: "Block countdown information showing estimated time until a target block is reached",
     type: :object,
-    additionalProperties: false,
     properties: %{
-      current_block_number: %Schema{
-        type: :string,
+      current_block: %Schema{
+        type: :integer,
         description: "The current highest block number in the blockchain",
-        example: "22566361"
+        minimum: 0,
+        example: 22_566_361
       },
-      countdown_block_number: %Schema{
-        type: :string,
+      countdown_block: %Schema{
+        type: :integer,
         description: "The target block number for the countdown",
-        example: "22600000"
+        minimum: 0,
+        example: 22_600_000
       },
-      remaining_blocks_count: %Schema{
-        type: :string,
+      remaining_blocks: %Schema{
+        type: :integer,
         description: "Number of blocks remaining until the target block is reached",
-        example: "33639"
+        minimum: 0,
+        example: 33_639
       },
-      estimated_time_in_seconds: %Schema{
-        type: :string,
+      estimated_time_in_sec: %Schema{
+        type: :number,
+        format: :float,
         description: "Estimated time in seconds until the target block is reached",
-        example: "404868.0"
+        minimum: 0,
+        example: 404_868.0
       }
     },
     required: [
-      :current_block_number,
-      :countdown_block_number,
-      :remaining_blocks_count,
-      :estimated_time_in_seconds
+      :current_block,
+      :countdown_block,
+      :remaining_blocks,
+      :estimated_time_in_sec
     ],
     example: %{
-      current_block_number: "22566361",
-      countdown_block_number: "22600000",
-      remaining_blocks_count: "33639",
-      estimated_time_in_seconds: "404868.0"
+      current_block: 22_566_361,
+      countdown_block: 22_600_000,
+      remaining_blocks: 33_639,
+      estimated_time_in_sec: 404_868.0
     }
   })
 end

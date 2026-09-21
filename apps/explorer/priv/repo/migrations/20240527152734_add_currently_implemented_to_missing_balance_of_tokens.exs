@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.AddCurrentlyImplementedToMissingBalanceOfTokens do
   use Ecto.Migration
 

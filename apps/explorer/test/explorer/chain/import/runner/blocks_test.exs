@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.BlocksTest do
   use Explorer.DataCase
 
@@ -15,7 +14,7 @@ defmodule Explorer.Chain.Import.Runner.BlocksTest do
   alias Explorer.Chain.{Address, Block, Transaction, PendingBlockOperation}
   alias Explorer.Chain.Cache.BlockNumber
   alias Explorer.{Chain, Repo}
-  alias Explorer.Utility.{CountersRefetchBlock, MissingBlockRange}
+  alias Explorer.Utility.MissingBlockRange
 
   describe "run/1" do
     setup do
@@ -87,98 +86,6 @@ defmodule Explorer.Chain.Import.Runner.BlocksTest do
 
       assert Repo.one!(from(transaction_fork in Transaction.Fork, select: "ctid")) == ctid,
              "Tuple was written even though it is not distinct"
-    end
-
-    test "re-import of a block queued for re-fetch subtracts its old content from the address counters", %{
-      consensus_block: %{hash: block_hash, miner_hash: miner_hash, number: block_number},
-      options: options
-    } do
-      consensus_block = insert(:block, %{hash: block_hash, number: block_number, refetch_needed: true})
-
-      transaction =
-        :transaction
-        |> insert()
-        |> with_block(consensus_block)
-
-      gas_used = Decimal.to_integer(transaction.gas_used)
-
-      from_address = Repo.get(Address, transaction.from_address_hash)
-
-      from_address
-      |> Ecto.Changeset.change(%{
-        transactions_count: 5,
-        token_transfers_count: 2,
-        gas_used: gas_used + 100,
-        counters_updated_at: block_number + 10
-      })
-      |> Repo.update!()
-
-      block_params =
-        params_for(:block, hash: block_hash, miner_hash: miner_hash, number: block_number, consensus: true)
-
-      %Ecto.Changeset{valid?: true, changes: block_changes} = Block.changeset(%Block{}, block_params)
-
-      assert {:ok, %{counters_refetched_block_numbers: [^block_number]}} =
-               Multi.new()
-               |> Blocks.run([block_changes], options)
-               |> Repo.transaction()
-
-      reloaded = Repo.get(Address, transaction.from_address_hash)
-
-      assert reloaded.transactions_count == 4
-      assert reloaded.token_transfers_count == 2
-      assert reloaded.gas_used == 100
-      assert reloaded.counters_updated_at == block_number + 10
-
-      assert Repo.aggregate(CountersRefetchBlock, :count) == 1
-
-      # a second import of the same block applies no further deltas: the
-      # re-fetch was already settled into the queue
-      assert {:ok, %{counters_refetched_block_numbers: []}} =
-               Multi.new()
-               |> Blocks.run([block_changes], options)
-               |> Repo.transaction()
-
-      assert Repo.get(Address, transaction.from_address_hash).transactions_count == 4
-    end
-
-    test "a reorg below the consolidation watermark resets it to force a full recalculation", %{
-      consensus_block: %{hash: block_hash, miner_hash: miner_hash, number: block_number},
-      options: options
-    } do
-      consensus_block = insert(:block, %{hash: block_hash, number: block_number})
-
-      transaction =
-        :transaction
-        |> insert()
-        |> with_block(consensus_block)
-
-      consolidated_address =
-        Address
-        |> Repo.get(transaction.from_address_hash)
-        |> Ecto.Changeset.change(%{counters_updated_at: block_number + 10})
-        |> Repo.update!()
-
-      fresh_address =
-        Address
-        |> Repo.get(transaction.to_address_hash)
-        |> Ecto.Changeset.change(%{counters_updated_at: block_number - 1})
-        |> Repo.update!()
-
-      block_params =
-        params_for(:block, hash: block_hash, miner_hash: miner_hash, number: block_number, consensus: false)
-
-      %Ecto.Changeset{valid?: true, changes: block_changes} = Block.changeset(%Block{}, block_params)
-
-      assert {:ok, %{counters_corrections: %{reset: reset_bytes}}} =
-               Multi.new()
-               |> Blocks.run([block_changes], options)
-               |> Repo.transaction()
-
-      assert reset_bytes == [consolidated_address.hash.bytes]
-      assert is_nil(Repo.get(Address, consolidated_address.hash).counters_updated_at)
-      # the forked transaction was above this watermark, so it stays intact
-      assert Repo.get(Address, fresh_address.hash).counters_updated_at == block_number - 1
     end
 
     test "coin balances are deleted and new balances are derived if some blocks lost consensus",
@@ -630,6 +537,50 @@ defmodule Explorer.Chain.Import.Runner.BlocksTest do
       Process.sleep(200)
 
       assert %{from_number: ^block_number, to_number: ^block_number} = Repo.one(MissingBlockRange)
+    end
+
+    test "inserts pending_block_operations only for consensus blocks",
+         %{consensus_block: %{miner_hash: miner_hash}, options: options} do
+      %{number: number, hash: hash} = new_block = params_for(:block, miner_hash: miner_hash, consensus: true)
+      new_block1 = params_for(:block, miner_hash: miner_hash, consensus: false)
+
+      %Ecto.Changeset{valid?: true, changes: block_changes} = Block.changeset(%Block{}, new_block)
+      %Ecto.Changeset{valid?: true, changes: block_changes1} = Block.changeset(%Block{}, new_block1)
+
+      config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
+      Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, Keyword.put(config, :block_traceable?, true))
+
+      on_exit(fn -> Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, config) end)
+
+      Multi.new()
+      |> Blocks.run([block_changes, block_changes1], options)
+      |> Repo.transaction()
+
+      assert %{block_number: ^number, block_hash: ^hash} = Repo.one(PendingBlockOperation)
+    end
+
+    test "inserts pending_block_operations only for actually inserted blocks",
+         %{consensus_block: %{miner_hash: miner_hash}, options: options} do
+      %{number: number, hash: hash} = new_block = params_for(:block, miner_hash: miner_hash, consensus: true)
+      new_block1 = params_for(:block, miner_hash: miner_hash, consensus: true)
+
+      miner = Repo.get_by(Address, hash: miner_hash)
+
+      insert(:block, Map.put(new_block1, :miner, miner))
+
+      %Ecto.Changeset{valid?: true, changes: block_changes} = Block.changeset(%Block{}, new_block)
+      %Ecto.Changeset{valid?: true, changes: block_changes1} = Block.changeset(%Block{}, new_block1)
+
+      config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
+      Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, Keyword.put(config, :block_traceable?, true))
+
+      on_exit(fn -> Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, config) end)
+
+      Multi.new()
+      |> Blocks.run([block_changes, block_changes1], options)
+      |> Repo.transaction()
+
+      assert %{block_number: ^number, block_hash: ^hash} = Repo.one(PendingBlockOperation)
     end
 
     test "change instance owner if was token transfer in older blocks",

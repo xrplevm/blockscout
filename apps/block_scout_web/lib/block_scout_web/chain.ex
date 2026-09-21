@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Chain do
   @moduledoc """
   Converts the `param` to the corresponding resource that uses that format of param.
@@ -56,7 +55,6 @@ defmodule BlockScoutWeb.Chain do
   alias Explorer.Chain.Optimism.FrameSequence, as: OptimismFrameSequence
   alias Explorer.Chain.Optimism.InteropMessage, as: OptimismInteropMessage
   alias Explorer.Chain.Optimism.OutputRoot, as: OptimismOutputRoot
-  alias Explorer.Chain.Scroll.Batch, as: ScrollBatch
   alias Explorer.Chain.Scroll.Bridge, as: ScrollBridge
   alias Explorer.{Etherscan, PagingOptions}
   alias Explorer.Migrator.DeleteZeroValueInternalTransactions
@@ -138,7 +136,7 @@ defmodule BlockScoutWeb.Chain do
     end
   end
 
-  @spec next_page_params(any(), list(), map(), boolean(), (any() -> map())) :: nil | map()
+  @spec next_page_params(any, list(), map(), bool(), (any -> map())) :: nil | map
   def next_page_params(next_page, list, params, increment_items_count? \\ false, paging_function \\ &paging_params/1)
 
   def next_page_params([], _list, _params, _increment_items_count?, _), do: nil
@@ -587,10 +585,6 @@ defmodule BlockScoutWeb.Chain do
     [paging_options: %{@default_paging_options | key: {number}}]
   end
 
-  def paging_options(%{number: number}) do
-    [paging_options: %{@default_paging_options | key: {number}}]
-  end
-
   def paging_options(%{"inserted_at" => inserted_at_string, "hash" => hash_string})
       when is_binary(inserted_at_string) and is_binary(hash_string) do
     with {:ok, inserted_at, _} <- DateTime.from_iso8601(inserted_at_string),
@@ -711,7 +705,11 @@ defmodule BlockScoutWeb.Chain do
 
   # clause for pagination of entities:
   # - Account's entities
+  # - Optimism frame sequences
+  # - Polygon Edge Deposits
+  # - Polygon Edge Withdrawals
   # - Arbitrum cross chain messages
+  # - Scroll cross chain messages
   def paging_options(%{"id" => id_string}) when is_binary(id_string) do
     case Integer.parse(id_string) do
       {id, ""} ->
@@ -726,9 +724,6 @@ defmodule BlockScoutWeb.Chain do
     [paging_options: %{@default_paging_options | key: {id}}]
   end
 
-  # clause for pagination of entities:
-  # - Optimism frame sequences
-  # - Scroll cross chain messages
   def paging_options(%{id: id}) do
     [paging_options: %{@default_paging_options | key: {id}}]
   end
@@ -774,6 +769,22 @@ defmodule BlockScoutWeb.Chain do
           }
       }
     ]
+  end
+
+  # Clause for InternalTransaction by block (for backward compatibility):
+  #  returned by `BlockScoutWeb.API.V2.BlockController.internal_transactions/2` (`/api/v2/blocks/:block_hash_or_number/internal-transactions`)
+  def paging_options(%{"block_index" => index_string}) when is_binary(index_string) do
+    case Integer.parse(index_string) do
+      {index, ""} ->
+        [paging_options: %{@default_paging_options | key: %{block_index: index}}]
+
+      _ ->
+        [paging_options: @default_paging_options]
+    end
+  end
+
+  def paging_options(%{"block_index" => index}) when is_integer(index) do
+    [paging_options: %{@default_paging_options | key: %{block_index: index}}]
   end
 
   # Clause for `Explorer.Chain.Blackfort.Validator`,
@@ -1054,12 +1065,8 @@ defmodule BlockScoutWeb.Chain do
     }
   end
 
-  defp paging_params(%ScrollBatch{number: number}) do
-    %{number: number}
-  end
-
   defp paging_params(%ScrollBridge{index: id}) do
-    %{id: id}
+    %{"id" => id}
   end
 
   defp paging_params(%Instance{token_id: token_id}) do
@@ -1075,7 +1082,7 @@ defmodule BlockScoutWeb.Chain do
     %{index: index}
   end
 
-  # clause for zkEVM batches pagination
+  # clause for zkEVM & Scroll batches pagination
   defp paging_params(%{number: number}) do
     %{"number" => number}
   end
@@ -1300,17 +1307,14 @@ defmodule BlockScoutWeb.Chain do
     paging_options = Keyword.get(options, :paging_options, @default_paging_options)
     transaction_hash = Keyword.get(options, :transaction_hash)
 
-    necessity_by_association = %{block: :optional}
+    necessity_by_association =
+      %{
+        :block => :optional,
+        [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
+        [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional
+      }
 
-    address_preloads = [
-      from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
-      to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
-    ]
-
-    options_with_necessity =
-      options
-      |> Keyword.put_new(:necessity_by_association, necessity_by_association)
-      |> Keyword.put_new(:address_preloads, address_preloads)
+    options_with_necessity = Keyword.put_new(options, :necessity_by_association, necessity_by_association)
 
     cond do
       match?(%PagingOptions{key: {0, 0, 0}}, paging_options) or
@@ -1331,7 +1335,7 @@ defmodule BlockScoutWeb.Chain do
         InternalTransactionOnDemand.fetch_latest(options_with_necessity)
 
       Application.get_env(:explorer, DeleteZeroValueInternalTransactions)[:enabled] ->
-        from_db = InternalTransaction.fetch(options_with_necessity)
+        from_db = InternalTransaction.fetch(options)
 
         from_node =
           if InternalTransactionOnDemand.should_fetch?(from_db, paging_options.page_size) do
@@ -1343,7 +1347,7 @@ defmodule BlockScoutWeb.Chain do
         merge_internal_transactions(from_db, from_node, paging_options.page_size)
 
       true ->
-        InternalTransaction.fetch(options_with_necessity)
+        InternalTransaction.fetch(options)
     end
   end
 
@@ -1385,7 +1389,6 @@ defmodule BlockScoutWeb.Chain do
     - `block`: The block struct to fetch internal transactions for
     - `options`: Keyword list with optional keys:
       - `:necessity_by_association` - associations to preload as required or optional
-      - `:address_preloads` - addresses to preload with nested associations
       - `:paging_options` - pagination options including page_size and key
       - `:type` - filter by transaction type
       - `:call_type` - filter by call type
@@ -1414,7 +1417,6 @@ defmodule BlockScoutWeb.Chain do
     - `options`: Keyword list with optional keys:
       - `:paging_options` - pagination options including page_size and key
       - `:necessity_by_association` - associations to preload as required or optional
-      - `:address_preloads` - addresses to preload with nested associations
 
     ## Returns
     - List of InternalTransaction structs for the given address

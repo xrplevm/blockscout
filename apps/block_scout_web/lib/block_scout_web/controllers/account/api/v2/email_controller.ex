@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Account.API.V2.EmailController do
   use BlockScoutWeb, :controller
   use Utils.CompileTimeEnvHelper, invalid_session_key: [:block_scout_web, :invalid_session_key]
@@ -7,7 +6,7 @@ defmodule BlockScoutWeb.Account.API.V2.EmailController do
 
   alias BlockScoutWeb.AccessHelper
   alias BlockScoutWeb.Account.API.V2.AuthenticateController
-  alias Explorer.Account.{Authentication, Identity}
+  alias Explorer.Account.Identity
   alias Explorer.{Helper, HttpClient, Repo}
   alias Explorer.ThirdPartyIntegrations.Auth0
 
@@ -99,7 +98,7 @@ defmodule BlockScoutWeb.Account.API.V2.EmailController do
           | Plug.Conn.t()
   def link_email(conn, %{"email" => email, "otp" => otp}) do
     with {:auth, %{} = user} <- {:auth, current_user(conn)},
-         {:ok, auth} <- Authentication.link_email(user, email, otp, AccessHelper.conn_to_ip_string(conn)) do
+         {:ok, auth} <- Auth0.link_email(user, email, otp, AccessHelper.conn_to_ip_string(conn)) do
       AuthenticateController.put_auth_to_session(conn, auth)
     end
   end

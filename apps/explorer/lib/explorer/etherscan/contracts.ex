@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Etherscan.Contracts do
   @moduledoc """
   This module contains functions for working with contracts, as they pertain to the

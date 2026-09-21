@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Utility.RateLimiterTest do
   use ExUnit.Case, async: true
 

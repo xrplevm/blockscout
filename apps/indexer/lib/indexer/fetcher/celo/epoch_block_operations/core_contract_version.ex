@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Celo.EpochBlockOperations.CoreContractVersion do
   @moduledoc """
   Fetches the version of the celo core contract.

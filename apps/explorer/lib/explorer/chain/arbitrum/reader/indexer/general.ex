@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.Reader.Indexer.General do
   @moduledoc """
     Provides general-purpose blockchain data reading functionality that is currently

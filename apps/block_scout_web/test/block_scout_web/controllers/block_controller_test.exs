@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.BlockControllerTest do
   use BlockScoutWeb.ConnCase
   alias Explorer.Chain.Block

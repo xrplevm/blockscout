@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.VyperDownloader do
   @moduledoc """
   Checks to see if the requested Vyper compiler version exists, and if not it

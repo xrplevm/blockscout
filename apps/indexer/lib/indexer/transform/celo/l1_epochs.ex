@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Celo.L1Epochs do
   @moduledoc """
   Transformer for Celo L1 epoch data from blockchain blocks.

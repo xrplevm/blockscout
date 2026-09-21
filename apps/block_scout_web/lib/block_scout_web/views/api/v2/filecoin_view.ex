@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.FilecoinView do
   @moduledoc """
   View functions for rendering Filecoin-related data in JSON format.
@@ -34,16 +33,9 @@ defmodule BlockScoutWeb.API.V2.FilecoinView do
           }) ::
             map()
     def preload_and_put_filecoin_robust_address(result, %{address_hash: address_hash} = params) do
-      address =
-        case address_hash do
-          hash when is_binary(hash) and hash != "" -> Address.get(hash, @api_true)
-          _ -> nil
-        end
+      address = address_hash && Address.get(address_hash, @api_true)
 
-      params
-      |> Map.put_new(:field_prefix, nil)
-      |> Map.put(:address, address)
-      |> then(&put_filecoin_robust_address(result, &1))
+      put_filecoin_robust_address(result, Map.put(params, :address, address))
     end
 
     def preload_and_put_filecoin_robust_address(result, _params) do

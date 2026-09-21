@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Optimism.Interop.MessageQueue do
   @moduledoc """
     Searches for incomplete messages in the `op_interop_messages` database table and sends message's data to the

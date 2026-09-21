@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb do
   @moduledoc """
   The entrypoint for defining your web interface, such

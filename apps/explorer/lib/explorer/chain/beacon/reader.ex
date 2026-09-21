@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Beacon.Reader do
   @moduledoc "Contains read functions for beacon chain related modules."
 

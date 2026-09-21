@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.RefetchContractCodes do
   @moduledoc """
   Refetch contract_code for. Migration created for running on zksync chain type.

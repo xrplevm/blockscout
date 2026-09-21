@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressValidationController do
   @moduledoc """
   Display all the blocks that this address validates.

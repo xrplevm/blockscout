@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Fetcher.Coin do
   @moduledoc """
   Local cache for native coin exchange rates.

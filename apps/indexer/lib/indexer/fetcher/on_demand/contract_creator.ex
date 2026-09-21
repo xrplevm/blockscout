@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.OnDemand.ContractCreator do
   @moduledoc """
   Ensures that we have a smart-contract creator address indexed.
@@ -12,45 +11,32 @@ defmodule Indexer.Fetcher.OnDemand.ContractCreator do
   import EthereumJSONRPC, only: [id_to_params: 1, integer_to_quantity: 1, json_rpc: 2]
 
   alias EthereumJSONRPC.Nonce
-  alias EthereumJSONRPC.Utility.RangesHelper
-  alias Explorer.Chain.{Address, Block, PendingOperationsHelper}
+  alias Explorer.Chain.{Address, Block}
   alias Explorer.Chain.Cache.BlockNumber
   alias Explorer.Utility.MissingBlockRange
-  alias Indexer.Fetcher.InternalTransaction
+
+  import Indexer.Block.Fetcher,
+    only: [
+      async_import_internal_transactions: 2
+    ]
 
   @table_name :contract_creator_lookup
   @pending_blocks_cache_key "pending_blocks"
-  @max_json_rpc_retries 5
 
   def start_link(_) do
-    if :ets.whereis(@table_name) == :undefined do
-      :ets.new(@table_name, [
-        :set,
-        :named_table,
-        :public,
-        read_concurrency: true,
-        write_concurrency: true
-      ])
-    end
+    :ets.new(@table_name, [
+      :set,
+      :named_table,
+      :public,
+      read_concurrency: true,
+      write_concurrency: true
+    ])
 
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
 
   @spec trigger_fetch(Address.t()) :: :ok | :ignore
   def trigger_fetch(address) do
-    if :ets.whereis(@table_name) == :undefined do
-      Logger.warning(
-        "ContractCreator ETS table is not available, skipping on-demand fetch for address #{to_string(address.hash)}"
-      )
-
-      :ignore
-    else
-      do_trigger_fetch(address)
-    end
-  end
-
-  @spec do_trigger_fetch(Address.t()) :: :ok | :ignore
-  defp do_trigger_fetch(address) do
     # we expect here, that address has 'contract_creation_internal_transaction' and 'contract_creation_transaction' preloads
     creation_transaction = Address.creation_transaction(address)
     creator_hash = creation_transaction && creation_transaction.from_address_hash
@@ -58,7 +44,6 @@ defmodule Indexer.Fetcher.OnDemand.ContractCreator do
     with false <- is_nil(address.contract_code),
          true <- is_nil(creator_hash),
          false <- Address.eoa_with_code?(address),
-         true <- table_exists?(),
          {:address_lookup, [{_, contract_creation_block_number}]} <-
            {:address_lookup, :ets.lookup(@table_name, address_cache_name(address.hash))},
          {:pending_blocks_lookup, [{@pending_blocks_cache_key, blocks}]} <-
@@ -77,7 +62,7 @@ defmodule Indexer.Fetcher.OnDemand.ContractCreator do
     end
   end
 
-  @spec fetch_contract_creator_address_hash(Explorer.Chain.Hash.Address.t()) :: non_neg_integer() | :error
+  @spec fetch_contract_creator_address_hash(Explorer.Chain.Hash.Address.t()) :: :ok
   defp fetch_contract_creator_address_hash(address_hash) do
     max_block_number = BlockNumber.get_max()
 
@@ -87,105 +72,7 @@ defmodule Indexer.Fetcher.OnDemand.ContractCreator do
       previous_nonce: nil
     }
 
-    find_contract_creation_block_number(initial_block_ranges, address_hash, @max_json_rpc_retries)
-  end
-
-  defp find_contract_creation_block_number(block_ranges, address_hash, retries_left) do
-    json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
-    medium = trunc((block_ranges.right - block_ranges.left) / 2)
-    medium_position = block_ranges.left + medium
-
-    params = %{block_quantity: integer_to_quantity(medium_position), address: to_string(address_hash)}
-
-    id_to_params = id_to_params([params])
-
-    case params
-         |> Map.merge(%{id: 0})
-         |> Nonce.request()
-         |> json_rpc(json_rpc_named_arguments) do
-      {:ok, response} ->
-        case Nonce.from_response(%{id: 0, result: response}, id_to_params) do
-          {:ok, %{nonce: 0}} ->
-            left_new = new_left_position(medium, medium_position)
-            block_ranges = Map.put(block_ranges, :left, left_new)
-
-            maybe_continue_binary_search(block_ranges, address_hash, 0, retries_left)
-
-          {:ok, %{nonce: nonce}} when nonce > 0 ->
-            right_new = new_right_position(medium, medium_position)
-            block_ranges = Map.put(block_ranges, :right, right_new)
-
-            maybe_continue_binary_search(block_ranges, address_hash, nonce, retries_left)
-
-          _ ->
-            Logger.error("Error while fetching 'eth_getTransactionCount' for address #{to_string(address_hash)}")
-            retry_find_contract_creation_block_number(block_ranges, address_hash, retries_left)
-        end
-
-      {:error, reason} ->
-        Logger.error(
-          "Error while fetching 'eth_getTransactionCount' for address #{to_string(address_hash)}: #{inspect(reason)}"
-        )
-
-        retry_find_contract_creation_block_number(block_ranges, address_hash, retries_left)
-    end
-  end
-
-  defp retry_find_contract_creation_block_number(_block_ranges, address_hash, 0) do
-    Logger.error("Reached max retry attempts for 'eth_getTransactionCount' for address #{to_string(address_hash)}")
-
-    :error
-  end
-
-  defp retry_find_contract_creation_block_number(block_ranges, address_hash, retries_left) do
-    :timer.sleep(1000)
-    find_contract_creation_block_number(block_ranges, address_hash, retries_left - 1)
-  end
-
-  defp new_left_position(medium, medium_position) do
-    if medium == 0, do: medium_position + 1, else: medium_position
-  end
-
-  defp new_right_position(medium, medium_position) do
-    if medium == 0, do: medium_position - 1, else: medium_position
-  end
-
-  defp maybe_continue_binary_search(block_ranges, address_hash, nonce, retries_left) do
-    cond do
-      block_ranges.left == block_ranges.right ->
-        block_ranges.left
-
-      block_ranges.right - block_ranges.left == 1 && nonce !== block_ranges.previous_nonce ->
-        block_ranges.right
-
-      true ->
-        block_ranges = Map.put(block_ranges, :previous_nonce, nonce)
-        find_contract_creation_block_number(block_ranges, address_hash, retries_left)
-    end
-  end
-
-  @impl true
-  def init([]) do
-    {:ok, %{}}
-  end
-
-  @impl true
-  def handle_cast({:fetch, address}, state) do
-    address_hash = address.hash
-    :ets.insert(@table_name, {address_cache_name(address_hash), :in_progress})
-
-    Task.start(fn ->
-      result = fetch_contract_creator_address_hash(address_hash)
-      GenServer.cast(__MODULE__, {:fetch_result, address_hash, result})
-    end)
-
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_cast({:fetch_result, address_hash, contract_creation_block_number}, state)
-      when is_integer(contract_creation_block_number) do
-    address_hash_string = to_string(address_hash)
+    contract_creation_block_number = find_contract_creation_block_number(initial_block_ranges, address_hash)
 
     pending_blocks =
       case pending_blocks_cache() do
@@ -196,54 +83,94 @@ defmodule Indexer.Fetcher.OnDemand.ContractCreator do
           pending_blocks
       end
 
-    updated_pending_blocks = [
-      %{block_number: contract_creation_block_number, address_hash_string: address_hash_string}
-      | Enum.reject(pending_blocks, fn %{address_hash_string: addr} -> addr == address_hash_string end)
-    ]
+    updated_pending_blocks =
+      case Enum.member?(pending_blocks, contract_creation_block_number) do
+        true ->
+          pending_blocks
 
-    :ets.insert(@table_name, {address_cache_name(address_hash), contract_creation_block_number})
+        false ->
+          [
+            %{block_number: contract_creation_block_number, address_hash_string: to_string(address_hash)}
+            | pending_blocks
+          ]
+      end
+
     :ets.insert(@table_name, {@pending_blocks_cache_key, updated_pending_blocks})
 
-    # Change `1` to specific label when `priority` field becomes `Ecto.Enum`.
-    priority = 1
-
-    if InternalTransaction.disabled?() do
-      if Block.indexed?(contract_creation_block_number) do
-        # credo:disable-for-lines:2 Credo.Check.Refactor.Nesting
-        if RangesHelper.traceable_block_number?(contract_creation_block_number) do
-          PendingOperationsHelper.insert_pending_operations([contract_creation_block_number], priority)
-        end
-      else
-        MissingBlockRange.add_ranges_by_block_numbers([contract_creation_block_number], priority)
-      end
-    else
-      unless Block.indexed?(contract_creation_block_number) do
-        MissingBlockRange.add_ranges_by_block_numbers([contract_creation_block_number], priority)
-      end
+    unless Block.indexed?(contract_creation_block_number) do
+      # Change `1` to specific label when `priority` field becomes `Ecto.Enum`.
+      MissingBlockRange.add_ranges_by_block_numbers([contract_creation_block_number], 1)
     end
 
-    {:noreply, state}
+    :ok
+  end
+
+  defp find_contract_creation_block_number(block_ranges, address_hash) do
+    :ets.insert(@table_name, {address_cache_name(address_hash), :in_progress})
+    json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
+    medium = trunc((block_ranges.right - block_ranges.left) / 2)
+    medium_position = block_ranges.left + medium
+
+    params = %{block_quantity: integer_to_quantity(medium_position), address: to_string(address_hash)}
+
+    id_to_params = id_to_params([params])
+
+    with {:ok, response} <-
+           params
+           |> Map.merge(%{id: 0})
+           |> Nonce.request()
+           |> json_rpc(json_rpc_named_arguments) do
+      case Nonce.from_response(%{id: 0, result: response}, id_to_params) do
+        {:ok, %{nonce: 0}} ->
+          left_new = new_left_position(medium, medium_position)
+          block_ranges = Map.put(block_ranges, :left, left_new)
+
+          maybe_continue_binary_search(block_ranges, address_hash, 0)
+
+        {:ok, %{nonce: nonce}} when nonce > 0 ->
+          right_new = new_right_position(medium, medium_position)
+          block_ranges = Map.put(block_ranges, :right, right_new)
+
+          maybe_continue_binary_search(block_ranges, address_hash, nonce)
+
+        _ ->
+          Logger.error("Error while fetching 'eth_getTransactionCount' for address #{to_string(address_hash)}")
+          :timer.sleep(1000)
+          find_contract_creation_block_number(block_ranges, address_hash)
+      end
+    end
+  end
+
+  defp new_left_position(medium, medium_position) do
+    if medium == 0, do: medium_position + 1, else: medium_position
+  end
+
+  defp new_right_position(medium, medium_position) do
+    if medium == 0, do: medium_position - 1, else: medium_position
+  end
+
+  defp maybe_continue_binary_search(block_ranges, address_hash, nonce) do
+    cond do
+      block_ranges.left == block_ranges.right ->
+        block_ranges.left
+
+      block_ranges.right - block_ranges.left == 1 && nonce !== block_ranges.previous_nonce ->
+        block_ranges.right
+
+      true ->
+        block_ranges = Map.put(block_ranges, :previous_nonce, nonce)
+        find_contract_creation_block_number(block_ranges, address_hash)
+    end
   end
 
   @impl true
-  def handle_cast({:fetch_result, address_hash, unexpected_value}, state) do
-    Logger.error(
-      "Unexpected contract creation block number for address #{to_string(address_hash)}: #{inspect(unexpected_value)}"
-    )
-
-    :ets.delete(@table_name, address_cache_name(address_hash))
-
-    {:noreply, state}
+  def init([]) do
+    {:ok, %{}}
   end
 
   @impl true
-  def handle_cast({:update_pending_contract_creator_cache, imported}, state) do
-    imported_block_numbers =
-      imported
-      |> Map.get(:blocks, [])
-      |> Enum.map(&Map.get(&1, :number))
-
-    maybe_update_pending_contract_creator_cache(imported_block_numbers)
+  def handle_cast({:fetch, address}, state) do
+    fetch_contract_creator_address_hash(address.hash)
 
     {:noreply, state}
   end
@@ -262,46 +189,46 @@ defmodule Indexer.Fetcher.OnDemand.ContractCreator do
 
   # - `[{String.t(), [map()]}]`: A list of tuples containing block identifiers and their associated data.
   @spec pending_blocks_cache() :: [{String.t(), [map()]}]
-  defp pending_blocks_cache do
-    if table_exists?() do
-      :ets.lookup(@table_name, @pending_blocks_cache_key)
-    else
-      []
-    end
-  end
-
-  defp table_exists? do
-    :ets.whereis(@table_name) != :undefined
-  end
+  defp pending_blocks_cache, do: :ets.lookup(@table_name, @pending_blocks_cache_key)
 
   @doc """
   Asynchronously updates value of ETS cache :contract_creator_lookup for key "pending_blocks":
   removes block from the cache since the block has been imported.
   """
-  @spec async_update_cache_of_contract_creator_on_demand(map()) :: :ok
+  @spec async_update_cache_of_contract_creator_on_demand(map()) :: Task.t()
   def async_update_cache_of_contract_creator_on_demand(imported) do
-    GenServer.cast(__MODULE__, {:update_pending_contract_creator_cache, imported})
-    :ok
+    Task.async(fn ->
+      imported_block_numbers =
+        imported
+        |> Map.get(:blocks, [])
+        |> Enum.map(&Map.get(&1, :number))
+
+      if !Enum.empty?(imported_block_numbers) do
+        cache_key = @pending_blocks_cache_key
+        # credo:disable-for-next-line Credo.Check.Refactor.Nesting
+        case pending_blocks_cache() do
+          [{^cache_key, pending_blocks}] ->
+            update_pending_contract_creator_blocks(pending_blocks, imported_block_numbers, imported)
+
+          [] ->
+            :ok
+        end
+      end
+    end)
   end
 
-  defp maybe_update_pending_contract_creator_cache([]), do: :ok
+  defp update_pending_contract_creator_blocks([], _imported_block_numbers, _imported), do: []
 
-  defp maybe_update_pending_contract_creator_cache(imported_block_numbers) do
-    case pending_blocks_cache() do
-      [{@pending_blocks_cache_key, pending_blocks}] ->
-        update_pending_contract_creator_blocks(pending_blocks, imported_block_numbers)
-
-      [] ->
-        :ok
-    end
-  end
-
-  defp update_pending_contract_creator_blocks([], _imported_block_numbers), do: []
-
-  defp update_pending_contract_creator_blocks(pending_blocks, imported_block_numbers) do
+  defp update_pending_contract_creator_blocks(pending_blocks, imported_block_numbers, imported) do
     updated_pending_block_numbers =
       Enum.filter(pending_blocks, fn pending_block ->
         if Enum.member?(imported_block_numbers, pending_block.block_number) do
+          contract_creation_block =
+            find_contract_creation_block_in_imported(imported, pending_block.block_number)
+
+          internal_transactions_import_params = [%{blocks: [contract_creation_block]}]
+          async_import_internal_transactions(internal_transactions_import_params, true)
+
           # todo: emit event that contract creator updated for the contract. This was the purpose keeping address_hash_string in that cache key.
           :ets.delete(@table_name, pending_block.address_hash_string)
           false
@@ -314,5 +241,11 @@ defmodule Indexer.Fetcher.OnDemand.ContractCreator do
       @table_name,
       {@pending_blocks_cache_key, updated_pending_block_numbers}
     )
+  end
+
+  defp find_contract_creation_block_in_imported(imported, contract_creation_block_number) do
+    Enum.find(imported[:blocks], fn %Explorer.Chain.Block{number: block_number} ->
+      block_number == contract_creation_block_number
+    end)
   end
 end

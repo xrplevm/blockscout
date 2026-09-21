@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.Message do
   @moduledoc """
     Models an L1<->L2 messages on Arbitrum.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.TransactionRawTraceView do
   use BlockScoutWeb, :view
   @dialyzer :no_match

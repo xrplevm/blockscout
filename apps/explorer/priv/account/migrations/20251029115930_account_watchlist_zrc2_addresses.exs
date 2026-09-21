@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Account.Migrations.AccountWatchlistZRC2Addresses do
   use Ecto.Migration
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.SmartContract.Proxy.ERC7760 do
   @moduledoc """
   Module for fetching proxy implementation from https://github.com/ethereum/ERCs/blob/master/ERCS/erc-7760.md

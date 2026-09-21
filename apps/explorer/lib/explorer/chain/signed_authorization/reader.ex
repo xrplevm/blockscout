@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.SignedAuthorization.Reader do
   @moduledoc """
   Reads signed authorization data from the database.

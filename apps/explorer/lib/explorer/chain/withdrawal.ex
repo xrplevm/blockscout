@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Withdrawal do
   @moduledoc """
   A stored representation of withdrawal introduced in [EIP-4895](https://eips.ethereum.org/EIPS/eip-4895)
@@ -83,16 +82,6 @@ defmodule Explorer.Chain.Withdrawal do
       where: withdrawal.address_hash == ^address_hash,
       where: block.consensus == true,
       preload: [block: block]
-    )
-  end
-
-  @spec address_hash_to_withdrawals_existence_query(Hash.Address.t()) :: Ecto.Query.t()
-  def address_hash_to_withdrawals_existence_query(address_hash) do
-    from(withdrawal in __MODULE__,
-      left_join: block in assoc(withdrawal, :block),
-      where: withdrawal.address_hash == ^address_hash,
-      where: block.consensus == true,
-      select: 1
     )
   end
 

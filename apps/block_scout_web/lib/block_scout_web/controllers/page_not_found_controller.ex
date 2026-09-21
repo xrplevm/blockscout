@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.PageNotFoundController do
   use BlockScoutWeb, :controller
 

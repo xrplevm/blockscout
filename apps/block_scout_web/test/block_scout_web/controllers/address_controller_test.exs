@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressControllerTest do
   use BlockScoutWeb.ConnCase,
     # ETS tables are shared in `Explorer.Counters.*`

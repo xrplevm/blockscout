@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.UniversalProxy.TargetClient do
   @moduledoc """
   A WebSocket client that connects to a target WebSocket server and forwards messages to/from a

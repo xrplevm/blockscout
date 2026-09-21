@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.Geas.Publisher do
   @moduledoc """
   Module responsible for verifying and publishing GEAS smart contracts.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Zilliqa.Zrc2.TokenTransfer do
   @moduledoc """
   Represents a token transfer between addresses for a given ZRC-2 token with unknown ERC-20 adapter contract address yet.

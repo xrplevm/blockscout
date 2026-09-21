@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.Helper do
   @moduledoc """
     API V2 helper
@@ -6,7 +5,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   alias Ecto.Association.NotLoaded
-  alias Explorer.Chain.{Address, Address.Reputation}
+  alias Explorer.Chain.{Address, Address.Reputation, SmartContract}
   alias Explorer.Chain.SmartContract.Proxy
   alias Explorer.Chain.Transaction.History.TransactionStats
 
@@ -25,20 +24,6 @@ defmodule BlockScoutWeb.API.V2.Helper do
       personal_tags: private_tags,
       watchlist_names: watchlist_names
     } = get_address_tags(address_hash, current_user(conn), api?: true)
-
-    Map.merge(address_with_info(address, address_hash), %{
-      "private_tags" => private_tags,
-      "watchlist_names" => watchlist_names,
-      "public_tags" => public_tags
-    })
-  end
-
-  def address_with_info(_conn, address, address_hash, true, {:address_tags, address_tags}) do
-    %{
-      common_tags: public_tags,
-      personal_tags: private_tags,
-      watchlist_names: watchlist_names
-    } = Map.get(address_tags, address_hash, %{common_tags: [], personal_tags: [], watchlist_names: []})
 
     Map.merge(address_with_info(address, address_hash), %{
       "private_tags" => private_tags,
@@ -160,7 +145,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
 
   # We treat contracts with minimal proxy or similar standards as verified if all their implementations are verified
   defp verified_as_proxy?(%{proxy_type: proxy_type, names: names})
-       when proxy_type in [:eip1167, :eip7702, :clone_with_immutable_arguments, :erc7760, :minimal_proxy] do
+       when proxy_type in [:eip1167, :eip7702, :clone_with_immutable_arguments, :erc7760] do
     !Enum.empty?(names) && Enum.all?(names)
   end
 
@@ -170,7 +155,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
     case Enum.find(address_names, &(&1.primary == true)) do
       nil ->
         # take last created address name, if there is no `primary` one.
-        %Address.Name{name: name} = Enum.max_by(address_names, & &1.inserted_at)
+        %Address.Name{name: name} = Enum.max_by(address_names, & &1.id)
         name
 
       %Address.Name{name: name} ->
@@ -202,10 +187,11 @@ defmodule BlockScoutWeb.API.V2.Helper do
     - `false` if the smart contract is `NotLoaded`.
     - `true` if the smart contract is present and does not have metadata from a verified bytecode twin.
   """
-  @spec smart_contract_verified?(Address.t()) :: boolean() | nil
-  def smart_contract_verified?(%Address{verified: verified}) when is_boolean(verified), do: verified
-  def smart_contract_verified?(%Address{verified: nil}), do: nil
-  def smart_contract_verified?(_), do: false
+  @spec smart_contract_verified?(Address.t()) :: boolean()
+  def smart_contract_verified?(%Address{smart_contract: nil}), do: false
+  def smart_contract_verified?(%Address{smart_contract: %{metadata_from_verified_bytecode_twin: true}}), do: false
+  def smart_contract_verified?(%Address{smart_contract: %NotLoaded{}}), do: nil
+  def smart_contract_verified?(%Address{smart_contract: %SmartContract{}}), do: true
 
   def market_cap(:standard, %{
         available_supply: available_supply,

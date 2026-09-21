@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.CldrHelper.Number do
   @moduledoc """
   Work-arounds for `Cldr.Number` bugs

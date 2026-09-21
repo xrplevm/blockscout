@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.WebSocket.WebSocketClient do
   @moduledoc """
   `EthereumJSONRPC.WebSocket` that uses `WebSockex`

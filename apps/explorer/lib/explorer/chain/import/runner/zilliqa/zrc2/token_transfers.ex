@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Zilliqa.Zrc2.TokenTransfers do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Zilliqa.Zrc2.TokenTransfer.t/0`.

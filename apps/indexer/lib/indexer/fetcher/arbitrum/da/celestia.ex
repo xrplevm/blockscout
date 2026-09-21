@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.DA.Celestia do
   @moduledoc """
     Provides functionality for parsing and preparing Celestia data availability

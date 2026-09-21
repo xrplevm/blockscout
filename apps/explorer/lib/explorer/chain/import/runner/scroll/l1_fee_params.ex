@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Scroll.L1FeeParams do
   @moduledoc """
   Bulk imports `Explorer.Chain.Scroll.L1FeeParam`.

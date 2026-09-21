@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Migrations.AddBlockNumberToTokenTransfers do
   @moduledoc """
   Use `priv/repo/migrations/scripts/20181121170616_token_transfers_update_block_number_in_batches.sql` to migrate data.

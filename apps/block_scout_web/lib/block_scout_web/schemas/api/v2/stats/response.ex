@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Stats.Response.ChainTypeCustomizations do
   @moduledoc false
   require OpenApiSpex
@@ -109,6 +108,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Stats.Response do
         static_gas_price: General.IntegerStringNullable,
         total_addresses: General.IntegerString,
         total_blocks: General.IntegerString,
+        total_gas_used: General.IntegerString,
         total_transactions: General.IntegerString,
         transactions_today: General.IntegerString,
         tvl: General.IntegerStringNullable

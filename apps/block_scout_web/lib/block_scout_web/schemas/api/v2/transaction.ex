@@ -1,9 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
   @moduledoc false
   alias BlockScoutWeb.API.V2.ZkSyncView
   alias BlockScoutWeb.Schemas.API.V2.{Address, General, Token}
-  alias BlockScoutWeb.Schemas.API.V2.Eden.Call, as: EdenCall
   alias BlockScoutWeb.Schemas.API.V2.Transaction.Fee
   alias BlockScoutWeb.Schemas.Helper
   alias OpenApiSpex.Schema
@@ -109,14 +107,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
     additionalProperties: false
   }
 
-  # OP Stack-specific transaction types appended to the `transaction_types` enum
-  # for both `optimism` and `optimism-celo` chain types (the latter resolves to
-  # the `:optimism` chain type with a `{:optimism, :celo}` chain identity).
-  @optimism_transaction_types [
-    "op_stack_l1_attributes_transaction",
-    "op_stack_post_exec_transaction"
-  ]
-
   @scroll_schema %Schema{
     type: :object,
     nullable: false,
@@ -165,6 +155,21 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
   def chain_type_fields(schema) do
     chain_type()
     |> case do
+      :polygon_zkevm ->
+        schema
+        |> Helper.extend_schema(
+          properties: %{
+            zkevm_batch_number: %Schema{type: :integer, nullable: true},
+            zkevm_sequence_hash: General.FullHash,
+            zkevm_verify_hash: General.FullHash,
+            zkevm_status: %Schema{
+              type: :string,
+              enum: ["Confirmed by Sequencer", "L1 Confirmed"],
+              nullable: false
+            }
+          }
+        )
+
       :zksync ->
         schema |> Helper.extend_schema(properties: %{zksync: @zksync_schema})
 
@@ -204,20 +209,9 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
             operator_fee: General.IntegerString
           }
         )
-        |> extend_transaction_types_enum(@optimism_transaction_types)
 
       :scroll ->
         schema |> Helper.extend_schema(properties: %{scroll: @scroll_schema})
-
-      :eden ->
-        schema
-        |> Helper.extend_schema(
-          properties: %{
-            fee_payer: %Schema{allOf: [Address], nullable: true},
-            calls: %Schema{type: :array, items: EdenCall, nullable: true}
-          },
-          required: [:fee_payer, :calls]
-        )
 
       :suave ->
         schema
@@ -304,16 +298,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
     |> chain_identity_fields()
   end
 
-  # Appends chain-specific values to the `transaction_types` items enum of the given schema.
-  @spec extend_transaction_types_enum(map(), [String.t()]) :: map()
-  defp extend_transaction_types_enum(schema, extra_types) do
-    update_in(
-      schema,
-      [:properties, :transaction_types, Access.key(:items), Access.key(:enum)],
-      &(&1 ++ extra_types)
-    )
-  end
-
   defp chain_identity_fields(schema) do
     case chain_identity() do
       {:optimism, :celo} ->
@@ -345,6 +329,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
 
   alias BlockScoutWeb.Schemas.API.V2.{Address, General, SignedAuthorization, TokenTransfer}
   alias BlockScoutWeb.Schemas.API.V2.Transaction.{ChainTypeCustomizations, Fee}
+  alias Explorer.Chain.TransactionAction
   alias OpenApiSpex.Schema
 
   OpenApiSpex.schema(
@@ -436,6 +421,32 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
         decoded_input: %Schema{allOf: [General.DecodedInput], nullable: true},
         token_transfers: %Schema{type: :array, items: TokenTransfer, nullable: true},
         token_transfers_overflow: %Schema{type: :boolean, nullable: true},
+        actions: %Schema{
+          type: :array,
+          items: %Schema{
+            type: :object,
+            required: [:protocol, :type, :data],
+            properties: %{
+              protocol: %Schema{
+                type: :string,
+                enum: TransactionAction.supported_protocols(),
+                nullable: false
+              },
+              type: %Schema{
+                type: :string,
+                enum: TransactionAction.supported_types(),
+                nullable: false
+              },
+              data: %Schema{
+                type: :object,
+                description: "Transaction action details (json formatted)",
+                nullable: false
+              }
+            },
+            additionalProperties: false
+          },
+          nullable: true
+        },
         exchange_rate: General.FloatStringNullable,
         historic_exchange_rate: General.FloatStringNullable,
         method: General.MethodNameNullable,
@@ -452,8 +463,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
               "token_creation",
               "token_transfer",
               "blob_transaction",
-              "set_code_transaction",
-              "sponsored_transaction"
+              "set_code_transaction"
             ]
           }
         },
@@ -465,12 +475,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
         },
         has_error_in_internal_transactions: %Schema{type: :boolean, nullable: true},
         authorization_list: %Schema{type: :array, items: SignedAuthorization, nullable: true},
-        is_pending_update: %Schema{type: :boolean, nullable: true},
-        fhe_operations_count: %Schema{
-          type: :integer,
-          description: "Number of FHE (Fully Homomorphic Encryption) operations in the transaction",
-          nullable: false
-        }
+        is_pending_update: %Schema{type: :boolean, nullable: true}
       },
       required: [
         :hash,
@@ -501,6 +506,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
         :decoded_input,
         :token_transfers,
         :token_transfers_overflow,
+        :actions,
         :exchange_rate,
         :historic_exchange_rate,
         :method,
@@ -508,8 +514,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
         :transaction_tag,
         :has_error_in_internal_transactions,
         :authorization_list,
-        :is_pending_update,
-        :fhe_operations_count
+        :is_pending_update
       ],
       additionalProperties: false
     }

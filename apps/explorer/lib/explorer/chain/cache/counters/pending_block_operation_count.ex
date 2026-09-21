@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.PendingBlockOperationCount do
   @moduledoc """
   Cache for estimated `pending_block_operations` count.

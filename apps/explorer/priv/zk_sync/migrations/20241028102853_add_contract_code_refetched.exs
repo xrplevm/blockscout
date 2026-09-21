@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.ZkSync.Migrations.AddContractCodeRefetched do
   use Ecto.Migration
 

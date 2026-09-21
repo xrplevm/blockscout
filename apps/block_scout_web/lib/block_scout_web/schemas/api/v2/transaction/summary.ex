@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Transaction.Summary do
   @moduledoc """
   This module defines the schema for a transaction summary API response.

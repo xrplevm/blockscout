@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 # credo:disable-for-this-file
 defmodule Explorer.SmartContract.Vyper.Verifier do
   @moduledoc """

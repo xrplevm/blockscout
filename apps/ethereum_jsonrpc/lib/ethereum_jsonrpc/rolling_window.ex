@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.RollingWindow do
   @moduledoc """
   Tracker for counting an event that occurs within a moving time window.

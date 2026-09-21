@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.AddressTokensUsdSum do
   @moduledoc """
   Caches Address tokens USD value.

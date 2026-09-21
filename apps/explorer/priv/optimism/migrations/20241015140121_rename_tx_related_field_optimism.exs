@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.Optimism.Migrations.RenameTxRelatedFieldOptimism do
   use Ecto.Migration
 

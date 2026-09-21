@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.APILogger do
   @moduledoc """
   Logger for API endpoints usage

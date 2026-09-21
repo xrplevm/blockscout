@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.SmartContractController do
   use BlockScoutWeb, :controller
   use OpenApiSpex.ControllerSpecs
@@ -43,7 +42,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
 
   plug(OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true)
 
-  tags(["smart-contracts"])
+  tags(["smart_contracts"])
 
   operation :smart_contract,
     summary: "Retrieve detailed information about a verified smart contract",
@@ -102,7 +101,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
       ok:
         {"List of verified smart contracts matching the filter criteria, with pagination.", "application/json",
          paginated_response(
-           items: Schemas.SmartContract.ListItem,
+           items: Schemas.SmartContract,
            next_page_params_example: %{
              "smart_contract_id" => 1_947_801,
              "items_count" => 50
@@ -196,7 +195,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
                items: Schemas.SmartContract.AuditReport,
                nullable: false
              },
-             next_page_params: %Schema{type: :object, nullable: true, additionalProperties: true}
+             next_page_params: %Schema{type: :object, nullable: true}
            },
            required: [:items, :next_page_params],
            additionalProperties: false
@@ -274,10 +273,10 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
   defp contract_creation_transaction_associations do
     case chain_type() do
       :filecoin ->
-        [Address.contract_creation_transaction_with_from_address_association()]
+        Address.contract_creation_transaction_with_from_address_associations()
 
       _ ->
-        [Address.contract_creation_transaction_association()]
+        Address.contract_creation_transaction_associations()
     end
   end
 
@@ -287,8 +286,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
       necessity_by_association: %{
         [smart_contract: :smart_contract_additional_sources] => :optional,
         contract_creation_transaction_associations() => :optional
-      },
-      preload_contract_creation_internal_transaction: true
+      }
     ]
     |> Keyword.merge(@api_true)
   end
@@ -299,8 +297,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
       necessity_by_association: %{
         [:token, :names, :proxy_implementations] => :optional,
         contract_creation_transaction_associations() => :optional
-      },
-      preload_contract_creation_internal_transaction: true
+      }
     ]
     |> Keyword.merge(@api_true)
   end

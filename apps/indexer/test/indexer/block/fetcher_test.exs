@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.FetcherTest do
   # `async: false` due to use of named GenServer
   use EthereumJSONRPC.Case, async: false
@@ -17,7 +16,6 @@ defmodule Indexer.Block.FetcherTest do
   alias Indexer.BufferedTask
   alias Indexer.Fetcher.CoinBalance.Catchup, as: CoinBalanceCatchup
   alias Indexer.Fetcher.OnDemand.ContractCreator, as: ContractCreatorOnDemand
-  alias Indexer.Fetcher.TokenBalance.Current, as: TokenBalanceCurrent
   alias Indexer.Fetcher.TokenBalance.Historical, as: TokenBalanceHistorical
 
   alias Indexer.Fetcher.{
@@ -72,7 +70,6 @@ defmodule Indexer.Block.FetcherTest do
       InternalTransaction.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       Token.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       TokenBalanceHistorical.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
-      TokenBalanceCurrent.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       ReplacedTransaction.Supervisor.Case.start_supervised!()
       {:ok, _pid} = ContractCreatorOnDemand.start_link([[], []])
 
@@ -299,13 +296,6 @@ defmodule Indexer.Block.FetcherTest do
     test "can import range with all synchronous imported schemas", %{
       block_fetcher: %Fetcher{json_rpc_named_arguments: json_rpc_named_arguments} = block_fetcher
     } do
-      initial_env = Application.get_env(:indexer, Indexer.Fetcher.InternalTransaction)
-
-      on_exit(fn ->
-        Application.put_env(:indexer, Indexer.Fetcher.InternalTransaction, initial_env)
-      end)
-
-      Application.put_env(:indexer, Indexer.Fetcher.InternalTransaction, disabled?: false)
       block_number = @first_full_block_number
 
       if Application.get_env(:explorer, :chain_type) == :filecoin do
@@ -833,7 +823,6 @@ defmodule Indexer.Block.FetcherTest do
         InternalTransaction.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
         Token.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
         TokenBalanceHistorical.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
-        TokenBalanceCurrent.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
         ReplacedTransaction.Supervisor.Case.start_supervised!()
         {:ok, _pid} = ContractCreatorOnDemand.start_link([[], []])
         start_supervised!({Task.Supervisor, name: Indexer.TaskSupervisor})

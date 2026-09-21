@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Shibarium.Bridge do
   @moduledoc """
   Helper functions for transforming data for Shibarium Bridge operations.

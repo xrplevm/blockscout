@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.ReplacedTransactionTest do
   use Explorer.DataCase
 

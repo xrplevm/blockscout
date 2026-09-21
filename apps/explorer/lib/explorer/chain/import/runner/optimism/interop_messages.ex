@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Optimism.InteropMessages do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Optimism.InteropMessage.t/0`.

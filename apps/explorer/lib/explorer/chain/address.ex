@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Address.Schema do
   @moduledoc """
     A stored representation of a web3 address.
@@ -136,14 +135,19 @@ defmodule Explorer.Chain.Address.Schema do
         field(:transactions_count, :integer)
         field(:token_transfers_count, :integer)
         field(:gas_used, :integer)
-        field(:counters_updated_at, :integer) :: Block.block_number() | nil
         field(:ens_domain_name, :string, virtual: true)
         field(:metadata, :any, virtual: true)
-        field(:contract_creation_internal_transaction, :map, virtual: true)
 
         has_one(:smart_contract, SmartContract, references: :hash)
         has_one(:token, Token, foreign_key: :contract_address_hash, references: :hash)
         has_one(:proxy_implementations, Implementation, foreign_key: :proxy_address_hash, references: :hash)
+
+        has_one(
+          :contract_creation_internal_transaction,
+          InternalTransaction,
+          foreign_key: :created_contract_address_hash,
+          references: :hash
+        )
 
         has_one(
           :contract_creation_transaction,
@@ -192,7 +196,7 @@ defmodule Explorer.Chain.Address do
 
   import Explorer.Chain.SmartContract.Proxy.Models.Implementation, only: [proxy_implementations_association: 0]
 
-  @optional_attrs ~w(contract_code fetched_coin_balance fetched_coin_balance_block_number nonce verified gas_used transactions_count token_transfers_count counters_updated_at)a
+  @optional_attrs ~w(contract_code fetched_coin_balance fetched_coin_balance_block_number nonce verified gas_used transactions_count token_transfers_count)a
   @chain_type_optional_attrs (case @chain_type do
                                 :filecoin ->
                                   ~w(filecoin_id filecoin_robust filecoin_actor_type)a
@@ -468,16 +472,11 @@ defmodule Explorer.Chain.Address do
     Preloads provided contracts associations if address has contract_code which is not nil
   """
   @spec maybe_preload_smart_contract_associations(__MODULE__.t(), list, list) :: __MODULE__.t()
-  def maybe_preload_smart_contract_associations(address, associations, options)
-
   def maybe_preload_smart_contract_associations(%__MODULE__{contract_code: nil} = address, _associations, _options),
     do: address
 
-  def maybe_preload_smart_contract_associations(%__MODULE__{contract_code: _} = address, associations, options) do
-    address
-    |> Chain.select_repo(options).preload(associations)
-    |> maybe_preload_contract_creation_internal_transaction(options)
-  end
+  def maybe_preload_smart_contract_associations(%__MODULE__{contract_code: _} = address, associations, options),
+    do: Chain.select_repo(options).preload(address, associations)
 
   @doc """
   Counts all the addresses where the `fetched_coin_balance` is > 0.
@@ -832,66 +831,6 @@ defmodule Explorer.Chain.Address do
   end
 
   @doc """
-  Preloads the contract creation internal transaction for the given address or
-  list of addresses.
-
-  For each address, this function finds the most relevant internal transaction
-  whose `created_contract_address_hash` resolves to the address hash, preloads
-  its related addresses, and assigns it to the virtual
-  `:contract_creation_internal_transaction` field.
-
-  When a list of addresses is provided, the function performs a single batch
-  query for all address hashes, builds a map keyed by
-  `created_contract_address_hash`, and attaches the matched internal transaction
-  to each address.
-
-  ## Parameters
-
-    - `addresses`: An `Explorer.Chain.Address.t/0`, a list of addresses, `[]`, or `nil`
-    - `options`: A keyword list of options used to select the repo (for example, `api?: true`)
-
-  ## Returns
-
-    - A list of addresses with `:contract_creation_internal_transaction`
-      populated when the input is a list
-    - A single address with `:contract_creation_internal_transaction`
-      populated when the input is a single struct
-  """
-  @spec maybe_preload_contract_creation_internal_transaction([__MODULE__.t()] | __MODULE__.t() | nil, [Chain.api?()]) ::
-          [__MODULE__.t()] | __MODULE__.t() | nil
-  def maybe_preload_contract_creation_internal_transaction(addresses, options)
-
-  def maybe_preload_contract_creation_internal_transaction([], _options), do: []
-  def maybe_preload_contract_creation_internal_transaction(nil, _options), do: nil
-
-  def maybe_preload_contract_creation_internal_transaction(addresses, options) when is_list(addresses) do
-    if Application.get_env(:explorer, :api_disable_contract_creation_internal_transaction_association, false) do
-      addresses
-    else
-      address_hashes = Enum.map(addresses, & &1.hash)
-
-      internal_transactions_map =
-        contract_creation_internal_transaction_preload_query()
-        |> InternalTransaction.where_address_match_by_hash(:created_contract_address, address_hashes, options)
-        |> Chain.select_repo(options).all()
-        |> InternalTransaction.preload_addresses([], Chain.select_repo(options))
-        |> Map.new(&{&1.created_contract_address_hash, &1})
-
-      Enum.map(addresses, &%{&1 | contract_creation_internal_transaction: internal_transactions_map[&1.hash]})
-    end
-  end
-
-  def maybe_preload_contract_creation_internal_transaction(address, options) do
-    if Application.get_env(:explorer, :api_disable_contract_creation_internal_transaction_association, false) do
-      address
-    else
-      [address]
-      |> maybe_preload_contract_creation_internal_transaction(options)
-      |> List.first()
-    end
-  end
-
-  @doc """
   Creates a query for preloading contract creation internal transactions.
 
   This query filters for internal transactions with index > 0, sorts them by:
@@ -909,17 +848,17 @@ defmodule Explorer.Chain.Address do
   """
   @spec contract_creation_internal_transaction_preload_query() :: Ecto.Query.t()
   def contract_creation_internal_transaction_preload_query do
-    InternalTransaction
-    |> InternalTransaction.join_transaction_query()
-    |> where([it], it.index > 0)
-    |> order_by([it],
-      asc_nulls_first: it.error_id,
-      desc: it.block_number,
-      desc: it.transaction_index,
-      desc: it.index
+    from(
+      it in InternalTransaction,
+      where: it.index > 0,
+      order_by: [
+        asc_nulls_first: coalesce(it.error, type(it.error_id, :string)),
+        desc: it.block_number,
+        desc: it.transaction_index,
+        desc: it.index
+      ],
+      limit: 1
     )
-    |> limit(1)
-    |> select_merge([_it, t], %{transaction: t})
   end
 
   @doc """
@@ -979,6 +918,119 @@ defmodule Explorer.Chain.Address do
     ]
   end
 
+  @doc """
+  Returns contract creation internal transaction association specification.
+
+  ## Note
+  IMPORTANT: This association function should be used ONLY for single address
+  operations. Using it with multiple addresses may produce unexpected results.
+
+  As noted in [Ecto documentation](https://hexdocs.pm/ecto/Ecto.Query.html#preload/3-preload-queries),
+  operations like `limit` and `offset` in preload queries affect the entire
+  result set, not each individual association. When working with collections of
+  addresses, consider using window functions instead of these helpers.
+
+  ## Returns
+  A keyword list with the contract creation internal transaction association.
+  """
+  @spec contract_creation_internal_transaction_association() :: keyword()
+  def contract_creation_internal_transaction_association do
+    [
+      contract_creation_internal_transaction: Address.contract_creation_internal_transaction_preload_query()
+    ]
+  end
+
+  @doc """
+  Same as `contract_creation_internal_transaction_association/0`, but
+  preloads a nested association for the `from_address` field. Used for Filecoin
+  chain type.
+  """
+  @spec contract_creation_internal_transaction_with_from_address_association() :: keyword()
+  def contract_creation_internal_transaction_with_from_address_association do
+    [
+      contract_creation_internal_transaction: {
+        contract_creation_internal_transaction_preload_query(),
+        :from_address
+      }
+    ]
+  end
+
+  @doc """
+  Returns both contract creation transaction and internal transaction
+  associations.
+
+  This is a convenience function that combines both types of contract creation
+  associations.
+
+  ## Returns
+
+  A list containing both contract creation transaction and internal transaction
+  associations.
+  """
+  @spec contract_creation_transaction_associations() :: [keyword()]
+  def contract_creation_transaction_associations do
+    [
+      contract_creation_transaction_association(),
+      contract_creation_internal_transaction_association()
+    ]
+  end
+
+  @doc """
+  Same as `contract_creation_transaction_associations/0`, but preloads a nested
+  association for the `from_address` field. Used for Filecoin chain type.
+  """
+  @spec contract_creation_transaction_with_from_address_associations() :: [keyword()]
+  def contract_creation_transaction_with_from_address_associations do
+    [
+      contract_creation_transaction_with_from_address_association(),
+      contract_creation_internal_transaction_with_from_address_association()
+    ]
+  end
+
+  @doc """
+  Finds contract addresses from a list of hashes.
+
+  ## Parameters
+
+    - `hashes`: A list of hashes to search for contract addresses.
+    - `options`: An optional keyword list of options.
+
+  ## Options
+
+    - `:necessity_by_association`: A map of associations with their necessity (default: `%{}`).
+
+  ## Returns
+
+    - `{:ok, addresses}`: A tuple with `:ok` and a list of found addresses.
+    - `{:error, :not_found}`: A tuple with `:error` and `:not_found` if no addresses are found.
+
+  """
+  @spec find_contract_addresses([Hash.Address.t()], [Chain.necessity_by_association_option() | Chain.api?()]) ::
+          {:ok, [__MODULE__.t()]} | {:error, :not_found}
+  def find_contract_addresses(
+        hashes,
+        options \\ []
+      ) do
+    necessity_by_association =
+      options
+      |> Keyword.get(:necessity_by_association, %{})
+      |> Map.merge(%{
+        Implementation.proxy_implementations_association() => :optional
+      })
+
+    hashes
+    |> addresses_with_bytecode_query()
+    |> Chain.join_associations(necessity_by_association)
+    |> Chain.select_repo(options).all()
+    |> Enum.map(fn address_result ->
+      update_address_result(address_result, options, true)
+    end)
+    |> case do
+      [] -> {:error, :not_found}
+      addresses -> {:ok, addresses}
+    end
+  end
+
   @spec update_address_result(
           map() | nil,
           [Chain.necessity_by_association_option() | Chain.api?() | Chain.ip()],
@@ -1019,12 +1071,14 @@ defmodule Explorer.Chain.Address do
   """
   @spec creation_internal_transaction_query(binary() | Hash.t()) :: Ecto.Query.t()
   def creation_internal_transaction_query(address_hash) do
-    InternalTransaction
-    |> InternalTransaction.join_transaction_query()
-    |> InternalTransaction.where_address_match_by_hash(:created_contract_address, address_hash, [])
-    |> where(as(:transaction).status == ^:ok)
-    |> order_by([it], desc: it.block_number, desc: it.transaction_index, desc: it.index)
-    |> limit(1)
+    from(
+      it in InternalTransaction,
+      inner_join: t in assoc(it, :transaction),
+      where: it.created_contract_address_hash == ^address_hash,
+      where: t.status == ^1,
+      order_by: [desc: it.block_number],
+      limit: 1
+    )
   end
 
   @doc """
@@ -1055,13 +1109,6 @@ defmodule Explorer.Chain.Address do
     |> address_with_bytecode_query()
     |> Chain.join_associations(necessity_by_association)
     |> Chain.select_repo(options).one()
-    |> then(fn address ->
-      if Keyword.get(options, :preload_contract_creation_internal_transaction, false) do
-        Address.maybe_preload_contract_creation_internal_transaction(address, options)
-      else
-        address
-      end
-    end)
     |> update_address_result(options, false)
     |> case do
       nil -> {:error, :not_found}

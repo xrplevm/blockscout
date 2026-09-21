@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Arbitrum.MessagesToL2Matcher do
   @moduledoc """
   Matches and processes L1-to-L2 messages in the Arbitrum protocol.

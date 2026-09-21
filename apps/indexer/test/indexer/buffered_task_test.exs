@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.BufferedTaskTest do
   use ExUnit.Case
 
@@ -237,14 +236,14 @@ defmodule Indexer.BufferedTaskTest do
       refute flush_timer == nil
     end
 
-    test "with 0 size without maximum size schedules next flush and hibernates" do
+    test "with 0 size without maximum size schedules next flush" do
       bound_queue = %BoundQueue{}
 
       refute BoundQueue.shrunk?(bound_queue)
 
       start_supervised!({Task.Supervisor, name: BufferedTaskSup})
 
-      assert {:noreply, %BufferedTask{flush_timer: flush_timer}, :hibernate} =
+      assert {:noreply, %BufferedTask{flush_timer: flush_timer}} =
                BufferedTask.handle_info(:flush, %BufferedTask{
                  callback_module: ShrinkableTask,
                  callback_module_state: nil,
@@ -260,7 +259,7 @@ defmodule Indexer.BufferedTaskTest do
       refute flush_timer == nil
     end
 
-    test "with 0 size with maximum size calls init/2 to get work that was shed before scheduling next flush and hibernates" do
+    test "with 0 size with maximum size calls init/2 to get work that was shed before scheduling next flush" do
       {:ok, bound_queue} = BoundQueue.push_back(%BoundQueue{}, 1)
       {:ok, bound_queue} = BoundQueue.push_back(bound_queue, 2)
       {:ok, bound_queue} = BoundQueue.shrink(bound_queue)
@@ -271,7 +270,7 @@ defmodule Indexer.BufferedTaskTest do
 
       start_supervised!({Task.Supervisor, name: BufferedTaskSup})
 
-      assert {:noreply, %BufferedTask{flush_timer: flush_timer}, :hibernate} =
+      assert {:noreply, %BufferedTask{flush_timer: flush_timer}} =
                BufferedTask.handle_info(:flush, %BufferedTask{
                  callback_module: ShrinkableTask,
                  callback_module_state: nil,

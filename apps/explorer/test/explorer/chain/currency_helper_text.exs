@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.CurrencyHelperTest do
   use ExUnit.Case
 

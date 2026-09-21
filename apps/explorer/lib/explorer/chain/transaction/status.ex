@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Transaction.Status do
   @moduledoc """
   Whether a transaction succeeded (`:ok`) or failed (`:error`).

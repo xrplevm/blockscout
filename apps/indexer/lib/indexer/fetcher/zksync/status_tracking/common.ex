@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.ZkSync.StatusTracking.CommonUtils do
   @moduledoc """
     Common functions for status changes trackers

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Optimism.TransactionBatches do
   @moduledoc """
   Bulk imports `t:Explorer.Chain.Optimism.TransactionBatch.t/0`.

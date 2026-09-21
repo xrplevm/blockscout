@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Arbitrum.Reader.Indexer.Settlement do
   @moduledoc """
     Provides database query functions for retrieving information about Arbitrum rollup batches

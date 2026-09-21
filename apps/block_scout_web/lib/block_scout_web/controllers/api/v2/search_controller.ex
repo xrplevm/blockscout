@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.SearchController do
   use BlockScoutWeb, :controller
   use OpenApiSpex.ControllerSpecs
@@ -107,7 +106,7 @@ defmodule BlockScoutWeb.API.V2.SearchController do
     responses: [
       ok:
         {"Quick search results.", "application/json",
-         %Schema{type: :array, items: Schemas.Search.ResultItem, nullable: false}},
+         %Schema{type: :array, items: %Schema{type: :object}, nullable: false}},
       unprocessable_entity: JsonErrorResponse.response()
     ]
 

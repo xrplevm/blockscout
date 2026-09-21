@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Account.Api.Key do
   @moduledoc """
     Module is responsible for schema for API keys, keys is used to track number of requests to the API endpoints

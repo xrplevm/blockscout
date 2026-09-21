@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.SmartContract.Stylus.Publisher do
   @moduledoc """
     Module responsible for verifying and publishing Stylus smart contracts.

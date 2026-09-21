@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Events.SubscriberTest do
   use ExUnit.Case, async: true
 

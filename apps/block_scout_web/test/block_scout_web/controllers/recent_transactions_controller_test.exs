@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.RecentTransactionsControllerTest do
   use BlockScoutWeb.ConnCase
 

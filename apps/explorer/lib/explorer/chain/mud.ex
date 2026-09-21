@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Mud do
   @moduledoc """
     Represents a MUD framework database record.

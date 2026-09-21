@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.UnescapeQuotesInTokensTest do
   use Explorer.DataCase, async: false
 
@@ -6,8 +5,6 @@ defmodule Explorer.Migrator.UnescapeQuotesInTokensTest do
   alias Explorer.Repo
 
   test "Unescapes quotes in tokens" do
-    insert(:block)
-
     escaped_name_token = insert(:token, name: "Smth&#39;s")
     escaped_symbol_token = insert(:token, symbol: "&quot;Double quoted&quot;")
     escaped_both_token = insert(:token, name: "Smth&#39;s", symbol: "&quot;Double quoted&quot;")

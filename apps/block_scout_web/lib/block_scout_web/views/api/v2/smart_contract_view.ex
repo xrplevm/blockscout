@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.SmartContractView do
   use BlockScoutWeb, :view
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
@@ -198,7 +197,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
           do: AddressContractView.sourcify_repo_url(address.hash, smart_contract.partially_verified)
         ),
       "can_be_visualized_via_sol2uml" =>
-        visualize_sol2uml_enabled && target_contract && target_contract.language == :solidity,
+        visualize_sol2uml_enabled && target_contract && SmartContract.language(target_contract) == :solidity,
       "name" => target_contract && target_contract.name,
       "compiler_version" => target_contract && target_contract.compiler_version,
       "optimization_enabled" => target_contract && target_contract.optimization,
@@ -216,7 +215,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
         if(smart_contract_verified,
           do: SmartContract.format_constructor_arguments(smart_contract.abi, smart_contract.constructor_arguments)
         ),
-      "language" => smart_contract.language,
+      "language" => SmartContract.language(smart_contract),
       "license_type" => smart_contract.license_type,
       "certified" => if(smart_contract.certified, do: smart_contract.certified, else: false),
       "is_blueprint" => if(smart_contract.is_blueprint, do: smart_contract.is_blueprint, else: false)
@@ -313,7 +312,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
         "compiler_version" => smart_contract.compiler_version,
         "optimization_enabled" => smart_contract.optimization,
         "transactions_count" => address.transactions_count,
-        "language" => smart_contract.language,
+        "language" => SmartContract.language(smart_contract),
         "verified_at" => smart_contract.inserted_at,
         "market_cap" => token && token.circulating_market_cap,
         "has_constructor_args" => !is_nil(smart_contract.constructor_arguments),
@@ -383,12 +382,6 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
 
   def render_json(value, type) when type in [:address, "address", "address payable"] do
     SmartContractView.cast_address(value)
-  end
-
-  # A Solidity `function` type is a 24-byte value (address + selector). Since
-  # ex_abi 0.8.4 it is decoded into a raw binary, so render it as hex.
-  def render_json(value, type) when type in [:function, "function"] and is_binary(value) do
-    "0x" <> Base.encode16(value, case: :lower)
   end
 
   def render_json(value, type) when type in [:string, "string"] do

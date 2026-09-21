@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Hash.Nonce do
   @moduledoc """
   The nonce (16 (hex) characters / 128 bits / 8 bytes) is derived from the Proof-of-Work.

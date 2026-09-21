@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Migrator.HeavyDbIndexOperation.UpdateInternalTransactionsPrimaryKey do
   @moduledoc """
   Update primary key on `internal_transactions` table from (`block_hash`, `block_index`) to (`block_number`, `transaction_index`, `index`).

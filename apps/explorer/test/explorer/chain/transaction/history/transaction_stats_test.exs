@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Transaction.History.TransactionStatsTest do
   use Explorer.DataCase, async: false
 

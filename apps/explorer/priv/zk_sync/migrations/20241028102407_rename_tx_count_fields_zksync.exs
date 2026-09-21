@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.ZkSync.Migrations.RenameTxCountFieldsZksync do
   use Ecto.Migration
 

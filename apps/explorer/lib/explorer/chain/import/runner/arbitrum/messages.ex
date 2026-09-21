@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Arbitrum.Messages do
   @moduledoc """
     Bulk imports of Explorer.Chain.Arbitrum.Message.

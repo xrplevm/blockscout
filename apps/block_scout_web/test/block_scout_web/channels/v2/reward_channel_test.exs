@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.V2.RewardChannelTest do
   use BlockScoutWeb.ChannelCase, async: false
 

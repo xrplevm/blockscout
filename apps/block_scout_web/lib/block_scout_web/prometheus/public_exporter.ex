@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Prometheus.PublicExporter do
   @moduledoc """
   Exports `Prometheus` metrics at `/public-metrics`

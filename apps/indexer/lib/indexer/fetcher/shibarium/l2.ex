@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Shibarium.L2 do
   @moduledoc """
   Fills shibarium_bridge DB table.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Tags.AddressTag do
   @moduledoc """
   Represents an address Tag object.
@@ -64,7 +63,7 @@ defmodule Explorer.Tags.AddressTag do
   @doc """
    Fetches AddressTag.t() by label name from the DB
   """
-  @spec get_id_by_label(String.t() | nil) :: non_neg_integer() | nil
+  @spec get_id_by_label(String.t()) :: non_neg_integer()
   def get_id_by_label(nil), do: nil
 
   def get_id_by_label(label) do

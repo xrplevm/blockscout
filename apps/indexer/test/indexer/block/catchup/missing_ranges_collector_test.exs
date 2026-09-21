@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Catchup.MissingRangesCollectorTest do
   use Explorer.DataCase, async: false
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Import.Runner.Helper do
   @moduledoc """
   Provides utility functions for the chain import runners.

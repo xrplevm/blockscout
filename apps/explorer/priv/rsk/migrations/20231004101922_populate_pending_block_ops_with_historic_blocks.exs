@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Repo.RSK.Migrations.PopulatePendingBlockOpsWithHistoricBlocks do
   use Ecto.Migration
 

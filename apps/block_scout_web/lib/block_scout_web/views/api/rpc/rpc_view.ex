@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.RPC.RPCView do
   use BlockScoutWeb, :view
 
@@ -8,6 +7,14 @@ defmodule BlockScoutWeb.API.RPC.RPCView do
       "message" => "OK",
       "result" => data
     }
+  end
+
+  def render("show_value.json", %{data: data}) do
+    {value, _} =
+      data
+      |> Float.parse()
+
+    value
   end
 
   def render("pending_internal_transaction.json", %{data: data, message: message}) do

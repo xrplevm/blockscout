@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
   use BlockScoutWeb.ConnCase
 
@@ -45,14 +44,16 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
         transaction: transaction,
         index: 0,
         block_number: transaction.block_number,
-        transaction_index: transaction.index
+        transaction_index: transaction.index,
+        block_hash: transaction.block_hash
       )
 
       insert(:internal_transaction,
         transaction: transaction,
         index: 1,
         transaction_index: transaction.index,
-        block_number: transaction.block_number
+        block_number: transaction.block_number,
+        block_hash: transaction.block_hash
       )
 
       path = transaction_internal_transaction_path(BlockScoutWeb.Endpoint, :index, transaction.hash)
@@ -93,9 +94,9 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           index: 0,
           block_number: transaction.block_number,
           transaction_index: transaction.index,
-          created_contract_code: contract_address.contract_code,
-          created_contract_address: contract_address
+          block_hash: transaction.block_hash
         )
+        |> with_contract_creation(contract_address)
 
       conn =
         get(
@@ -103,7 +104,7 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           transaction_internal_transaction_path(
             BlockScoutWeb.Endpoint,
             :index,
-            internal_transaction.transaction.hash
+            internal_transaction.transaction_hash
           )
         )
 
@@ -121,7 +122,8 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           transaction: transaction,
           index: 0,
           block_number: transaction.block_number,
-          transaction_index: transaction.index
+          transaction_index: transaction.index,
+          block_hash: transaction.block_hash
         )
 
       second_page_indexes =
@@ -131,7 +133,8 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
             transaction: transaction,
             index: index,
             block_number: transaction.block_number,
-            transaction_index: transaction.index
+            transaction_index: transaction.index,
+            block_hash: transaction.block_hash
           )
         end)
         |> Enum.map(& &1.index)
@@ -164,7 +167,8 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           transaction: transaction,
           index: index,
           block_number: transaction.block_number,
-          transaction_index: transaction.index
+          transaction_index: transaction.index,
+          block_hash: transaction.block_hash
         )
       end)
 
@@ -193,7 +197,8 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           transaction: transaction,
           index: index,
           block_number: transaction.block_number,
-          transaction_index: transaction.index
+          transaction_index: transaction.index,
+          block_hash: transaction.block_hash
         )
       end)
 

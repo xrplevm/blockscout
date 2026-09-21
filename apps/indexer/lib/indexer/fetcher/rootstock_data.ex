@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.RootstockData do
   @moduledoc """
   Refetch `minimum_gas_price`, `bitcoin_merged_mining_header`, `bitcoin_merged_mining_coinbase_transaction`,

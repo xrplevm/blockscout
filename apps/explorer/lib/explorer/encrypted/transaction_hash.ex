@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Encrypted.TransactionHash do
   @moduledoc false
 

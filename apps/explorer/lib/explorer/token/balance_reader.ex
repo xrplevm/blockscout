@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Token.BalanceReader do
   @moduledoc """
   Reads Token's balances using Smart Contract functions from the blockchain.

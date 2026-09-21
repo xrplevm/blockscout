@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Transform.Blocks.CliqueTest do
   use ExUnit.Case
 

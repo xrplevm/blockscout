@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Encoder do
   @moduledoc """
   Deals with encoding and decoding data to be sent to, or that is

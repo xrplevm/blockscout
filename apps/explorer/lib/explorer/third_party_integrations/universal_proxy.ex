@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.ThirdPartyIntegrations.UniversalProxy do
   @moduledoc """
   A single point of entry for proxying third-party HTTP API endpoints

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.AddressContractView do
   use BlockScoutWeb, :view
   use Phoenix.LiveView

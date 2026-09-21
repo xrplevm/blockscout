@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Hash do
   @moduledoc """
   A [KECCAK-256](https://en.wikipedia.org/wiki/SHA-3) hash.

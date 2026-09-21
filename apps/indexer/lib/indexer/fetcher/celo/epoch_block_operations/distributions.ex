@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Celo.EpochBlockOperations.Distributions do
   @moduledoc """
   Fetches Reserve bolster, Community, and Carbon offsetting distributions for

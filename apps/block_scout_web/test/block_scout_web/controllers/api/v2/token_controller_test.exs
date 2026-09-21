@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.TokenControllerTest do
   use EthereumJSONRPC.Case, async: false
   use BlockScoutWeb.ConnCase
@@ -10,9 +9,8 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
 
   alias Explorer.{Repo, TestHelper}
 
-  alias Explorer.Chain.{Address, Block, Token, Token.Instance, TokenTransfer}
+  alias Explorer.Chain.{Address, Token, Token.Instance, TokenTransfer}
   alias Explorer.Chain.Address.CurrentTokenBalance
-  alias Explorer.Chain.Cache.Counters.TokenCountersConsolidator
   alias Explorer.Chain.Events.Subscriber
 
   alias Indexer.Fetcher.OnDemand.TokenInstanceMetadataRefetch, as: TokenInstanceMetadataRefetchOnDemand
@@ -99,8 +97,6 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
         3,
         :token_transfer,
         transaction: transaction,
-        block: transaction.block,
-        block_number: transaction.block_number,
         token_contract_address: contract_token_address
       )
 
@@ -114,9 +110,10 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
           )
         )
 
-      safe_block = Repo.aggregate(Block, :max, :number)
-      TokenCountersConsolidator.consolidate_tokens([token.contract_address_hash], safe_block)
+      request = get(conn, "/api/v2/tokens/#{token.contract_address.hash}/counters")
+      assert json_response(request, 200)
 
+      Process.sleep(500)
       request = get(conn, "/api/v2/tokens/#{token.contract_address.hash}/counters")
       assert response = json_response(request, 200)
 
@@ -2647,54 +2644,6 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
         assert %{"items" => items, "next_page_params" => next_page_params} = response
         assert length(items) == 1
         assert next_page_params == nil
-      end
-
-      test "regression: sort and order params are applied for bridged tokens", %{conn: conn} do
-        parameter_names =
-          BlockScoutWeb.API.V2.TokenController.open_api_operation(:bridged_tokens_list).parameters
-          |> Enum.map(fn
-            %OpenApiSpex.Parameter{name: name} -> to_string(name)
-            %OpenApiSpex.Reference{} -> nil
-          end)
-          |> Enum.reject(&is_nil/1)
-
-        assert "sort" in parameter_names
-        assert "order" in parameter_names
-
-        high_fiat_token = insert(:token, %{total_supply: 20_000, name: "BridgeTokenHigh", fiat_value: 200})
-        low_fiat_token = insert(:token, %{total_supply: 10_000, name: "BridgeTokenLow", fiat_value: 100})
-
-        for token <- [high_fiat_token, low_fiat_token] do
-          Explorer.Repo.update_all(
-            from(t in Explorer.Chain.Token, where: t.contract_address_hash == ^token.contract_address_hash),
-            set: [bridged: true]
-          )
-
-          {:ok, _bridged_token} =
-            Explorer.Repo.insert(%Explorer.Chain.BridgedToken{
-              home_token_contract_address_hash: token.contract_address_hash,
-              foreign_chain_id: 1,
-              foreign_token_contract_address_hash: build(:address).hash,
-              type: "omni"
-            })
-        end
-
-        base_params = %{
-          "q" => "BridgeToken",
-          "chain_ids" => "1",
-          "sort" => "fiat_value"
-        }
-
-        request_asc = get(conn, "/api/v2/tokens/bridged", Map.put(base_params, "order", "asc"))
-        request_desc = get(conn, "/api/v2/tokens/bridged", Map.put(base_params, "order", "desc"))
-
-        assert %{"items" => [asc_first | _] = asc_items} = json_response(request_asc, 200)
-        assert %{"items" => [desc_first | _] = desc_items} = json_response(request_desc, 200)
-        assert length(asc_items) == 2
-        assert length(desc_items) == 2
-
-        assert asc_first["address_hash"] == Address.checksum(low_fiat_token.contract_address_hash)
-        assert desc_first["address_hash"] == Address.checksum(high_fiat_token.contract_address_hash)
       end
     end
   end

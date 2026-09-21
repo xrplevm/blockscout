@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Block.Reader.GeneralTest do
   use Explorer.DataCase
 

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.BenchmarkCase do
   @moduledoc """
   This module defines the benchmark case to be used by benchmarks.

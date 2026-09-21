@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.ZkSync.StatusTracking.Proven do
   @moduledoc """
     Functionality to discover proven batches
