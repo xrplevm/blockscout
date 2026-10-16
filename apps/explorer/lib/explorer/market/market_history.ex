@@ -7,7 +7,7 @@ defmodule Explorer.Market.MarketHistory do
   use Explorer.Schema
 
   alias Explorer.{Chain, Repo}
-  alias Explorer.Market.Token
+  alias Explorer.Market.{Source, Token}
 
   @typedoc """
   The recorded values of the configured coin to USD for a single day.
@@ -41,6 +41,23 @@ defmodule Explorer.Market.MarketHistory do
     Chain.select_repo(options).one(query)
   end
 
+  @doc """
+  Returns the market history (for the secondary coin if specified) for the given dates.
+  """
+  @spec prices_at_dates([Date.t()], boolean(), [Chain.api?()]) :: [t()]
+  def prices_at_dates(dates, secondary_coin? \\ false, options \\ [])
+  def prices_at_dates([], _secondary_coin?, _options), do: []
+
+  def prices_at_dates(dates, secondary_coin?, options) do
+    query =
+      from(
+        mh in __MODULE__,
+        where: mh.date in ^dates and mh.secondary_coin == ^secondary_coin?
+      )
+
+    Chain.select_repo(options).all(query)
+  end
+
   @doc false
   @spec bulk_insert([map()]) :: {:ok, {non_neg_integer(), nil | [term()]}} | {:error, term()}
   def bulk_insert(records) do
@@ -48,8 +65,8 @@ defmodule Explorer.Market.MarketHistory do
       records
       |> Enum.reject(fn item ->
         Map.has_key?(item, :opening_price) && Map.has_key?(item, :closing_price) &&
-          Decimal.equal?(item.closing_price, 0) &&
-          Decimal.equal?(item.opening_price, 0)
+          Source.zero_or_nil?(item.closing_price) &&
+          Source.zero_or_nil?(item.opening_price)
       end)
       # Enforce MarketHistory ShareLocks order (see docs: sharelocks.md)
       |> Enum.sort_by(& &1.date)

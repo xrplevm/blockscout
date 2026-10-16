@@ -66,6 +66,22 @@ defmodule Explorer.Chain.Transaction.Schema do
                             2
                           )
 
+                        :eden ->
+                          elem(
+                            quote do
+                              belongs_to(
+                                :fee_payer_address,
+                                Address,
+                                foreign_key: :fee_payer_address_hash,
+                                references: :hash,
+                                type: Hash.Address
+                              )
+
+                              field(:calls, {:array, :map})
+                            end,
+                            2
+                          )
+
                         :suave ->
                           elem(
                             quote do
@@ -228,7 +244,7 @@ defmodule Explorer.Chain.Transaction.Schema do
         field(:type, :integer)
         field(:has_error_in_internal_transactions, :boolean)
         field(:fhe_operations_count, :integer)
-        field(:has_token_transfers, :boolean, virtual: true)
+        field(:has_token_transfers, :boolean)
         field(:internal_transactions, {:array, :map}, virtual: true)
 
         # stability virtual fields
@@ -322,6 +338,7 @@ defmodule Explorer.Chain.Transaction do
     Hash,
     InternalTransaction,
     MethodIdentifier,
+    SmartContract,
     SmartContract.Proxy,
     TokenTransfer,
     Wei
@@ -329,6 +346,7 @@ defmodule Explorer.Chain.Transaction do
 
   alias Explorer.Chain.Block.Reader.General, as: BlockReaderGeneral
 
+  alias Explorer.Chain.Cache.ContractMethods, as: ContractMethodsCache
   alias Explorer.Chain.Cache.Transactions
 
   alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
@@ -349,6 +367,9 @@ defmodule Explorer.Chain.Transaction do
 
                                 :scroll ->
                                   ~w(l1_fee queue_index)a
+
+                                :eden ->
+                                  ~w(fee_payer_address_hash calls)a
 
                                 :suave ->
                                   ~w(execution_node_hash wrapped_type wrapped_nonce wrapped_to_address_hash wrapped_gas wrapped_gas_price wrapped_max_priority_fee_per_gas wrapped_max_fee_per_gas wrapped_value wrapped_input wrapped_v wrapped_r wrapped_s wrapped_hash)a
@@ -409,28 +430,7 @@ defmodule Explorer.Chain.Transaction do
   """
   @type wei_per_gas :: Wei.t()
 
-  @derive {Poison.Encoder,
-           only: [
-             :block_number,
-             :block_timestamp,
-             :cumulative_gas_used,
-             :error,
-             :gas,
-             :gas_price,
-             :gas_used,
-             :index,
-             :created_contract_code_indexed_at,
-             :input,
-             :nonce,
-             :r,
-             :s,
-             :v,
-             :status,
-             :value,
-             :revert_reason
-           ]}
-
-  @derive {Jason.Encoder,
+  @derive {JSON.Encoder,
            only: [
              :block_number,
              :block_timestamp,
@@ -531,6 +531,9 @@ defmodule Explorer.Chain.Transaction do
    * `wrapped_r` - R field of the signature from the `wrapped` field (used by Suave)
    * `wrapped_s` - S field of the signature from the `wrapped` field (used by Suave)
    * `wrapped_hash` - hash from the `wrapped` field (used by Suave)
+   * `fee_payer_address` - sponsor address which pays for the transaction (used by Eden)
+   * `fee_payer_address_hash` - `fee_payer_address` foreign key (used by Eden)
+   * `calls` - ordered list of the calls batched in a sponsored transaction (used by Eden)
    * `operator_fee_scalar` - operatorFeeScalar is a uint32 scalar set by a chain operator (used by some OP chains)
    * `operator_fee_constant` - operatorFeeConstant is a uint64 constant set by a chain operator (used by some OP chains)
    * `da_footprint_gas_scalar` - daFootprintGasScalar is a uint16 scalar used to calculate daFootprint introduced in Jovian OP upgrade
@@ -880,97 +883,37 @@ defmodule Explorer.Chain.Transaction do
     )
   end
 
-  # if to_address's smart_contract is nil reduce to the case when to_address is not loaded
+  # if to_address's smart_contract is nil, decode without contract ABI
   def decoded_input_data(
-        %__MODULE__{
-          to_address: %{smart_contract: nil},
-          input: input,
-          hash: hash
-        },
-        skip_sig_provider?,
-        options,
-        methods_map,
-        smart_contract_full_abi_map
-      ) do
-    decoded_input_data(
-      %__MODULE__{
-        to_address: %NotLoaded{},
-        input: input,
-        hash: hash
-      },
-      skip_sig_provider?,
-      options,
-      methods_map,
-      smart_contract_full_abi_map
-    )
-  end
-
-  # if to_address's smart_contract is not loaded reduce to the case when to_address is not loaded
-  def decoded_input_data(
-        %__MODULE__{
-          to_address: %{smart_contract: %NotLoaded{}},
-          input: input,
-          hash: hash
-        },
-        skip_sig_provider?,
-        options,
-        methods_map,
-        smart_contract_full_abi_map
-      ) do
-    decoded_input_data(
-      %__MODULE__{
-        to_address: %NotLoaded{},
-        input: input,
-        hash: hash
-      },
-      skip_sig_provider?,
-      options,
-      methods_map,
-      smart_contract_full_abi_map
-    )
-  end
-
-  # if to_address is not loaded try decoding by method candidates in the DB
-  def decoded_input_data(
-        %__MODULE__{
-          to_address: %NotLoaded{},
-          input: %{bytes: <<method_id::binary-size(4), _::binary>> = data} = input,
-          hash: hash
-        },
+        %__MODULE__{to_address: %{smart_contract: nil}, input: input, hash: hash},
         skip_sig_provider?,
         options,
         methods_map,
         _smart_contract_full_abi_map
       ) do
-    {:ok, method_id} = MethodIdentifier.cast(method_id)
-    methods = check_methods_cache(method_id, methods_map, options)
-
-    candidates =
-      methods
-      |> Enum.flat_map(fn candidate ->
-        case do_decoded_input_data(
-               data,
-               [candidate.abi],
-               hash
-             ) do
-          {:ok, _, _, _} = decoded -> [decoded]
-          _ -> []
-        end
-      end)
-
-    {:error, :contract_not_verified,
-     if(candidates == [], do: decode_function_call_via_sig_provider(input, hash, skip_sig_provider?), else: candidates)}
+    decode_without_contract_abi(input, hash, skip_sig_provider?, options, methods_map)
   end
 
-  # if to_address is not loaded and input is not a method call return error
+  # if to_address's smart_contract is not loaded, decode without contract ABI
   def decoded_input_data(
-        %__MODULE__{to_address: %NotLoaded{}},
-        _,
-        _,
-        _,
-        _
+        %__MODULE__{to_address: %{smart_contract: %NotLoaded{}}, input: input, hash: hash},
+        skip_sig_provider?,
+        options,
+        methods_map,
+        _smart_contract_full_abi_map
       ) do
-    {:error, :contract_not_verified, []}
+    decode_without_contract_abi(input, hash, skip_sig_provider?, options, methods_map)
+  end
+
+  # if to_address is not loaded, decode without contract ABI
+  def decoded_input_data(
+        %__MODULE__{to_address: %NotLoaded{}, input: input, hash: hash},
+        skip_sig_provider?,
+        options,
+        methods_map,
+        _smart_contract_full_abi_map
+      ) do
+    decode_without_contract_abi(input, hash, skip_sig_provider?, options, methods_map)
   end
 
   def decoded_input_data(
@@ -998,8 +941,13 @@ defmodule Explorer.Chain.Transaction do
     )
   end
 
+  # Fallback for a to_address that is neither a loaded `Address`, `nil`, nor
+  # `NotLoaded`. This happens when ENS/metadata preloading replaces an unloaded
+  # to_address with a bare map (e.g. `%{ens_domain_name: ...}` or
+  # `%{metadata: ...}`, see `Explorer.Chain.Address.MetadataPreloader.alter_address/4`).
+  # Such a map carries no contract data, so there is nothing to decode.
   def decoded_input_data(
-        %__MODULE__{to_address: %{metadata: _, ens_domain_name: _}},
+        %__MODULE__{},
         _,
         _,
         _,
@@ -1056,6 +1004,30 @@ defmodule Explorer.Chain.Transaction do
     end
   end
 
+  defp decode_without_contract_abi(
+         %{bytes: <<method_id::binary-size(4), _::binary>> = data} = input,
+         hash,
+         skip_sig_provider?,
+         options,
+         methods_map
+       ) do
+    {:ok, method_id} = MethodIdentifier.cast(method_id)
+    methods = check_methods_cache(method_id, methods_map, options)
+
+    candidates =
+      Enum.flat_map(methods, fn candidate ->
+        case do_decoded_input_data(data, [candidate.abi], hash) do
+          {:ok, _, _, _} = decoded -> [decoded]
+          _ -> []
+        end
+      end)
+
+    {:error, :contract_not_verified,
+     if(candidates == [], do: decode_function_call_via_sig_provider(input, hash, skip_sig_provider?), else: candidates)}
+  end
+
+  defp decode_without_contract_abi(_, _, _, _, _), do: {:error, :contract_not_verified, []}
+
   defp do_decoded_input_data(data, full_abi, hash) do
     with {:ok, {selector, values}} <- find_and_decode(full_abi, data, hash),
          {:ok, mapping} <- selector_mapping(selector, values, hash),
@@ -1065,18 +1037,33 @@ defmodule Explorer.Chain.Transaction do
     end
   end
 
-  defp decode_function_call_via_sig_provider(%{bytes: data} = input, hash, skip_sig_provider?) do
+  defp decode_function_call_via_sig_provider(
+         %{bytes: <<method_id::binary-size(4), _::binary>> = data} = input,
+         hash,
+         skip_sig_provider?
+       ) do
     with true <- SigProviderInterface.enabled?(),
          false <- skip_sig_provider?,
-         {:ok, result} <- SigProviderInterface.decode_function_call(input),
-         true <- is_list(result),
-         false <- Enum.empty?(result),
-         abi <- [result |> List.first() |> Map.put("outputs", []) |> Map.put("type", "function")],
+         [_ | _] = abi <-
+           ContractMethodsCache.fetch_sig_provider_abi(method_id, fn -> request_abi_from_sig_provider(input) end),
          {:ok, _, _, _} = candidate <- do_decoded_input_data(data, abi, hash) do
       [candidate]
     else
       _ ->
         []
+    end
+  end
+
+  # inputs shorter than a 4-byte method id cannot be a function call
+  defp decode_function_call_via_sig_provider(_input, _hash, _skip_sig_provider?), do: []
+
+  defp request_abi_from_sig_provider(input) do
+    with {:ok, result} <- SigProviderInterface.decode_function_call(input),
+         true <- is_list(result),
+         false <- Enum.empty?(result) do
+      [result |> List.first() |> Map.put("outputs", []) |> Map.put("type", "function")]
+    else
+      _ -> []
     end
   end
 
@@ -1159,7 +1146,7 @@ defmodule Explorer.Chain.Transaction do
     end
   rescue
     e ->
-      Logger.warning(fn ->
+      Logger.debug(fn ->
         [
           "Could not decode input data for transaction: ",
           Hash.to_iodata(hash),
@@ -1189,7 +1176,7 @@ defmodule Explorer.Chain.Transaction do
     {:ok, mapping}
   rescue
     e ->
-      Logger.warning(fn ->
+      Logger.debug(fn ->
         [
           "Could not decode input data for transaction: ",
           Hash.to_iodata(hash),
@@ -2170,8 +2157,8 @@ defmodule Explorer.Chain.Transaction do
         } = transaction
       ) do
     gas_used = gas_used || gas
-    operator_fee_scalar = Map.get(transaction, :operator_fee_scalar) || Decimal.new(0)
-    operator_fee_constant = Map.get(transaction, :operator_fee_constant) || Decimal.new(0)
+    operator_fee_scalar = Helper.chain_type_field(transaction, :operator_fee_scalar) || Decimal.new(0)
+    operator_fee_constant = Helper.chain_type_field(transaction, :operator_fee_constant) || Decimal.new(0)
 
     jovian_timestamp = op_jovian_timestamp()
 
@@ -2218,6 +2205,40 @@ defmodule Explorer.Chain.Transaction do
     gas_price
     |> Wei.to(unit)
     |> Decimal.mult(gas_used)
+  end
+
+  @doc """
+    Aggregates the values of the calls batched in an Eden sponsored transaction by their recipients.
+
+    The `to_address_hash` and the `value` of such a transaction are the compatibility fields derived
+    from the first call and from the sum of all the calls respectively, so the calls are the only
+    source of the actual recipients and of the amounts they receive.
+
+    The calls without a recipient (the contract creations) and the malformed ones are skipped.
+
+    ## Parameters
+    - `transaction`: The transaction entity.
+
+    ## Returns
+    - A map of the recipient address hashes to the total value each of them receives within the
+      transaction. Empty for the transactions which are not the sponsored ones.
+  """
+  @spec calls_value_by_recipient(__MODULE__.t()) :: %{Hash.Address.t() => Wei.t()}
+  if @chain_type == :eden do
+    def calls_value_by_recipient(%__MODULE__{calls: calls}) when is_list(calls) do
+      Enum.reduce(calls, %{}, fn call, acc ->
+        with {:ok, address_hash} <- call |> Map.get("to") |> Hash.Address.cast(),
+             {:ok, value} <- call |> Map.get("value") |> Wei.cast() do
+          Map.update(acc, address_hash, value, &Wei.sum(&1, value))
+        else
+          _ -> acc
+        end
+      end)
+    end
+
+    def calls_value_by_recipient(%__MODULE__{}), do: %{}
+  else
+    def calls_value_by_recipient(%__MODULE__{}), do: %{}
   end
 
   @doc """
@@ -2320,6 +2341,39 @@ defmodule Explorer.Chain.Transaction do
     )
   end
 
+  # EIP-7702 set code transaction type: the only type carrying an authorization list.
+  @set_code_transaction_type 4
+
+  @doc """
+  Preloads `signed_authorizations` for a transaction, but only when it can have
+  any: EIP-7702 set code transactions (type #{@set_code_transaction_type}).
+
+  Every other transaction type gets an empty list without touching the DB,
+  which saves one query per transaction on the single-transaction endpoints.
+  A transaction whose `signed_authorizations` are already loaded is returned
+  as is.
+
+  ## Parameters
+  - `transaction`: The transaction to preload.
+  - `options`: Keyword list with `api?` used to pick the replica repo.
+
+  ## Returns
+  - The transaction with `signed_authorizations` loaded (or set to `[]`).
+  """
+  @spec preload_signed_authorizations(t(), Keyword.t()) :: t()
+  def preload_signed_authorizations(%__MODULE__{signed_authorizations: signed_authorizations} = transaction, _options)
+      when is_list(signed_authorizations) do
+    transaction
+  end
+
+  def preload_signed_authorizations(%__MODULE__{type: @set_code_transaction_type} = transaction, options) do
+    Chain.select_repo(options).preload(transaction, :signed_authorizations)
+  end
+
+  def preload_signed_authorizations(%__MODULE__{} = transaction, _options) do
+    %{transaction | signed_authorizations: []}
+  end
+
   @doc """
   Receives as input list of transactions and returns decoded_input_data
   Where
@@ -2327,7 +2381,7 @@ defmodule Explorer.Chain.Transaction do
   """
   @spec decode_transactions([__MODULE__.t()], boolean(), Keyword.t()) :: [nil | {:ok, String.t(), String.t(), map()}]
   def decode_transactions(transactions, skip_sig_provider?, opts) do
-    smart_contract_full_abi_map = combine_smart_contract_full_abi_map(transactions)
+    smart_contract_full_abi_map = combine_smart_contract_full_abi_map(transactions, opts)
 
     # first we assemble an empty methods map, so that decoded_input_data will skip ContractMethod.t() lookup and decoding
     empty_methods_map =
@@ -2360,7 +2414,7 @@ defmodule Explorer.Chain.Transaction do
         _ -> []
       end)
       |> Enum.uniq()
-      |> ContractMethod.find_contract_methods(opts)
+      |> ContractMethodsCache.find_contract_methods(opts)
       |> Enum.into(empty_methods_map, &{&1.identifier, [&1]})
 
     # decode remaining transaction using methods map
@@ -2408,49 +2462,111 @@ defmodule Explorer.Chain.Transaction do
 
   defp decode_remaining_transaction({decoded, _}, _, _, _, _), do: decoded
 
-  defp combine_smart_contract_full_abi_map(transactions) do
-    # parse unique address hashes of smart-contracts from to_address and created_contract_address properties of the transactions list
-    unique_to_address_hashes =
+  # Builds %{target address hash => combined proxy + implementations ABI} for the
+  # to_address / created_contract_address of every transaction.
+  #
+  # Associations already present on the address structs (`smart_contract` with
+  # its `abi`, `proxy_implementations`, and the implementations'
+  # `smart_contracts`) are reused, so a fully preloaded target address costs no
+  # query at all. Whatever is missing is fetched in at most two queries: one for
+  # proxy implementations, one for all outstanding ABIs.
+  defp combine_smart_contract_full_abi_map(transactions, opts) do
+    # unique target addresses of the transactions list: to_address, or
+    # created_contract_address for contract creations
+    target_addresses =
       transactions
       |> Enum.flat_map(fn
-        %__MODULE__{to_address: %Address{hash: hash}} -> [hash]
-        %__MODULE__{created_contract_address: %Address{hash: hash}} -> [hash]
+        %__MODULE__{to_address: %Address{} = address} -> [address]
+        %__MODULE__{created_contract_address: %Address{} = address} -> [address]
         _ -> []
       end)
-      |> Enum.uniq()
+      |> Enum.uniq_by(& &1.hash)
 
-    # query from the DB proxy implementation objects for those address hashes
-    multiple_proxy_implementations =
-      Implementation.get_proxy_implementations_for_multiple_proxies(unique_to_address_hashes)
+    # %{target address hash => implementation address hashes}
+    implementation_hashes_map = implementation_hashes_by_target_address(target_addresses, opts)
 
-    # query from the DB address objects with smart_contract preload for all found above proxy and implementation addresses
-    addresses_with_smart_contracts =
-      multiple_proxy_implementations
-      |> Enum.flat_map(fn proxy_implementations -> proxy_implementations.address_hashes end)
-      |> Enum.concat(unique_to_address_hashes)
-      |> Chain.hashes_to_addresses(necessity_by_association: %{smart_contract: :optional})
-      |> Enum.into(%{}, &{&1.hash, &1})
+    # %{address hash => abi} for every target address and its implementations
+    abis_map = abis_by_address_hash(target_addresses, implementation_hashes_map, opts)
 
-    # combine map %{proxy_address_hash => implementation address hashes}
-    proxy_implementations_map =
-      multiple_proxy_implementations
-      |> Enum.into(%{}, &{&1.proxy_address_hash, &1.address_hashes})
-
-    # combine map %{proxy_address_hash => combined proxy abi}
-    unique_to_address_hashes
-    |> Enum.into(%{}, fn to_address_hash ->
+    Map.new(target_addresses, fn %Address{hash: target_hash} ->
       full_abi =
-        [to_address_hash | Map.get(proxy_implementations_map, to_address_hash, [])]
-        |> Enum.map(&Map.get(addresses_with_smart_contracts, &1))
-        |> Enum.flat_map(fn
-          %{smart_contract: %{abi: abi}} when is_list(abi) -> abi
-          _ -> []
-        end)
-        |> Enum.filter(&(!is_nil(&1)))
+        [target_hash | Map.get(implementation_hashes_map, target_hash, [])]
+        |> Enum.flat_map(&abi_from_map(abis_map, &1))
+        |> Enum.reject(&is_nil/1)
 
-      {to_address_hash, full_abi}
+      {target_hash, full_abi}
     end)
   end
+
+  defp abi_from_map(abis_map, address_hash) do
+    case Map.get(abis_map, address_hash) do
+      abi when is_list(abi) -> abi
+      _ -> []
+    end
+  end
+
+  # Takes implementation address hashes from the preloaded `proxy_implementations`
+  # association where present and queries them in one go for the rest.
+  defp implementation_hashes_by_target_address(target_addresses, opts) do
+    {preloaded_map, not_loaded_hashes} =
+      Enum.reduce(target_addresses, {%{}, []}, fn
+        %Address{hash: hash, proxy_implementations: %Implementation{address_hashes: address_hashes}},
+        {preloaded_map, not_loaded_hashes} ->
+          {Map.put(preloaded_map, hash, address_hashes), not_loaded_hashes}
+
+        # a loaded `has_one` without a row: the address is not a proxy
+        %Address{proxy_implementations: nil}, acc ->
+          acc
+
+        %Address{hash: hash}, {preloaded_map, not_loaded_hashes} ->
+          {preloaded_map, [hash | not_loaded_hashes]}
+      end)
+
+    not_loaded_hashes
+    |> Implementation.get_proxy_implementations_for_multiple_proxies(opts)
+    |> Enum.reduce(preloaded_map, &Map.put(&2, &1.proxy_address_hash, &1.address_hashes))
+  end
+
+  # Takes ABIs from the preloaded `smart_contract` and
+  # `proxy_implementations.smart_contracts` associations where present and
+  # fetches the outstanding ones in a single query.
+  defp abis_by_address_hash(target_addresses, implementation_hashes_map, opts) do
+    preloaded_abis_map =
+      Enum.reduce(target_addresses, %{}, fn %Address{hash: hash} = address, acc ->
+        acc
+        |> put_preloaded_abi(hash, address.smart_contract)
+        |> put_preloaded_implementation_abis(address.proxy_implementations)
+      end)
+
+    target_addresses
+    |> Enum.flat_map(fn %Address{hash: hash} -> [hash | Map.get(implementation_hashes_map, hash, [])] end)
+    |> Enum.uniq()
+    |> Enum.reject(&Map.has_key?(preloaded_abis_map, &1))
+    |> SmartContract.abis_by_address_hashes(opts)
+    |> Map.merge(preloaded_abis_map)
+  end
+
+  # a loaded `has_one` without a row: the address is not a verified contract
+  defp put_preloaded_abi(acc, hash, nil), do: Map.put(acc, hash, [])
+
+  # `abi` is a list only when the smart contract was loaded with its ABI; the
+  # ABI-less preload (`SmartContract.association_without_abi/0`) leaves it `nil`
+  # and falls through to the fetch below
+  defp put_preloaded_abi(acc, hash, %SmartContract{abi: abi}) when is_list(abi), do: Map.put(acc, hash, abi)
+
+  defp put_preloaded_abi(acc, _hash, _not_loaded_or_without_abi), do: acc
+
+  defp put_preloaded_implementation_abis(
+         acc,
+         %Implementation{address_hashes: address_hashes, smart_contracts: smart_contracts}
+       )
+       when is_list(smart_contracts) do
+    smart_contracts_map = Map.new(smart_contracts, &{&1.address_hash, &1})
+
+    Enum.reduce(address_hashes, acc, &put_preloaded_abi(&2, &1, Map.get(smart_contracts_map, &1)))
+  end
+
+  defp put_preloaded_implementation_abis(acc, _not_loaded), do: acc
 
   @doc """
   Receives as input result of decoded_input_data/5, returns either nil or decoded input in format: {:ok, _identifier, _text, _mapping}
@@ -2833,7 +2949,11 @@ defmodule Explorer.Chain.Transaction do
             required(:hash) => Hash.t()
           }
         ]) :: {integer(), nil | [term()]}
-  def find_and_update_replaced_transactions(transactions, timeout \\ :infinity) do
+  def find_and_update_replaced_transactions(transactions, timeout \\ :infinity)
+
+  def find_and_update_replaced_transactions([], _timeout), do: {0, []}
+
+  def find_and_update_replaced_transactions(transactions, timeout) do
     query =
       transactions
       |> Enum.reduce(
@@ -2945,12 +3065,57 @@ defmodule Explorer.Chain.Transaction do
   end
 
   @doc """
+  Streams pending transactions that have already been replaced, i.e. pending transactions for which a mined
+  transaction with the same `from_address_hash` and `nonce` exists, but which have not been marked as
+  `dropped/replaced` yet.
+
+  Unlike `stream_pending_transactions/4` the result is not limited by the fetcher init limit: the result set only
+  contains transactions that need to be updated, so it stays small.
+  """
+  @spec stream_replaced_pending_transactions(
+          fields :: [:block_hash | :from_address_hash | :hash | :nonce],
+          initial :: accumulator,
+          reducer :: (entry :: term(), accumulator -> accumulator)
+        ) :: {:ok, accumulator}
+        when accumulator: term()
+  def stream_replaced_pending_transactions(fields, initial, reducer) when is_function(reducer, 2) do
+    query =
+      __MODULE__
+      |> replaced_pending_transactions_query()
+      |> select(^fields)
+
+    Repo.stream_reduce(query, initial, reducer)
+  end
+
+  @doc """
   Query to return all pending transactions
   """
   @spec pending_transactions_query(Ecto.Queryable.t()) :: Ecto.Queryable.t()
   def pending_transactions_query(query) do
     from(transaction in query,
       where: is_nil(transaction.block_hash) and (is_nil(transaction.error) or transaction.error != "dropped/replaced")
+    )
+  end
+
+  @doc """
+  Query to return pending transactions (see `pending_transactions_query/1`) for which a mined transaction with the same
+  `from_address_hash` and `nonce` already exists. Such transactions should be marked as `dropped/replaced`.
+  """
+  @spec replaced_pending_transactions_query(Ecto.Queryable.t()) :: Ecto.Queryable.t()
+  def replaced_pending_transactions_query(query) do
+    mined_duplicate_query =
+      from(mined in __MODULE__,
+        where:
+          mined.nonce == parent_as(:pending).nonce and
+            mined.from_address_hash == parent_as(:pending).from_address_hash and
+            not is_nil(mined.block_hash),
+        select: 1
+      )
+
+    from(transaction in query,
+      as: :pending,
+      where: is_nil(transaction.block_hash) and (is_nil(transaction.error) or transaction.error != "dropped/replaced"),
+      where: exists(mined_duplicate_query)
     )
   end
 
@@ -3015,19 +3180,19 @@ defmodule Explorer.Chain.Transaction do
   @doc """
   Finds all transactions of a certain block number
   """
-  def get_transactions_of_block_number(block_number) do
+  def get_transactions_of_block_number(block_number, options \\ []) do
     block_number
     |> transactions_with_block_number()
-    |> Repo.all()
+    |> Chain.select_repo(options).all()
   end
 
   @doc """
   Finds all transactions of a certain block numbers
   """
-  def get_transactions_of_block_numbers(block_numbers) do
+  def get_transactions_of_block_numbers(block_numbers, options \\ []) do
     block_numbers
     |> transactions_for_block_numbers()
-    |> Repo.all()
+    |> Chain.select_repo(options).all()
   end
 
   @doc """

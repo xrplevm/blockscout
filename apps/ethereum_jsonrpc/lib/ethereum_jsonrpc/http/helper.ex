@@ -4,27 +4,102 @@ defmodule EthereumJSONRPC.HTTP.Helper do
   Helper functions for `EthereumJSONRPC.HTTP` implementations.
   """
 
-  @doc """
-  Extracts the JSON-RPC method from a JSON string payload.
+  require Logger
 
-  Supports both single objects and batch requests (arrays).
+  alias EthereumJSONRPC.Prometheus.Instrumenter
+
+  @doc """
+  Decodes a raw JSON-RPC payload into a list of request maps.
+
+  Both single requests (a JSON object) and batch requests (a JSON array) are
+  normalized to a list, so callers can treat every payload uniformly. Returns an
+  empty list when the payload cannot be decoded.
 
   ## Parameters
-  - `json_string`: The JSON string to parse
+  - `json_string`: The raw JSON string payload sent to the node
 
   ## Returns
-  - The method name as a binary, or `{:error, Jason.DecodeError.t()}` if extraction fails
+  - A list of decoded request maps, or `[]` when decoding fails.
   """
-  @spec get_method_from_json_string(binary()) :: binary() | {:error, Jason.DecodeError.t()}
-  def get_method_from_json_string(json_string) do
-    with {:ok, decoded_json} <- Jason.decode(json_string) do
-      if is_map(decoded_json) do
-        Map.get(decoded_json, "method")
-      else
-        decoded_json |> Enum.at(0) |> Map.get("method")
-      end
+  @spec decode_requests(binary()) :: [map()]
+  def decode_requests(json_string) do
+    case Utils.JSON.decode(json_string) do
+      {:ok, decoded} -> decoded |> List.wrap() |> Enum.filter(&is_map/1)
+      _ -> []
     end
   end
+
+  @doc """
+  Reports the number of individual JSON-RPC calls, grouped by method, to the
+  `json_rpc_calls_count` Prometheus metric.
+
+  Unlike `json_rpc_requests_count`, which counts one increment per HTTP request
+  (labeled by the first method of a batch), this counts each request within a
+  batch, giving the exact number of requests per method. Calls to the L1 node
+  made by rollup modules (`l1?` is `true`) are reported to the separate
+  `l1_json_rpc_calls_count` metric instead.
+
+  ## Parameters
+  - `requests`: The decoded JSON-RPC requests (as returned by `decode_requests/1`)
+  - `l1?`: Whether the request targets the L1 node. Defaults to `false`.
+
+  ## Returns
+  - `:ok`
+  """
+  @spec track_json_rpc_calls([map()], boolean()) :: :ok
+  def track_json_rpc_calls(requests, l1? \\ false) do
+    requests
+    |> Enum.frequencies_by(&Map.get(&1, "method"))
+    |> Enum.each(fn
+      {nil, _count} -> :ok
+      {method, count} -> Instrumenter.json_rpc_calls(method, l1?, count)
+    end)
+  end
+
+  @doc """
+  Tracks which contract methods are called via `eth_call` JSON-RPC requests.
+
+  For every `eth_call` in the payload (both single requests and batches) the
+  method id (first 4 bytes of the `data` field, e.g. `"0x70a08231"`) is
+  extracted, logged at the `debug` level and reported to the
+  `eth_call_requests_count` Prometheus metric. Requests to the L1 node made by
+  rollup modules (`l1?` is `true`) are reported to the separate
+  `l1_eth_call_requests_count` metric instead.
+
+  ## Parameters
+  - `requests`: The decoded JSON-RPC requests (as returned by `decode_requests/1`)
+  - `l1?`: Whether the request targets the L1 node. Defaults to `false`.
+
+  ## Returns
+  - `:ok`
+  """
+  @spec track_eth_call_methods([map()], boolean()) :: :ok
+  def track_eth_call_methods(requests, l1? \\ false) do
+    requests
+    |> Enum.map(&eth_call_method_id/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.frequencies()
+    |> Enum.each(fn {method_id, count} ->
+      Logger.debug(fn ->
+        # credo:disable-for-next-line Credo.Check.Refactor.Nesting
+        "eth_call request to method id #{method_id} on #{if l1?, do: "L1", else: "L2"} (count: #{count})"
+      end)
+
+      Instrumenter.eth_call_requests(method_id, l1?, count)
+    end)
+  end
+
+  defp eth_call_method_id(%{"method" => "eth_call", "params" => [%{} = call_params | _]}) do
+    (call_params["data"] || call_params["input"]) |> method_id_from_data()
+  end
+
+  defp eth_call_method_id(_request), do: nil
+
+  @spec method_id_from_data(binary() | nil) :: binary() | nil
+  defp method_id_from_data("0x" <> _rest = data) when byte_size(data) >= 10,
+    do: binary_part(data, 0, 10)
+
+  defp method_id_from_data(_data), do: nil
 
   @spec response_body_has_error?(map() | [map()]) :: boolean()
   def response_body_has_error?(decoded_body) when is_map(decoded_body) do
@@ -52,9 +127,10 @@ defmodule EthereumJSONRPC.HTTP.Helper do
   """
   @spec try_unzip(binary(), [{binary(), binary()}]) :: binary()
   def try_unzip(body, headers) do
-    gzip_enabled? = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.HTTP)[:gzip_enabled?]
+    request_compression_all_methods_enabled? =
+      Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.HTTP)[:request_compression_all_methods_enabled?]
 
-    if gzip_enabled? do
+    if request_compression_all_methods_enabled? do
       do_unzip(body, headers)
     else
       body
@@ -83,4 +159,50 @@ defmodule EthereumJSONRPC.HTTP.Helper do
       body
     end
   end
+
+  @doc """
+  Determines whether HTTP request compression should be enabled for a given JSON-RPC method.
+
+  Compression is enabled when either the all-methods flag is true, or when the
+  heavy-methods flag is true and the method is classified as heavy. Heavy methods
+  include trace_*, debug_*, and eth_getBlockReceipts.
+
+  ## Parameters
+  - `method`: The JSON-RPC method name (binary) or term
+  - `config`: Optional keyword list of configuration options (defaults to application environment)
+
+  ## Returns
+  - `true` if request compression should be enabled, `false` otherwise
+  """
+  @spec request_compression_enabled?(binary() | term(), keyword() | nil) :: boolean()
+  def request_compression_enabled?(method, config \\ Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.HTTP, [])) do
+    request_compression_all_methods_enabled? =
+      Keyword.get(config, :request_compression_all_methods_enabled?, false)
+
+    request_compression_heavy_methods_enabled? =
+      Keyword.get(config, :request_compression_heavy_methods_enabled?, true)
+
+    request_compression_all_methods_enabled? ||
+      (request_compression_heavy_methods_enabled? && heavy_request_method?(method))
+  end
+
+  @doc """
+  Determines whether a JSON-RPC method is classified as a "heavy" request.
+
+  Heavy methods are those with high payload or computational requirements,
+  specifically methods starting with trace_ or debug_ prefixes, or the
+  eth_getBlockReceipts method.
+
+  ## Parameters
+  - `method`: The JSON-RPC method name (binary) or any term
+
+  ## Returns
+  - `true` if the method is classified as heavy, `false` otherwise
+  """
+  @spec heavy_request_method?(binary() | term()) :: boolean()
+  def heavy_request_method?(method) when is_binary(method) do
+    String.starts_with?(method, ["trace_", "debug_"]) || method == "eth_getBlockReceipts"
+  end
+
+  def heavy_request_method?(_method), do: false
 end

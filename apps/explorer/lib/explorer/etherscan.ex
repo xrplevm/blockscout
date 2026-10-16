@@ -4,14 +4,13 @@ defmodule Explorer.Etherscan do
   The etherscan context.
   """
 
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
+
   import Ecto.Query
 
-  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
-
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.{Address, Block, DenormalizationHelper, Hash, InternalTransaction, TokenTransfer, Transaction}
   alias Explorer.Chain.Address.{CurrentTokenBalance, TokenBalance}
-  alias Explorer.Chain.Cache.BackgroundMigrations
+  alias Explorer.Chain.{Block, DenormalizationHelper, Hash, InternalTransaction, TokenTransfer, Transaction}
   alias Explorer.Chain.Transaction.History.TransactionStats
   alias Explorer.Etherscan.Logs
 
@@ -25,6 +24,8 @@ defmodule Explorer.Etherscan do
     start_timestamp: nil,
     end_timestamp: nil
   }
+
+  @api_true [api?: true]
 
   @doc """
   Returns the maximum allowed page size number.
@@ -80,6 +81,34 @@ defmodule Explorer.Etherscan do
       ) do
     merged_options = Map.merge(@default_options, options)
     list_pending_transactions_query(address_hash, merged_options)
+  end
+
+  # Rollup L1 data fee columns of `transactions`, exposed by the Etherscan-compatible API as
+  # `L1FeesPaid` (and, on OP-stack chains, `L1GasUsed`, `L1GasPrice`, `L1FeeScalar`). The list is
+  # resolved at compile time because `map/2` and `struct/2` selects validate field names against the
+  # schema, which only has these fields on the corresponding chain types.
+  @l1_fee_transaction_fields (case @chain_type do
+                                :optimism -> ~w(l1_fee l1_gas_used l1_gas_price l1_fee_scalar)a
+                                :scroll -> ~w(l1_fee)a
+                                _ -> []
+                              end)
+
+  @doc """
+  Returns the list of transaction fields holding the rollup L1 data fee data for the current
+  chain type. Empty on chain types without an L1 fee.
+  """
+  @spec l1_fee_transaction_fields() :: [atom()]
+  def l1_fee_transaction_fields, do: @l1_fee_transaction_fields
+
+  # Adds the parent transaction's L1 fee columns to an internal transactions query whose transaction
+  # is the first join (see `InternalTransaction.join_transaction_query/1`). No-op on chain types
+  # without an L1 fee.
+  if @l1_fee_transaction_fields == [] do
+    defp select_merge_l1_fee_fields(query), do: query
+  else
+    defp select_merge_l1_fee_fields(query) do
+      select_merge(query, [_internal_transaction, transaction], map(transaction, ^@l1_fee_transaction_fields))
+    end
   end
 
   @internal_transaction_fields ~w(
@@ -139,10 +168,9 @@ defmodule Explorer.Etherscan do
           merge(map(it, ^@internal_transaction_fields), %{
             block_timestamp: as(:transaction).block_timestamp,
             transaction_hash: as(:transaction).hash,
-            from_address_hash: coalesce(it.from_address_hash, as(:from_address_mapping).address_hash),
-            to_address_hash: coalesce(it.to_address_hash, as(:to_address_mapping).address_hash),
-            created_contract_address_hash:
-              coalesce(it.created_contract_address_hash, as(:created_contract_address_mapping).address_hash)
+            from_address_hash: as(:from_address_mapping).address_hash,
+            to_address_hash: as(:to_address_mapping).address_hash,
+            created_contract_address_hash: as(:created_contract_address_mapping).address_hash
           })
         )
       else
@@ -159,15 +187,15 @@ defmodule Explorer.Etherscan do
           merge(map(it, ^@internal_transaction_fields), %{
             block_timestamp: as(:block).timestamp,
             transaction_hash: as(:transaction).hash,
-            from_address_hash: coalesce(it.from_address_hash, as(:from_address_mapping).address_hash),
-            to_address_hash: coalesce(it.to_address_hash, as(:to_address_mapping).address_hash),
-            created_contract_address_hash:
-              coalesce(it.created_contract_address_hash, as(:created_contract_address_mapping).address_hash)
+            from_address_hash: as(:from_address_mapping).address_hash,
+            to_address_hash: as(:to_address_mapping).address_hash,
+            created_contract_address_hash: as(:created_contract_address_mapping).address_hash
           })
         )
       end
 
     query
+    |> select_merge_l1_fee_fields()
     |> InternalTransaction.where_is_different_from_parent_transaction()
     |> InternalTransaction.where_nonpending_operation()
     |> InternalTransaction.include_zero_value(options.include_zero_value)
@@ -192,8 +220,7 @@ defmodule Explorer.Etherscan do
     options
     |> options_to_directions()
     |> then(fn directions ->
-      if BackgroundMigrations.get_empty_internal_transactions_data_finished() and
-           Enum.member?(directions, :to_address_hash) do
+      if Enum.member?(directions, :to_address_hash) do
         directions
         |> Kernel.--([:created_contract_address_hash, :to_address_hash])
         |> Enum.concat([:to])
@@ -204,7 +231,8 @@ defmodule Explorer.Etherscan do
     |> Enum.map(fn direction ->
       options
       |> consensus_internal_transactions_with_transactions_and_blocks_query()
-      |> InternalTransaction.where_address_fields_match(address_hash, direction)
+      |> select_merge_l1_fee_fields()
+      |> InternalTransaction.where_address_fields_match(address_hash, direction, @api_true)
       |> InternalTransaction.where_is_different_from_parent_transaction()
       |> InternalTransaction.include_zero_value(options.include_zero_value)
       |> where_start_block_match_internal_transaction(options)
@@ -241,6 +269,7 @@ defmodule Explorer.Etherscan do
 
     options
     |> internal_transactions_query(consensus_blocks)
+    |> select_merge_l1_fee_fields()
     |> InternalTransaction.where_is_different_from_parent_transaction()
     |> InternalTransaction.include_zero_value(options.include_zero_value)
     |> where_start_block_match_internal_transaction(options)
@@ -274,10 +303,9 @@ defmodule Explorer.Etherscan do
         merge(map(it, ^@internal_transaction_fields), %{
           block_timestamp: transaction.block_timestamp,
           transaction_hash: transaction.hash,
-          from_address_hash: coalesce(it.from_address_hash, as(:from_address_mapping).address_hash),
-          to_address_hash: coalesce(it.to_address_hash, as(:to_address_mapping).address_hash),
-          created_contract_address_hash:
-            coalesce(it.created_contract_address_hash, as(:created_contract_address_mapping).address_hash)
+          from_address_hash: as(:from_address_mapping).address_hash,
+          to_address_hash: as(:to_address_mapping).address_hash,
+          created_contract_address_hash: as(:created_contract_address_mapping).address_hash
         })
       )
     else
@@ -303,10 +331,9 @@ defmodule Explorer.Etherscan do
         merge(map(it, ^@internal_transaction_fields), %{
           block_timestamp: as(:block).timestamp,
           transaction_hash: as(:transaction).hash,
-          from_address_hash: coalesce(it.from_address_hash, as(:from_address_mapping).address_hash),
-          to_address_hash: coalesce(it.to_address_hash, as(:to_address_mapping).address_hash),
-          created_contract_address_hash:
-            coalesce(it.created_contract_address_hash, as(:created_contract_address_mapping).address_hash)
+          from_address_hash: as(:from_address_mapping).address_hash,
+          to_address_hash: as(:to_address_mapping).address_hash,
+          created_contract_address_hash: as(:created_contract_address_mapping).address_hash
         })
       )
     end
@@ -335,10 +362,9 @@ defmodule Explorer.Etherscan do
       merge(map(it, ^@internal_transaction_fields), %{
         block_timestamp: as(:block).timestamp,
         transaction_hash: as(:transaction).hash,
-        from_address_hash: coalesce(it.from_address_hash, as(:from_address_mapping).address_hash),
-        to_address_hash: coalesce(it.to_address_hash, as(:to_address_mapping).address_hash),
-        created_contract_address_hash:
-          coalesce(it.created_contract_address_hash, as(:created_contract_address_mapping).address_hash)
+        from_address_hash: as(:from_address_mapping).address_hash,
+        to_address_hash: as(:to_address_mapping).address_hash,
+        created_contract_address_hash: as(:created_contract_address_mapping).address_hash
       })
     )
   end
@@ -504,7 +530,7 @@ defmodule Explorer.Etherscan do
     to_address_hash
     value
     revert_reason
-  )a
+  )a ++ @l1_fee_transaction_fields
 
   @pending_transaction_fields ~w(
     created_contract_address_hash
@@ -622,7 +648,9 @@ defmodule Explorer.Etherscan do
   end
 
   defp list_erc20_token_transfers(address_hash, contract_address_hash, options) do
-    "ERC-20" |> base_token_transfers_query(address_hash, contract_address_hash, options) |> Repo.replica().all()
+    ["ERC-20", "ERC-8056"]
+    |> base_token_transfers_query(address_hash, contract_address_hash, options)
+    |> Repo.replica().all()
   end
 
   # Retrieves token transfers filtered by ZRC-2 type with optional address and contract filtering.
@@ -774,23 +802,41 @@ defmodule Explorer.Etherscan do
     |> maybe_preload_entities()
   end
 
+  # Transaction fields needed to render the `tokentx`-family RPC responses (see
+  # `BlockScoutWeb.API.RPC.AddressView.prepare_common_token_transfer/3`) and to decode the method call.
+  # Token transfers are fetched in pages of up to `@default_options.page_size` items, so preloading full
+  # transaction rows for each of them was one of the top consumers of DB time on the API read replica.
+  # `hash` must stay in the list: Ecto uses it to match preloaded transactions to token transfers.
+  @token_transfer_transaction_fields [
+    :hash,
+    :block_timestamp,
+    :nonce,
+    :index,
+    :gas,
+    :gas_price,
+    :gas_used,
+    :cumulative_gas_used,
+    :input,
+    :to_address_hash,
+    :created_contract_address_hash
+  ]
+
+  @token_transfer_transaction_fields @token_transfer_transaction_fields ++ @l1_fee_transaction_fields
+
   defp maybe_preload_entities(query) do
+    transaction_query =
+      from(transaction in Transaction, select: struct(transaction, ^@token_transfer_transaction_fields))
+
     if DenormalizationHelper.tt_denormalization_finished?() do
-      query
-      |> preload([:transaction, :token])
+      preload(query, [:token, transaction: ^transaction_query])
     else
-      query
-      |> preload([:block, :token, :transaction])
+      preload(query, [:block, :token, transaction: ^transaction_query])
     end
   end
-
-  defp where_start_block_match(query, %{startblock: nil}), do: query
 
   defp where_start_block_match(query, %{startblock: start_block}) do
     where(query, [..., block], block.number >= ^start_block)
   end
-
-  defp where_end_block_match(query, %{endblock: nil}), do: query
 
   defp where_end_block_match(query, %{endblock: end_block}) do
     where(query, [..., block], block.number <= ^end_block)
@@ -909,33 +955,6 @@ defmodule Explorer.Etherscan do
   """
   @spec list_logs(map()) :: [map()]
   def list_logs(filter), do: Logs.list_logs(filter)
-
-  @spec fetch_sum_coin_total_supply() :: non_neg_integer
-  def fetch_sum_coin_total_supply do
-    query =
-      from(
-        a0 in Address,
-        select: fragment("SUM(a0.fetched_coin_balance)"),
-        where: a0.fetched_coin_balance > ^0
-      )
-
-    Repo.replica().one!(query, timeout: :infinity) || 0
-  end
-
-  @spec fetch_sum_coin_total_supply_minus_burnt() :: non_neg_integer
-  def fetch_sum_coin_total_supply_minus_burnt do
-    {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
-
-    query =
-      from(
-        a0 in Address,
-        select: fragment("SUM(a0.fetched_coin_balance)"),
-        where: a0.hash != ^burn_address_hash,
-        where: a0.fetched_coin_balance > ^0
-      )
-
-    Repo.replica().one!(query, timeout: :infinity) || 0
-  end
 
   @doc """
   It is used by `totalfees` API endpoint of `stats` module for retrieving of total fee per day

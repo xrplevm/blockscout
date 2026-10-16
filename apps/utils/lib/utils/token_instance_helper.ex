@@ -4,6 +4,8 @@ defmodule Utils.TokenInstanceHelper do
   Auxiliary functions for NFTs
   """
 
+  alias Utils.HttpClient.SafeFetch
+
   @doc """
   Determines the media type of the given URL.
 
@@ -12,32 +14,33 @@ defmodule Utils.TokenInstanceHelper do
     - url: The URL to check the media type for.
     - headers: Optional list of headers to include in the request. Defaults to an empty list.
     - treat_data_as_valid_media_type?: Optional boolean flag to treat url of `data:image/` format as a valid media type. Defaults to true.
+    - validate_host?: Optional boolean flag to validate the host against the SSRF blacklist. Defaults to true. Pass `false` for URLs already resolved to an operator-configured gateway (IPFS/Arweave/Swarm), which may legitimately live on a private address.
 
   ## Returns
 
   The media type of the given URL, or nil
   """
-  @spec media_type(binary(), list(), boolean()) :: {binary(), binary()} | nil
-  def media_type(url, headers \\ [], treat_data_as_valid_media_type? \\ true)
+  @spec media_type(binary(), list(), boolean(), boolean()) :: {binary(), binary()} | nil
+  def media_type(url, headers \\ [], treat_data_as_valid_media_type? \\ true, validate_host? \\ true)
 
-  def media_type("data:image/" <> _data, _headers, true) do
+  def media_type("data:image/" <> _data, _headers, true, _validate_host?) do
     {"image", ""}
   end
 
-  def media_type("data:video/" <> _data, _headers, true) do
+  def media_type("data:video/" <> _data, _headers, true, _validate_host?) do
     {"video", ""}
   end
 
-  def media_type("data:" <> _data, _headers, _) do
+  def media_type("data:" <> _data, _headers, _, _validate_host?) do
     nil
   end
 
-  def media_type(media_src, headers, _) when not is_nil(media_src) do
+  def media_type(media_src, headers, _, validate_host?) when not is_nil(media_src) do
     ext = media_src |> Path.extname() |> String.trim()
 
     mime_type =
       if ext == "" do
-        process_missing_extension(media_src, headers)
+        process_missing_extension(media_src, headers, validate_host?)
       else
         ext_with_dot =
           media_src
@@ -49,23 +52,158 @@ defmodule Utils.TokenInstanceHelper do
         |> MIME.type()
       end
 
-    if mime_type do
-      mime_type |> String.split("/") |> List.to_tuple()
-    else
-      nil
+    case mime_type && parse_mime_type(mime_type) do
+      {:ok, type_tuple} -> type_tuple
+      _ -> nil
     end
   end
 
-  def media_type(nil, _headers, _), do: nil
+  def media_type(nil, _headers, _, _validate_host?), do: nil
 
-  defp process_missing_extension(media_src, headers) do
-    case HTTPoison.head(media_src, headers, follow_redirect: true) do
+  @doc """
+  Same as `media_type/4` but reports why detection failed instead of returning `nil`.
+
+  ## Parameters
+
+    - url: The URL to check the media type for.
+    - headers: Optional list of headers to include in the request. Defaults to an empty list.
+    - validate_host?: Optional boolean flag to validate the host against the SSRF blacklist. Defaults to true. Pass `false` for URLs already resolved to an operator-configured gateway (IPFS/Arweave/Swarm), which may live on a private address.
+
+  ## Returns
+
+    - `{:ok, {type, subtype}}` with the media type split on `/`, e.g. `{"image", "png"}`. For
+      `data:image/` and `data:video/` URLs the subtype is an empty string.
+    - `{:error, reason}` with a human-readable binary reason when the URL is nil, uses an
+      unsupported `data:` scheme, is rejected by host validation, or when the HEAD request
+      fails or returns no `content-type` header.
+  """
+  @spec media_type_detailed(binary(), list(), boolean()) :: {:ok, {binary(), binary()}} | {:error, binary()}
+  def media_type_detailed(url, headers \\ [], validate_host? \\ true)
+
+  def media_type_detailed("data:image/" <> _data, _headers, _validate_host?), do: {:ok, {"image", ""}}
+  def media_type_detailed("data:video/" <> _data, _headers, _validate_host?), do: {:ok, {"video", ""}}
+
+  def media_type_detailed("data:" <> data, _headers, _validate_host?),
+    do: {:error, "unsupported data URI scheme: #{String.slice(data, 0, 20)}"}
+
+  def media_type_detailed(nil, _headers, _validate_host?), do: {:error, "nil URL"}
+
+  def media_type_detailed(media_src, headers, validate_host?) do
+    ext = media_src |> Path.extname() |> String.trim()
+
+    if ext == "" do
+      case process_missing_extension_detailed(media_src, headers, validate_host?) do
+        {:ok, mime_type} -> parse_mime_type(mime_type)
+        {:error, _} = error -> error
+      end
+    else
+      "." <> ext_without_dot = Path.extname(media_src)
+      ext_without_dot |> MIME.type() |> parse_mime_type()
+    end
+  end
+
+  @doc """
+  Parses a `Content-Type` header value into a `{type, subtype}` tuple.
+
+  The header comes from an arbitrary host referenced by NFT metadata, so it is treated as
+  untrusted input: only the first comma-separated value is considered, parameters after `;`
+  are dropped, surrounding whitespace and quotes are stripped, and the result is downcased.
+  Anything that does not reduce to exactly `type/subtype` is reported as an error instead of
+  being turned into a tuple of unexpected arity.
+
+  ## Examples
+
+      iex> Utils.TokenInstanceHelper.parse_mime_type("image/png")
+      {:ok, {"image", "png"}}
+
+      iex> Utils.TokenInstanceHelper.parse_mime_type("Image/PNG; charset=utf-8")
+      {:ok, {"image", "png"}}
+
+      iex> Utils.TokenInstanceHelper.parse_mime_type("image")
+      {:error, "malformed content-type: image"}
+
+      iex> Utils.TokenInstanceHelper.parse_mime_type("image/png/extra")
+      {:error, "malformed content-type: image/png/extra"}
+  """
+  @spec parse_mime_type(binary()) :: {:ok, {binary(), binary()}} | {:error, binary()}
+  def parse_mime_type(value) when is_binary(value) do
+    normalized =
+      value
+      |> String.split(",", parts: 2)
+      |> hd()
+      |> String.split(";", parts: 2)
+      |> hd()
+      |> String.trim()
+      |> String.trim("\"")
+      |> String.trim()
+      |> String.downcase()
+
+    case String.split(normalized, "/") do
+      [type, subtype] when type != "" and subtype != "" -> {:ok, {type, subtype}}
+      _ -> {:error, "malformed content-type: #{String.slice(value, 0, 100)}"}
+    end
+  end
+
+  defp process_missing_extension(media_src, headers, validate_host?) do
+    case safe_head(media_src, headers, validate_host?) do
       {:ok, %HTTPoison.Response{status_code: 200, headers: headers}} ->
         headers_map = Map.new(headers, fn {key, value} -> {String.downcase(key), value} end)
         headers_map["content-type"]
 
       _ ->
         nil
+    end
+  end
+
+  defp process_missing_extension_detailed(media_src, headers, validate_host?) do
+    case safe_head(media_src, headers, validate_host?) do
+      {:ok, %HTTPoison.Response{status_code: 200, headers: headers}} ->
+        headers_map = Map.new(headers, fn {key, value} -> {String.downcase(key), value} end)
+
+        case headers_map["content-type"] do
+          nil -> {:error, "no content-type header in response"}
+          mime_type -> {:ok, mime_type}
+        end
+
+      {:ok, %HTTPoison.Response{status_code: status_code}} ->
+        {:error, "HTTP HEAD returned #{status_code}"}
+
+      {:error, :not_a_web_url} ->
+        {:error, "not an http(s) URL with a host: #{String.slice(media_src, 0, 100)}"}
+
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        {:error, "HTTP HEAD failed: #{inspect(reason)}"}
+
+      {:error, reason} ->
+        {:error, "HTTP HEAD failed: #{inspect(reason)}"}
+    end
+  end
+
+  # Issues a HEAD request that validates the host (and any redirect target) against the
+  # SSRF blacklist, following redirects manually since the media URL is attacker-controlled.
+  #
+  # Only `http(s)` URLs with a host are fetched. Metadata is arbitrary JSON, so the value
+  # may be a bare word or a relative path; hackney would prepend `http://` and resolve it as
+  # a hostname, which costs blocking DNS lookups (very slow on resolvers that answer
+  # SERVFAIL for single-label names). `UrlValidator` already rejects such values when host
+  # filtering is enabled, so this keeps behavior consistent when it is disabled.
+  defp safe_head(media_src, headers, validate_host?) do
+    if web_url?(media_src) do
+      SafeFetch.request(
+        media_src,
+        headers,
+        [validate_host?: validate_host?, transport_opts: [timeout: 30_000, recv_timeout: 30_000]],
+        fn url, request_headers, opts -> HTTPoison.head(url, request_headers, opts) end
+      )
+    else
+      {:error, :not_a_web_url}
+    end
+  end
+
+  defp web_url?(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) and host != "" -> true
+      _ -> false
     end
   end
 end

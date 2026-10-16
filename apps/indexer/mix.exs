@@ -15,9 +15,9 @@ defmodule Indexer.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       lockfile: "../../mix.lock",
       start_permanent: Mix.env() == :prod,
-      version: "11.2.2",
-      xref: [
-        exclude: [
+      version: "12.0.2",
+      elixirc_options: [
+        no_warn_undefined: [
           Explorer.Chain.Optimism.Deposit,
           Explorer.Chain.Optimism.FrameSequence,
           Explorer.Chain.Optimism.OutputRoot,
@@ -66,7 +66,7 @@ defmodule Indexer.MixProject do
       {:logger_file_backend, "~> 0.0.10"},
       {:logger_json, "~> 7.0"},
       # Mocking `EthereumJSONRPC.Transport`, so we avoid hitting real chains for local testing
-      {:mox, "~> 1.1.0"},
+      {:mox, "~> 1.3.2"},
       {:prometheus_ex, "~> 5.1.0", override: true},
       # Tracing
       {:spandex, "~> 3.0"},

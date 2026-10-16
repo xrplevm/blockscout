@@ -8,7 +8,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
   alias Explorer.{Chain, Repo, TestHelper}
   alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.{Events.Subscriber, InternalTransaction, Transaction, Wei}
-  alias Explorer.Chain.Cache.Counters.{AddressesCount, AverageBlockTime}
+  alias Explorer.Chain.Cache.Counters.AverageBlockTime
   alias Explorer.Utility.AddressIdToAddressHash
   alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
 
@@ -28,8 +28,6 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
     Application.put_env(:indexer, CoinBalanceOnDemand.Supervisor, disabled?: false)
 
     CoinBalanceOnDemand.Supervisor.Case.start_supervised!(json_rpc_named_arguments: mocked_json_rpc_named_arguments)
-
-    start_supervised!(AddressesCount)
 
     Application.put_env(:explorer, AverageBlockTime, enabled: true, cache_period: 1_800_000)
 
@@ -639,6 +637,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "confirmations" => "0",
           "methodId" => "0x"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -1867,6 +1866,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "isError" => "0",
           "errCode" => "#{internal_transaction.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -1886,6 +1886,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
 
       block = insert(:block)
       insert(:pending_block_operation, block_hash: block.hash, block_number: block.number)
+      # the pending block is exactly `tolerance` blocks behind the head, so it is not ignored
+      insert(:block, number: block.number + pending_head_tolerance())
 
       transaction =
         :transaction
@@ -1933,6 +1935,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "isError" => "0",
           "errCode" => "#{internal_transaction.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -1944,6 +1947,197 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert response["status"] == "2"
       assert response["message"] == "Some internal transactions within this block range have not yet been processed"
       assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "returns status = 1 when only blocks within the chain head tolerance are pending", %{
+      conn: conn,
+      params: params
+    } do
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      block = insert(:block)
+      internal_transaction = insert_internal_transaction(block, address, address_2)
+
+      # the pending block is one block inside the tolerance window, so it is ignored
+      pending_block = insert(:block, number: block.number + 1)
+      insert(:pending_block_operation, block_hash: pending_block.hash, block_number: pending_block.number)
+      head_block = insert(:block, number: pending_block.number + pending_head_tolerance() - 1)
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert [%{"transactionHash" => transaction_hash}] = response["result"]
+      assert transaction_hash == to_string(internal_transaction.transaction.hash)
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+
+      # an explicit endblock at or above the head reaches the head as well, so it is tolerated too
+      for endblock <- [head_block.number, 99_999_999] do
+        assert response =
+                 conn
+                 |> get("/api/v1", Map.merge(params, %{"startblock" => "#{block.number}", "endblock" => "#{endblock}"}))
+                 |> json_response(200)
+
+        assert [_] = response["result"]
+        assert response["status"] == "1"
+        assert response["message"] == "OK"
+      end
+
+      # an explicit endblock below the head is a really bounded range, so the strict check applies
+      assert response =
+               conn
+               |> get("/api/v1", Map.put(params, "endblock", "#{head_block.number - 1}"))
+               |> json_response(200)
+
+      assert [_] = response["result"]
+      assert response["status"] == "2"
+      assert response["message"] == "Some internal transactions within this block range have not yet been processed"
+    end
+
+    test "returns status = 2 when the requested endblock is below the chain head tolerance", %{
+      conn: conn,
+      params: params
+    } do
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      block = insert(:block)
+      insert_internal_transaction(block, address, address_2)
+
+      pending_block = insert(:block, number: block.number + 1)
+      insert(:pending_block_operation, block_hash: pending_block.hash, block_number: pending_block.number)
+      insert(:block, number: pending_block.number + pending_head_tolerance() + 1)
+
+      assert response =
+               conn
+               |> get("/api/v1", Map.put(params, "endblock", "#{pending_block.number}"))
+               |> json_response(200)
+
+      assert [_] = response["result"]
+      assert response["status"] == "2"
+      assert response["message"] == "Some internal transactions within this block range have not yet been processed"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+
+      # an endblock below the pending block excludes it from the checked range
+      assert response =
+               conn
+               |> get("/api/v1", Map.put(params, "endblock", "#{block.number}"))
+               |> json_response(200)
+
+      assert [_] = response["result"]
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+    end
+
+    test "returns status = 2 when a pending block is exactly tolerance blocks behind the chain head", %{
+      conn: conn,
+      params: params
+    } do
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      block = insert(:block)
+      insert_internal_transaction(block, address, address_2)
+
+      pending_block = insert(:block, number: block.number + 1)
+      insert(:pending_block_operation, block_hash: pending_block.hash, block_number: pending_block.number)
+      insert(:block, number: pending_block.number + pending_head_tolerance())
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert [_] = response["result"]
+      assert response["status"] == "2"
+      assert response["message"] == "Some internal transactions within this block range have not yet been processed"
+    end
+
+    test "returns status = 2 with an empty result when blocks within the chain head tolerance are pending", %{
+      conn: conn,
+      params: params
+    } do
+      head_block = insert(:block)
+      insert(:pending_block_operation, block_hash: head_block.hash, block_number: head_block.number)
+
+      for request_params <- [params, Map.put(params, "startblock", "#{head_block.number}")] do
+        assert response =
+                 conn
+                 |> get("/api/v1", request_params)
+                 |> json_response(200)
+
+        assert response["result"] == []
+        assert response["status"] == "2"
+        assert response["message"] == "Some internal transactions within this block range have not yet been processed"
+        assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+      end
+    end
+
+    test "returns status = 2 for pending block 0 when the chain head is below the tolerance", %{
+      conn: conn,
+      params: params
+    } do
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      genesis_block = insert(:block, number: 0)
+
+      block = insert(:block, number: 1)
+      insert_internal_transaction(block, address, address_2)
+
+      # the head block is within the tolerance, so it is ignored
+      head_block = insert(:block, number: 2)
+      insert(:pending_block_operation, block_hash: head_block.hash, block_number: head_block.number)
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert [_] = response["result"]
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+
+      # block 0 is the only block outside the tolerance, so it is still reported
+      insert(:pending_block_operation, block_hash: genesis_block.hash, block_number: genesis_block.number)
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert [_] = response["result"]
+      assert response["status"] == "2"
+      assert response["message"] == "Some internal transactions within this block range have not yet been processed"
+    end
+
+    test "returns status = 2 for pending blocks at the chain head when tolerance is disabled", %{
+      conn: conn,
+      params: params
+    } do
+      configuration = Application.get_env(:block_scout_web, AddressController)
+      Application.put_env(:block_scout_web, AddressController, internal_transactions_pending_head_tolerance: 0)
+      on_exit(fn -> Application.put_env(:block_scout_web, AddressController, configuration) end)
+
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      block = insert(:block)
+      insert_internal_transaction(block, address, address_2)
+      insert(:pending_block_operation, block_hash: block.hash, block_number: block.number)
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert [_] = response["result"]
+      assert response["status"] == "2"
+      assert response["message"] == "Some internal transactions within this block range have not yet been processed"
     end
 
     test "returns only non zero value internal transactions by default", %{conn: conn, params: params} do
@@ -2009,6 +2203,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "isError" => "0",
           "errCode" => "#{internal_transaction.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -2088,7 +2283,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "transactionHash" => "#{transaction.hash}",
           "isError" => "0",
           "errCode" => "#{internal_transaction_b.error}"
-        },
+        }
+        |> Map.merge(expected_l1_fee_fields()),
         %{
           "blockNumber" => "#{internal_transaction_a.block_number}",
           "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
@@ -2106,6 +2302,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "isError" => "0",
           "errCode" => "#{internal_transaction_a.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -2207,6 +2404,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "isError" => "0",
           "errCode" => "#{internal_transaction.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -2389,6 +2587,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "isError" => "0",
           "errCode" => "#{internal_transaction.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       params = %{
@@ -2462,7 +2661,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "transactionHash" => "#{transaction.hash}",
           "isError" => "0",
           "errCode" => "#{internal_transaction_b.error}"
-        },
+        }
+        |> Map.merge(expected_l1_fee_fields()),
         %{
           "blockNumber" => "#{transaction.block_number}",
           "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
@@ -2480,6 +2680,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "isError" => "0",
           "errCode" => "#{internal_transaction_a.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       params = %{
@@ -2500,82 +2701,59 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
     end
 
-    if Application.compile_env(:explorer, :chain_type) not in [:rsk, :filecoin] do
-      test "via on-demand fetcher", %{conn: conn} do
-        original_config = Application.get_env(:explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions)
+    test "via on-demand fetcher", %{conn: conn} do
+      original_config = Application.get_env(:explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions)
 
-        Application.put_env(:explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions,
-          enabled: true,
-          storage_period: 0
-        )
+      Application.put_env(:explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions,
+        enabled: true,
+        storage_period: 0
+      )
 
-        on_exit(fn ->
-          Application.put_env(:explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions, original_config)
-        end)
+      on_exit(fn ->
+        Application.put_env(:explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions, original_config)
+      end)
 
-        transaction = :transaction |> insert() |> with_block()
+      transaction = :transaction |> insert() |> with_block()
 
-        expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
-          [%{id: id, params: _}], _ ->
-            {:ok,
-             [
-               %{
-                 id: id,
-                 result: %{
-                   "type" => "create",
-                   "from" => "0x117b358218da5a4f647072ddb50ded038ed63d17",
-                   "to" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
-                   "value" => "0x0",
-                   "gas" => "0x106f5",
-                   "gasUsed" => "0x106f5",
-                   "input" =>
-                     "0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033",
-                   "output" =>
-                     "0x608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033"
-                 }
-               }
-             ]}
-        end)
+      mock_contract_creation_trace_fetching(transaction)
 
-        Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
-
-        expected_result = [
-          %{
-            "blockNumber" => "#{transaction.block_number}",
-            "callType" => "",
-            "contractAddress" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
-            "errCode" => "",
-            "from" => "0x117b358218da5a4f647072ddb50ded038ed63d17",
-            "gas" => "67317",
-            "gasUsed" => "67317",
-            "index" => "0",
-            "input" => "",
-            "isError" => "0",
-            "timeStamp" => "#{DateTime.to_unix(transaction.block.timestamp)}",
-            "to" => "",
-            "transactionHash" => "#{transaction.hash}",
-            "type" => "create",
-            "value" => "0"
-          }
-        ]
-
-        params = %{
-          "module" => "account",
-          "action" => "txlistinternal",
-          "txhash" => "#{transaction.hash}",
-          "include_zero_value" => "true"
+      expected_result = [
+        %{
+          "blockNumber" => "#{transaction.block_number}",
+          "callType" => "",
+          "contractAddress" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
+          "errCode" => "",
+          "from" => "0x117b358218da5a4f647072ddb50ded038ed63d17",
+          "gas" => "67317",
+          "gasUsed" => "67317",
+          "index" => "0",
+          "input" => "",
+          "isError" => "0",
+          "timeStamp" => "#{DateTime.to_unix(transaction.block.timestamp)}",
+          "to" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
+          "transactionHash" => "#{transaction.hash}",
+          "type" => "create",
+          "value" => "0"
         }
+        |> Map.merge(expected_l1_fee_fields())
+      ]
 
-        assert response =
-                 conn
-                 |> get("/api/v1", params)
-                 |> json_response(200)
+      params = %{
+        "module" => "account",
+        "action" => "txlistinternal",
+        "txhash" => "#{transaction.hash}",
+        "include_zero_value" => "true"
+      }
 
-        assert response["result"] == expected_result
-        assert response["status"] == "1"
-        assert response["message"] == "OK"
-        assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
-      end
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
     end
   end
 
@@ -2596,6 +2774,79 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert response["status"] == "0"
       assert Map.has_key?(response, "result")
       refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "returns status = 1 when only blocks within the chain head tolerance are pending", %{
+      conn: conn
+    } do
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      block = insert(:block)
+      internal_transaction = insert_internal_transaction(block, address, address_2)
+
+      pending_block = insert(:block, number: block.number + 1)
+      insert(:pending_block_operation, block_hash: pending_block.hash, block_number: pending_block.number)
+
+      params = %{
+        "module" => "account",
+        "action" => "txlistinternal",
+        "address" => "#{address.hash}"
+      }
+
+      # the pending block is the head, so it is ignored with and without an endblock reaching the head
+      for request_params <- [params, Map.put(params, "endblock", "99999999")] do
+        assert response =
+                 conn
+                 |> get("/api", request_params)
+                 |> json_response(200)
+
+        assert [%{"transactionHash" => transaction_hash}] = response["result"]
+        assert transaction_hash == to_string(internal_transaction.transaction.hash)
+        assert response["status"] == "1"
+        assert response["message"] == "OK"
+        assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+      end
+
+      # once the chain moves on, the pending block leaves the tolerance window
+      insert(:block, number: pending_block.number + pending_head_tolerance())
+
+      for request_params <- [params, Map.put(params, "endblock", "#{pending_block.number}")] do
+        assert response =
+                 conn
+                 |> get("/api", request_params)
+                 |> json_response(200)
+
+        assert [_] = response["result"]
+        assert response["status"] == "2"
+        assert response["message"] == "Some internal transactions within this block range have not yet been processed"
+      end
+    end
+
+    test "returns status = 2 with an empty result when blocks within the chain head tolerance are pending", %{
+      conn: conn
+    } do
+      address = insert(:address)
+
+      head_block = insert(:block)
+      insert(:pending_block_operation, block_hash: head_block.hash, block_number: head_block.number)
+
+      params = %{
+        "module" => "account",
+        "action" => "txlistinternal",
+        "address" => "#{address.hash}",
+        "startblock" => "#{head_block.number}"
+      }
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["result"] == []
+      assert response["status"] == "2"
+      assert response["message"] == "Some internal transactions within this block range have not yet been processed"
       assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
     end
 
@@ -2681,6 +2932,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "transactionHash" => "#{transaction.hash}",
           "errCode" => "#{internal_transaction.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       response =
@@ -2830,6 +3082,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "isError" => "0",
           "errCode" => "#{internal_transaction.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       params = %{
@@ -2908,7 +3161,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "transactionHash" => "#{transaction.hash}",
           "isError" => "0",
           "errCode" => "#{internal_transaction_b.error}"
-        },
+        }
+        |> Map.merge(expected_l1_fee_fields()),
         %{
           "blockNumber" => "#{internal_transaction_a.block_number}",
           "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
@@ -2926,6 +3180,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "isError" => "0",
           "errCode" => "#{internal_transaction_a.error}"
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       params = %{
@@ -3112,6 +3367,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "functionName" => "",
           "methodId" => ""
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -3167,6 +3423,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "functionName" => "",
           "methodId" => ""
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -3408,6 +3665,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "functionName" => "",
           "methodId" => ""
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -3782,6 +4040,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "functionName" => "",
           "methodId" => ""
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -4265,6 +4524,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "functionName" => "",
           "methodId" => ""
         }
+        |> Map.merge(expected_l1_fee_fields())
       ]
 
       assert response =
@@ -4464,6 +4724,135 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
 
       assert Enum.at(token_transfers_3, 1)["value"] == ""
       assert(Enum.count(token_transfers_3) == 2)
+    end
+  end
+
+  if Application.compile_env(:explorer, :chain_type) in [:optimism, :scroll] do
+    describe "rollup L1 fee fields" do
+      test "txlist returns the L1 fee so that gasUsed * gasPrice + L1FeesPaid is the total fee", %{conn: conn} do
+        address = insert(:address)
+
+        transaction =
+          :transaction
+          |> insert([from_address: address] ++ known_l1_fee_attrs())
+          |> with_block(status: :ok)
+
+        params = %{
+          "module" => "account",
+          "action" => "txlist",
+          "address" => "#{address.hash}"
+        }
+
+        assert response =
+                 %{"result" => [row], "status" => "1"} =
+                 conn
+                 |> get("/api", params)
+                 |> json_response(200)
+
+        assert Map.take(row, Map.keys(known_l1_fee_fields())) == known_l1_fee_fields()
+
+        {:actual, total_fee} = Transaction.fee(transaction, :wei)
+
+        assert Decimal.equal?(
+                 total_fee,
+                 String.to_integer(row["gasUsed"]) * String.to_integer(row["gasPrice"]) +
+                   String.to_integer(row["L1FeesPaid"])
+               )
+
+        assert :ok = ExJsonSchema.Validator.validate(txlist_schema(), response)
+      end
+
+      test "tokentx returns the L1 fee fields of the transfer's transaction", %{conn: conn} do
+        transaction =
+          :transaction
+          |> insert(known_l1_fee_attrs())
+          |> with_block()
+
+        token = insert(:token, type: "ERC-20")
+
+        token_transfer =
+          insert(:token_transfer,
+            block: transaction.block,
+            transaction: transaction,
+            block_number: transaction.block_number,
+            token_contract_address: token.contract_address,
+            token_type: "ERC-20"
+          )
+
+        params = %{
+          "module" => "account",
+          "action" => "tokentx",
+          "address" => to_string(token_transfer.from_address.hash)
+        }
+
+        assert response =
+                 %{"result" => [row], "status" => "1"} =
+                 conn
+                 |> get("/api", params)
+                 |> json_response(200)
+
+        assert Map.take(row, Map.keys(known_l1_fee_fields())) == known_l1_fee_fields()
+        assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+      end
+
+      test "txlistinternal returns the parent transaction's L1 fee fields by txhash and by address", %{conn: conn} do
+        address = insert(:address)
+        contract_address = insert(:contract_address)
+
+        transaction =
+          :transaction
+          |> insert([from_address: address, to_address: nil] ++ known_l1_fee_attrs())
+          |> with_contract_creation(contract_address)
+          |> with_block()
+
+        insert(:internal_transaction_create,
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 0,
+          value: 1,
+          from_address: address,
+          created_contract_code: contract_address.contract_code,
+          created_contract_address: contract_address,
+          block_number: transaction.block_number
+        )
+
+        for lookup_params <- [%{"txhash" => "#{transaction.hash}"}, %{"address" => "#{address.hash}"}] do
+          params = Map.merge(%{"module" => "account", "action" => "txlistinternal"}, lookup_params)
+
+          assert response =
+                   %{"result" => [row], "status" => "1"} =
+                   conn
+                   |> get("/api", params)
+                   |> json_response(200)
+
+          assert row["transactionHash"] == "#{transaction.hash}"
+          assert Map.take(row, Map.keys(known_l1_fee_fields())) == known_l1_fee_fields()
+          assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+        end
+      end
+    end
+  else
+    describe "rollup L1 fee fields" do
+      test "txlist carries no L1 fee fields on chains without an L1 fee", %{conn: conn} do
+        address = insert(:address)
+
+        :transaction
+        |> insert(from_address: address)
+        |> with_block()
+
+        params = %{
+          "module" => "account",
+          "action" => "txlist",
+          "address" => "#{address.hash}"
+        }
+
+        assert %{"result" => [row], "status" => "1"} =
+                 conn
+                 |> get("/api", params)
+                 |> json_response(200)
+
+        refute Map.has_key?(row, "L1FeesPaid")
+      end
     end
   end
 
@@ -5066,6 +5455,107 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
     end
   end
 
+  @contract_creation_from "0x117b358218da5a4f647072ddb50ded038ed63d17"
+  @contract_creation_address "0x205a6b72ce16736c9d87172568a9c0cb9304de0d"
+  @contract_creation_gas "0x106f5"
+  @contract_creation_init "0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033"
+  @contract_creation_code "0x608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033"
+
+  case Application.compile_env(:explorer, :chain_type) do
+    chain_type when chain_type in [:rsk, :filecoin] ->
+      # `EthereumJSONRPC.RSK` and `EthereumJSONRPC.Filecoin` variants don't support tracing of a
+      # single transaction, so the on-demand fetcher falls back to `trace_block` for them
+      defp mock_contract_creation_trace_fetching(transaction) do
+        block_number = transaction.block_number
+        block_quantity = EthereumJSONRPC.integer_to_quantity(block_number)
+        transaction_hash = to_string(transaction.hash)
+        transaction_index = transaction.index
+
+        expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+          [%{id: id, method: "trace_block", params: [^block_quantity]}], _ ->
+            {:ok,
+             [
+               %{
+                 id: id,
+                 result: [
+                   %{
+                     "type" => "create",
+                     "subtraces" => 0,
+                     "traceAddress" => [],
+                     "action" => %{
+                       "from" => @contract_creation_from,
+                       "gas" => @contract_creation_gas,
+                       "value" => "0x0",
+                       "init" => @contract_creation_init
+                     },
+                     "result" => %{
+                       "address" => @contract_creation_address,
+                       "gasUsed" => @contract_creation_gas,
+                       "code" => @contract_creation_code
+                     },
+                     "blockNumber" => block_number,
+                     "transactionHash" => transaction_hash,
+                     "transactionPosition" => transaction_index
+                   }
+                 ]
+               }
+             ]}
+        end)
+      end
+
+    _ ->
+      defp mock_contract_creation_trace_fetching(_transaction) do
+        expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+          [%{id: id, params: _}], _ ->
+            {:ok,
+             [
+               %{
+                 id: id,
+                 result: %{
+                   "type" => "create",
+                   "from" => @contract_creation_from,
+                   "to" => @contract_creation_address,
+                   "value" => "0x0",
+                   "gas" => @contract_creation_gas,
+                   "gasUsed" => @contract_creation_gas,
+                   "input" => @contract_creation_init,
+                   "output" => @contract_creation_code
+                 }
+               }
+             ]}
+        end)
+
+        original_config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
+
+        on_exit(fn ->
+          Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, original_config)
+        end)
+
+        Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+      end
+  end
+
+  defp pending_head_tolerance do
+    Application.get_env(:block_scout_web, AddressController)[:internal_transactions_pending_head_tolerance]
+  end
+
+  defp insert_internal_transaction(block, from_address, to_address) do
+    transaction =
+      :transaction
+      |> insert(from_address: from_address, to_address: to_address)
+      |> with_block(block)
+
+    insert(:internal_transaction,
+      transaction: transaction,
+      transaction_index: transaction.index,
+      index: 1,
+      value: 1,
+      from_address: from_address,
+      to_address: to_address,
+      block_number: block.number
+    )
+  end
+
   defp listaccounts_schema do
     resolve_schema(%{
       "type" => "array",
@@ -5094,8 +5584,62 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
     })
   end
 
+  # Rollup L1 fee fields added by `BlockScoutWeb.API.RPC.RPCView.l1_fee_fields/1` on chain types storing an L1 fee.
+  # Factory transactions carry no L1 fee, so these are the renderings for an unknown fee.
+  case Application.compile_env(:explorer, :chain_type) do
+    :optimism ->
+      defp expected_l1_fee_fields do
+        %{"L1FeesPaid" => "0", "L1GasUsed" => "", "L1GasPrice" => "", "L1FeeScalar" => ""}
+      end
+
+    :scroll ->
+      defp expected_l1_fee_fields, do: %{"L1FeesPaid" => "0"}
+
+    _ ->
+      defp expected_l1_fee_fields, do: %{}
+  end
+
+  # A transaction carrying a known rollup L1 fee (the Base Sepolia example from the feature request) and
+  # the fields the RPC views are expected to render for it.
+  case Application.compile_env(:explorer, :chain_type) do
+    :optimism ->
+      defp known_l1_fee_attrs do
+        [
+          l1_fee: %Wei{value: Decimal.new(83_741_055_139)},
+          l1_gas_used: Decimal.new(1600),
+          l1_gas_price: %Wei{value: Decimal.new(2_227_405)},
+          l1_fee_scalar: Decimal.new("0.684")
+        ]
+      end
+
+      defp known_l1_fee_fields do
+        %{"L1FeesPaid" => "83741055139", "L1GasUsed" => "1600", "L1GasPrice" => "2227405", "L1FeeScalar" => "0.684"}
+      end
+
+    :scroll ->
+      defp known_l1_fee_attrs, do: [l1_fee: %Wei{value: Decimal.new(83_741_055_139)}]
+      defp known_l1_fee_fields, do: %{"L1FeesPaid" => "83741055139"}
+
+    _ ->
+      :ok
+  end
+
+  @l1_fee_schema_properties %{
+    "L1FeesPaid" => %{"type" => "string"},
+    "L1GasUsed" => %{"type" => "string"},
+    "L1GasPrice" => %{"type" => "string"},
+    "L1FeeScalar" => %{"type" => "string"}
+  }
+
+  # Resolves a list schema whose items may also carry the rollup L1 fee fields.
+  defp resolve_schema_with_l1_fee_fields(result) do
+    result
+    |> update_in(["items", "properties"], &Map.merge(&1, @l1_fee_schema_properties))
+    |> resolve_schema()
+  end
+
   defp txlist_schema do
-    resolve_schema(%{
+    resolve_schema_with_l1_fee_fields(%{
       "type" => ["null", "array"],
       "items" => %{
         "type" => "object",
@@ -5124,7 +5668,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
   end
 
   defp txlistinternal_schema do
-    resolve_schema(%{
+    resolve_schema_with_l1_fee_fields(%{
       "type" => ["array", "null"],
       "items" => %{
         "type" => "object",
@@ -5149,7 +5693,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
   end
 
   defp tokentx_schema do
-    resolve_schema(%{
+    resolve_schema_with_l1_fee_fields(%{
       "type" => ["array", "null"],
       "items" => %{
         "type" => "object",

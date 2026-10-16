@@ -15,15 +15,8 @@ defmodule Indexer.Fetcher.ReplacedTransaction do
 
   @behaviour BufferedTask
 
-  @max_batch_size 10
-  @max_concurrency 4
-  @defaults [
-    flush_interval: :timer.seconds(3),
-    max_concurrency: @max_concurrency,
-    max_batch_size: @max_batch_size,
-    task_supervisor: Indexer.Fetcher.ReplacedTransaction.TaskSupervisor,
-    metadata: [fetcher: :replaced_transaction]
-  ]
+  @default_max_batch_size 10
+  @default_max_concurrency 4
 
   @spec async_fetch(
           [
@@ -44,28 +37,67 @@ defmodule Indexer.Fetcher.ReplacedTransaction do
     end
   end
 
+  @doc """
+  Asynchronously checks freshly imported pending transactions against already mined ones.
+
+  If a mined transaction with the same `from_address_hash` and `nonce` already exists in the DB, the pending
+  transaction is marked as `dropped/replaced`. This covers the case when a pending transaction is imported after
+  the block with its replacement has already been processed, so `async_fetch/3` could not catch it.
+  """
+  @spec async_fetch_pending(
+          [
+            %{
+              required(:nonce) => non_neg_integer,
+              required(:from_address_hash) => Hash.Address.t(),
+              required(:hash) => Hash.t()
+            }
+          ],
+          boolean()
+        ) :: :ok
+  def async_fetch_pending(transactions_fields, realtime?, timeout \\ 5000) when is_list(transactions_fields) do
+    if ReplacedTransactionSupervisor.disabled?() do
+      :ok
+    else
+      case Enum.map(transactions_fields, &pending_entry/1) do
+        [] -> :ok
+        entries -> BufferedTask.buffer(__MODULE__, entries, realtime?, timeout)
+      end
+    end
+  end
+
   @doc false
   def child_spec([init_options, gen_server_options]) do
     merged_init_opts =
-      @defaults
+      defaults()
       |> Keyword.merge(init_options)
       |> Keyword.put(:state, {})
 
     Supervisor.child_spec({BufferedTask, [{__MODULE__, merged_init_opts}, gen_server_options]}, id: __MODULE__)
   end
 
+  defp defaults do
+    [
+      flush_interval: :timer.seconds(3),
+      max_concurrency: Application.get_env(:indexer, __MODULE__)[:concurrency] || @default_max_concurrency,
+      max_batch_size: Application.get_env(:indexer, __MODULE__)[:batch_size] || @default_max_batch_size,
+      task_supervisor: Indexer.Fetcher.ReplacedTransaction.TaskSupervisor,
+      metadata: [fetcher: :replaced_transaction]
+    ]
+  end
+
+  # Streams only pending transactions that already have a mined duplicate (same `from_address_hash` and `nonce`),
+  # so that the periodic re-scan is not limited to an arbitrary sample of all pending transactions.
   @impl BufferedTask
   def init(initial, reducer, _) do
     {:ok, final} =
-      [:block_hash, :nonce, :from_address_hash, :hash]
-      |> Transaction.stream_pending_transactions(
+      [:nonce, :from_address_hash, :hash]
+      |> Transaction.stream_replaced_pending_transactions(
         initial,
         fn transaction_fields, acc ->
           transaction_fields
           |> pending_entry()
           |> reducer.(acc)
-        end,
-        true
+        end
       )
 
     final

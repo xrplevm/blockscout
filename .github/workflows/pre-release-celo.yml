@@ -13,15 +13,15 @@ permissions:
   packages: write
 
 env:
-  OTP_VERSION: '27.3.4.6'
-  ELIXIR_VERSION: '1.19.4'
+  OTP_VERSION: '28.5'
+  ELIXIR_VERSION: '1.20.4'
 
 jobs:
   push_to_registry:
     name: Push Docker image to GitHub Container Registry
     runs-on: build
     env:
-      RELEASE_VERSION: 11.2.2
+      RELEASE_VERSION: 12.0.2
       API_GRAPHQL_MAX_COMPLEXITY: 10400
     steps:
       - uses: actions/checkout@v5

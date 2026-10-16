@@ -19,7 +19,7 @@ defmodule Indexer.Fetcher.Optimism.DisputeGame do
   alias Explorer.{Chain, Helper, Repo}
   alias Explorer.Chain.Data
   alias Explorer.Chain.Hash.Address
-  alias Explorer.Chain.Optimism.{DisputeGame, Withdrawal}
+  alias Explorer.Chain.Optimism.{DisputeGame, SuperchainConfig, Withdrawal}
   alias Indexer.Fetcher.Optimism
   alias Indexer.Helper, as: IndexerHelper
 
@@ -59,12 +59,12 @@ defmodule Indexer.Fetcher.Optimism.DisputeGame do
     :timer.sleep(2000)
 
     env = Application.get_all_env(:indexer)[Optimism]
-    system_config = env[:optimism_l1_system_config]
+    system_config = SuperchainConfig.optimism_l1_system_config_contract()
     rpc = env[:optimism_l1_rpc]
 
     with {:system_config_valid, true} <- {:system_config_valid, IndexerHelper.address_correct?(system_config)},
          {:rpc_l1_undefined, false} <- {:rpc_l1_undefined, is_nil(rpc)},
-         json_rpc_named_arguments = IndexerHelper.json_rpc_named_arguments(rpc),
+         json_rpc_named_arguments = IndexerHelper.l1_json_rpc_named_arguments(rpc),
          {optimism_portal, _} <- Optimism.read_system_config(system_config, json_rpc_named_arguments),
          dispute_game_factory = get_dispute_game_factory_address(optimism_portal, json_rpc_named_arguments),
          {:dispute_game_factory_available, true} <- {:dispute_game_factory_available, !is_nil(dispute_game_factory)},

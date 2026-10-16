@@ -16,7 +16,7 @@ defmodule Indexer.Block.Fetcher do
 
   alias EthereumJSONRPC.{Blocks, FetchedBeneficiaries}
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.{Block, Hash, Import, Transaction, Wei, Withdrawal}
+  alias Explorer.Chain.{Block, Hash, Import, Log, Transaction, Wei, Withdrawal}
   alias Explorer.Chain.Block.Reward
   alias Explorer.Chain.Cache.{Accounts, BlockNumber, Transactions, Uncles}
   alias Explorer.Chain.Cache.Blocks, as: BlocksCache
@@ -278,18 +278,32 @@ defmodule Indexer.Block.Fetcher do
       Prometheus.Instrumenter.set_block_batch_fetch(fetch_time, callback_module)
       result = {:ok, %{inserted: inserted, errors: blocks_errors}}
 
-      Task.Supervisor.start_child(task_supervisor, fn ->
-        update_block_cache(inserted[:blocks], inserted)
-        update_transactions_cache(inserted[:transactions], inserted)
-        update_addresses_cache(inserted[:addresses])
-        update_uncles_cache(inserted[:block_second_degree_relations])
-        update_withdrawals_cache(inserted[:withdrawals])
-      end)
+      # only what the caches need is captured by the task, not the whole import result
+      inserted_for_caches =
+        Map.take(inserted, [
+          :blocks,
+          :transactions,
+          :block_rewards,
+          :token_transfers,
+          :addresses,
+          :block_second_degree_relations,
+          :withdrawals
+        ])
+
+      Task.Supervisor.start_child(task_supervisor, fn -> update_caches(inserted_for_caches) end)
 
       async_match_arbitrum_messages_to_l2(arbitrum_transactions_for_further_handling)
 
       if chain_type() == :zilliqa do
-        inserted_logs = Map.get(inserted, :logs, [])
+        inserted_logs =
+          inserted
+          |> Map.get(:logs, [])
+          |> Log.preload_block()
+          |> Log.preload_transaction()
+          |> Log.preload_address()
+          |> Log.prepare_data()
+          |> Log.prepare_first_topic()
+
         inserted_transactions = Map.get(inserted, :transactions, [])
         Zrc2Tokens.fetch_zrc2_token_transfers_and_adapters(inserted_logs, inserted_transactions, range, callback_module)
       end
@@ -484,6 +498,28 @@ defmodule Indexer.Block.Fetcher do
   end
 
   defp enable_partial_async_import?, do: Application.get_env(:indexer, :enable_partial_async_import?)
+
+  # Every cache is refreshed independently: a failure while updating one of them
+  # must not leave the others stale.
+  defp update_caches(inserted) do
+    update_cache_safely("blocks", fn -> update_block_cache(inserted[:blocks], inserted) end)
+    update_cache_safely("transactions", fn -> update_transactions_cache(inserted[:transactions], inserted) end)
+    update_cache_safely("addresses", fn -> update_addresses_cache(inserted[:addresses]) end)
+    update_cache_safely("uncles", fn -> update_uncles_cache(inserted[:block_second_degree_relations]) end)
+    update_cache_safely("withdrawals", fn -> update_withdrawals_cache(inserted[:withdrawals]) end)
+  end
+
+  defp update_cache_safely(cache_name, fun) do
+    fun.()
+  rescue
+    error ->
+      Logger.error(fn ->
+        ["Failed to update ", cache_name, " cache: ", Exception.format(:error, error, __STACKTRACE__)]
+      end)
+  catch
+    :exit, reason ->
+      Logger.error(fn -> ["Failed to update ", cache_name, " cache: ", inspect(reason)] end)
+  end
 
   defp update_block_cache([], _), do: :ok
 

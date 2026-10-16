@@ -3,6 +3,8 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
   @moduledoc false
   alias BlockScoutWeb.API.V2.ZkSyncView
   alias BlockScoutWeb.Schemas.API.V2.{Address, General, Token}
+  alias BlockScoutWeb.Schemas.API.V2.Eden.Call, as: EdenCall
+  alias BlockScoutWeb.Schemas.API.V2.Optimism.TransactionWithdrawal
   alias BlockScoutWeb.Schemas.API.V2.Transaction.Fee
   alias BlockScoutWeb.Schemas.Helper
   alias OpenApiSpex.Schema
@@ -18,7 +20,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
       batch_number: %Schema{type: :integer, nullable: true},
       status: %Schema{
         type: :string,
-        enum: ZkSyncView.batch_status_enum(),
+        enum: ZkSyncView.batched_item_lifecycle_status_enum(),
         nullable: true
       },
       commit_transaction_hash: General.FullHashNullable,
@@ -96,17 +98,13 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
     additionalProperties: false
   }
 
-  @optimism_withdrawal_schema %Schema{
-    type: :object,
-    nullable: false,
-    properties: %{
-      nonce: %Schema{type: :integer},
-      status: %Schema{type: :string, nullable: false},
-      l1_transaction_hash: General.FullHashNullable
-    },
-    required: [:nonce, :status, :l1_transaction_hash],
-    additionalProperties: false
-  }
+  # OP Stack-specific transaction types appended to the `transaction_types` enum
+  # for both `optimism` and `optimism-celo` chain types (the latter resolves to
+  # the `:optimism` chain type with a `{:optimism, :celo}` chain identity).
+  @optimism_transaction_types [
+    "op_stack_l1_attributes_transaction",
+    "op_stack_post_exec_transaction"
+  ]
 
   @scroll_schema %Schema{
     type: :object,
@@ -172,7 +170,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
             l1_gas_used: General.IntegerString,
             op_withdrawals: %Schema{
               type: :array,
-              items: @optimism_withdrawal_schema,
+              items: TransactionWithdrawal,
               nullable: false
             },
             op_interop_messages: %Schema{
@@ -183,7 +181,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
                 status: %Schema{type: :string, nullable: false, enum: ["Sent", "Relayed", "Failed"]},
                 sender_address_hash: General.AddressHashNullable,
                 target_address_hash: General.AddressHashNullable,
-                payload: General.HexString,
+                payload: General.HexData,
                 relay_chain: %Schema{type: :object, nullable: true},
                 relay_transaction_hash: General.FullHashNullable,
                 init_chain: %Schema{type: :object, nullable: true},
@@ -195,9 +193,20 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
             operator_fee: General.IntegerString
           }
         )
+        |> extend_transaction_types_enum(@optimism_transaction_types)
 
       :scroll ->
         schema |> Helper.extend_schema(properties: %{scroll: @scroll_schema})
+
+      :eden ->
+        schema
+        |> Helper.extend_schema(
+          properties: %{
+            fee_payer: %Schema{allOf: [Address], nullable: true},
+            calls: %Schema{type: :array, items: EdenCall, nullable: true}
+          },
+          required: [:fee_payer, :calls]
+        )
 
       :suave ->
         schema
@@ -221,7 +230,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
                 hash: General.FullHash,
                 method: General.MethodNameNullable,
                 decoded_input: %Schema{allOf: [General.DecodedInput], nullable: true},
-                raw_input: General.HexString
+                raw_input: General.HexData
               },
               additionalProperties: false
             }
@@ -282,6 +291,16 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
         schema
     end
     |> chain_identity_fields()
+  end
+
+  # Appends chain-specific values to the `transaction_types` items enum of the given schema.
+  @spec extend_transaction_types_enum(map(), [String.t()]) :: map()
+  defp extend_transaction_types_enum(schema, extra_types) do
+    update_in(
+      schema,
+      [:properties, :transaction_types, Access.key(:items), Access.key(:enum)],
+      &(&1 ++ extra_types)
+    )
   end
 
   defp chain_identity_fields(schema) do
@@ -347,7 +366,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
         },
         timestamp: General.TimestampNullable,
         from: Address,
-        to: Address,
+        to: %Schema{allOf: [Address], nullable: true},
         created_contract: %Schema{allOf: [Address], nullable: true},
         confirmations: %Schema{
           type: :integer,
@@ -394,7 +413,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
             General.DecodedInput,
             %Schema{
               type: :object,
-              properties: %{raw: %Schema{anyOf: [General.HexString, %Schema{type: :string}], nullable: true}},
+              properties: %{raw: %Schema{anyOf: [General.HexData, %Schema{type: :string}], nullable: true}},
               required: [:raw],
               nullable: false,
               additionalProperties: false
@@ -402,7 +421,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
           ],
           nullable: true
         },
-        raw_input: General.HexString,
+        raw_input: General.HexData,
         decoded_input: %Schema{allOf: [General.DecodedInput], nullable: true},
         token_transfers: %Schema{type: :array, items: TokenTransfer, nullable: true},
         token_transfers_overflow: %Schema{type: :boolean, nullable: true},
@@ -422,7 +441,8 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
               "token_creation",
               "token_transfer",
               "blob_transaction",
-              "set_code_transaction"
+              "set_code_transaction",
+              "sponsored_transaction"
             ]
           }
         },

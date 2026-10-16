@@ -10,11 +10,13 @@ defmodule BlockScoutWeb.API.V2.CeloView do
   import Explorer.Chain.SmartContract, only: [dead_address_hash_string: 0]
 
   alias BlockScoutWeb.API.V2.{Helper, TokenTransferView, TokenView, TransactionView}
+  alias Ecto.Association.NotLoaded
   alias Explorer.Chain
   alias Explorer.Chain.{Address, Address.Reputation, Block, Token, TokenTransfer, Transaction, Wei}
   alias Explorer.Chain.Cache.{CeloCoreContracts, CeloEpochs}
   alias Explorer.Chain.Celo.{Account, Epoch, EpochReward}
   alias Explorer.Chain.Celo.Helper, as: CeloHelper
+  alias Explorer.Helper, as: ExplorerHelper
 
   @address_params [
     necessity_by_association: %{
@@ -238,7 +240,7 @@ defmodule BlockScoutWeb.API.V2.CeloView do
   def extend_address_json_response(out_json, %Address{} = address) do
     account_json =
       address
-      |> Map.get(:celo_account)
+      |> ExplorerHelper.chain_type_field(:celo_account)
       |> case do
         %Account{} = account ->
           %{
@@ -287,11 +289,14 @@ defmodule BlockScoutWeb.API.V2.CeloView do
   def extend_transaction_json_response(out_json, %Transaction{} = transaction) do
     token_json =
       case {
-        Map.get(transaction, :gas_token_contract_address),
-        Map.get(transaction, :gas_token)
+        ExplorerHelper.chain_type_field(transaction, :gas_token_contract_address),
+        ExplorerHelper.chain_type_field(transaction, :gas_token)
       } do
-        # {_, %NotLoaded{}} ->
-        #   nil
+        {%NotLoaded{}, _} ->
+          nil
+
+        {_, %NotLoaded{}} ->
+          nil
 
         {nil, _} ->
           nil

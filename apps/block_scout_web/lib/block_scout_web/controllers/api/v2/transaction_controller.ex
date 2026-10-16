@@ -11,13 +11,12 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
 
   import BlockScoutWeb.Chain,
     only: [
-      next_page_params: 3,
-      next_page_params: 4,
-      next_page_params: 5,
+      next_page_params_for_state_changes: 3,
+      paginate_list: 3,
+      paginate_list: 4,
       put_key_value_to_paging_options: 3,
       token_transfers_next_page_params: 3,
       paging_options: 1,
-      split_list_by_page: 1,
       fetch_scam_token_toggle: 2,
       transaction_to_internal_transactions: 2
     ]
@@ -31,16 +30,12 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       type_filter_options: 1
     ]
 
-  import Explorer.MicroserviceInterfaces.BENS,
+  import Explorer.Chain.Address.MetadataPreloader,
     only: [
-      maybe_preload_ens: 1,
-      maybe_preload_ens_for_token_transfers: 1,
-      maybe_preload_ens_for_transactions: 1,
-      maybe_preload_ens_to_transaction: 1
+      maybe_preload_ens_and_metadata: 1,
+      maybe_preload_ens_and_metadata: 2,
+      maybe_preload_selected_meta: 2
     ]
-
-  import Explorer.MicroserviceInterfaces.Metadata,
-    only: [maybe_preload_metadata: 1, maybe_preload_metadata_to_transaction: 1]
 
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
 
@@ -52,7 +47,14 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   require Logger
 
   alias BlockScoutWeb.AccessHelper
-  alias BlockScoutWeb.API.V2.{BlobView, Ethereum.DepositController, Ethereum.DepositView}
+
+  alias BlockScoutWeb.API.V2.{
+    BlobView,
+    Ethereum.DepositController,
+    Ethereum.DepositView,
+    InternalTransactionsPendingStatusHelper
+  }
+
   alias BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation, as: TransactionInterpretationService
   alias BlockScoutWeb.Models.TransactionStateHelper
   alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.{ForbiddenResponse, NotFoundResponse}
@@ -62,7 +64,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   alias Explorer.Chain.Beacon.Deposit, as: BeaconDeposit
   alias Explorer.Chain.Beacon.Reader, as: BeaconReader
   alias Explorer.Chain.Cache.Counters.{NewPendingTransactionsCount, Transactions24hCount}
-  alias Explorer.Chain.{FheOperation, Hash, Transaction}
+  alias Explorer.Chain.{FheOperation, Hash, SmartContract, Transaction}
   alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
   alias Explorer.Chain.Scroll.Reader, as: ScrollReader
   alias Explorer.Chain.Token.Instance
@@ -92,45 +94,59 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   end
 
   # TODO might be redundant to preload blob fields in some of the endpoints
-  @transaction_necessity_by_association %{
-                                          :block => :optional,
-                                          [
-                                            created_contract_address: [
-                                              :scam_badge,
-                                              :names,
-                                              :token,
-                                              :smart_contract,
-                                              proxy_implementations_association()
-                                            ]
-                                          ] => :optional,
-                                          [
-                                            from_address: [
-                                              :scam_badge,
-                                              :names,
-                                              :smart_contract,
-                                              proxy_implementations_association()
-                                            ]
-                                          ] => :optional,
-                                          [
-                                            to_address: [
-                                              :scam_badge,
-                                              :names,
-                                              :smart_contract,
-                                              proxy_implementations_association()
-                                            ]
-                                          ] => :optional
-                                        }
+  # Address-info preloads for the transaction participants (from/to/created and
+  # token transfer addresses) are intentionally absent here: the `transaction`
+  # action loads them all in a single deduplicated pass via
+  # `Chain.preload_transaction_participants/3`, and the list actions via
+  # `Chain.preload_address_participants/4`.
+  @transaction_necessity_by_association %{:block => :optional}
                                         |> Map.merge(@chain_type_transaction_necessity_by_association)
 
+  @transaction_participants_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    :token => :optional,
+    SmartContract.association_without_abi() => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  # The same associations for an item of a transaction *list*, where nothing
+  # renders the contract source, so the smart contract itself is not loaded.
+  # `:token` stays: `TransactionView.transaction_types/3` reports
+  # `token_creation` off `created_contract_address.token`.
+  @transaction_list_participant_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    :token => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  @transaction_address_fields [
+    {:from_address_hash, :from_address},
+    {:to_address_hash, :to_address},
+    {:created_contract_address_hash, :created_contract_address}
+  ]
+
   @token_transfers_necessity_by_association %{
-    [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-    [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
     [token: reputation_association()] => :optional
   }
 
+  @token_transfer_participant_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    SmartContract.association_without_abi() => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  @token_transfer_address_fields [
+    {:from_address_hash, :from_address},
+    {:to_address_hash, :to_address}
+  ]
+
+  # Transfer from/to address preloads are handled by
+  # `Chain.preload_transaction_participants/3`, see
+  # `@transaction_participants_necessity_by_association`.
   @token_transfers_in_transaction_necessity_by_association %{
-    [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-    [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
     [token: reputation_association()] => :optional
   }
 
@@ -159,21 +175,20 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   """
   @spec transaction(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
   def transaction(conn, %{transaction_hash_param: transaction_hash_string} = params) do
-    necessity_by_association_with_actions =
-      @transaction_necessity_by_association
-      |> Map.put(:signed_authorizations, :optional)
-
+    # `signed_authorizations` are not part of the necessity map on purpose: only
+    # EIP-7702 (type 4) transactions have any, so they are preloaded below via
+    # `Transaction.preload_signed_authorizations/2` once the type is known.
     necessity_by_association =
       case Application.get_env(:explorer, :chain_type) do
         :zksync ->
-          necessity_by_association_with_actions
+          @transaction_necessity_by_association
           |> Map.put(:zksync_batch, :optional)
           |> Map.put(:zksync_commit_transaction, :optional)
           |> Map.put(:zksync_prove_transaction, :optional)
           |> Map.put(:zksync_execute_transaction, :optional)
 
         :arbitrum ->
-          necessity_by_association_with_actions
+          @transaction_necessity_by_association
           |> Map.put(:arbitrum_batch, :optional)
           |> Map.put(:arbitrum_commitment_transaction, :optional)
           |> Map.put(:arbitrum_confirmation_transaction, :optional)
@@ -181,13 +196,27 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
           |> Map.put(:arbitrum_message_from_l2, :optional)
 
         :suave ->
-          necessity_by_association_with_actions
+          @transaction_necessity_by_association
           |> Map.put(:logs, :optional)
           |> Map.put([execution_node: :names], :optional)
           |> Map.put([wrapped_to_address: :names], :optional)
 
+        :eden ->
+          Map.put(
+            @transaction_necessity_by_association,
+            [
+              fee_payer_address: [
+                :scam_badge,
+                :names,
+                :smart_contract,
+                proxy_implementations_association()
+              ]
+            ],
+            :optional
+          )
+
         _ ->
-          necessity_by_association_with_actions
+          @transaction_necessity_by_association
       end
 
     options =
@@ -195,11 +224,18 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> Keyword.merge(@api_true)
 
     with {:ok, transaction, _transaction_hash} <- validate_transaction(transaction_hash_string, params, options),
+         preloaded <- Transaction.preload_signed_authorizations(transaction, @api_true),
          preloaded <-
            Chain.preload_token_transfers(
-             transaction,
+             preloaded,
              @token_transfers_in_transaction_necessity_by_association,
              @api_true |> fetch_scam_token_toggle(conn)
+           ),
+         preloaded <-
+           Chain.preload_transaction_participants(
+             preloaded,
+             @transaction_participants_necessity_by_association,
+             @api_true
            ) do
       conn
       |> put_status(200)
@@ -207,8 +243,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
         transaction:
           preloaded
           |> Instance.preload_nft(@api_true)
-          |> maybe_preload_ens_to_transaction()
-          |> maybe_preload_metadata_to_transaction()
+          |> maybe_preload_ens_and_metadata()
       })
     end
   end
@@ -219,16 +254,15 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     parameters:
       base_params() ++
         [transaction_filter_param(), transaction_type_param()] ++
-        define_paging_params(["block_number", "index", "items_count", "hash", "inserted_at"]),
+        define_paging_params(["block_number", "index", "hash", "inserted_at"]),
     responses: [
       ok:
         {"List of transactions with pagination information.", "application/json",
          paginated_response(
-           items: Schemas.Transaction.Response,
+           items: Schemas.Transaction,
            next_page_params_example: %{
              "block_number" => 23_532_302,
-             "index" => 375,
-             "items_count" => 50
+             "index" => 375
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -243,7 +277,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
 
     full_options =
       [
-        necessity_by_association: transactions_necessity_by_association()
+        necessity_by_association: @transaction_necessity_by_association
       ]
       |> Keyword.merge(paging_options(params, filter_options))
       |> Keyword.merge(method_filter_options(params))
@@ -252,45 +286,32 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
 
     transactions_plus_one = Chain.recent_transactions(full_options, filter_options)
 
-    {transactions, next_page} = split_list_by_page(transactions_plus_one)
-
-    next_page_params = next_page |> next_page_params(transactions, params)
+    {transactions, next_page_params} = paginate_list(transactions_plus_one, params, full_options[:paging_options])
 
     conn
     |> put_status(200)
     |> render(:transactions, %{
-      transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+      transactions: transactions |> preload_transaction_list_participants(),
       next_page_params: next_page_params
     })
   end
 
-  defp transactions_necessity_by_association do
-    %{
-      :block => :optional,
-      [
-        created_contract_address: [
-          :scam_badge,
-          :names,
-          :token,
-          proxy_implementations_association()
-        ]
-      ] => :optional,
-      [
-        from_address: [
-          :scam_badge,
-          :names,
-          proxy_implementations_association()
-        ]
-      ] => :optional,
-      [
-        to_address: [
-          :scam_badge,
-          :names,
-          proxy_implementations_association()
-        ]
-      ] => :optional
-    }
-    |> Map.merge(@chain_type_transaction_necessity_by_association)
+  # Loads the address info of every `from`/`to`/`created_contract` participant on
+  # the page in one pass, deduplicating addresses shared between items and
+  # between roles of the same item. Preloading it per role through
+  # `necessity_by_association` instead repeats the `address_names`, scam badge
+  # and proxy implementation queries once per role.
+  #
+  # Runs before `maybe_preload_ens_and_metadata/2`, which writes ENS and metadata
+  # into the very address structs assigned here.
+  defp preload_transaction_list_participants(transactions) do
+    transactions
+    |> Chain.preload_address_participants(
+      @transaction_address_fields,
+      @transaction_list_participant_necessity_by_association,
+      @api_true
+    )
+    |> maybe_preload_ens_and_metadata(:transactions)
   end
 
   operation :zksync_batch,
@@ -298,16 +319,15 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     description: "Retrieves L2 transactions bound to a specific ZkSync batch number.",
     parameters:
       base_params() ++
-        [batch_number_param()] ++ define_paging_params(["block_number", "index", "items_count"]),
+        [batch_number_param()] ++ define_paging_params(["block_number", "index"]),
     responses: [
       ok:
         {"ZkSync batch transactions.", "application/json",
          paginated_response(
-           items: Schemas.Transaction.Response,
+           items: Schemas.Transaction,
            next_page_params_example: %{
              "block_number" => 65_361_291,
-             "index" => 1,
-             "items_count" => 50
+             "index" => 1
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -327,16 +347,15 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     description: "Retrieves L2 transactions bound to a specific Arbitrum batch number.",
     parameters:
       base_params() ++
-        [batch_number_param()] ++ define_paging_params(["block_number", "index", "items_count"]),
+        [batch_number_param()] ++ define_paging_params(["block_number", "index"]),
     responses: [
       ok:
         {"Arbitrum batch transactions.", "application/json",
          paginated_response(
-           items: Schemas.Transaction.Response,
+           items: Schemas.Transaction,
            next_page_params_example: %{
              "block_number" => 391_483_842,
-             "index" => 0,
-             "items_count" => 50
+             "index" => 0
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -397,16 +416,15 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     description: "Retrieves L2 transactions bound to a specific Optimism batch number.",
     parameters:
       base_params() ++
-        [batch_number_param()] ++ define_paging_params(["block_number", "index", "items_count"]),
+        [batch_number_param()] ++ define_paging_params(["block_number", "index"]),
     responses: [
       ok:
         {"Optimism batch transactions.", "application/json",
          paginated_response(
-           items: Schemas.Transaction.Response,
+           items: Schemas.Transaction,
            next_page_params_example: %{
              "block_number" => 142_678_440,
-             "index" => 5,
-             "items_count" => 50
+             "index" => 5
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -429,16 +447,15 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     description: "Retrieves L2 transactions bound to a specific Scroll batch number.",
     parameters:
       base_params() ++
-        [batch_number_param()] ++ define_paging_params(["block_number", "index", "items_count"]),
+        [batch_number_param()] ++ define_paging_params(["block_number", "index"]),
     responses: [
       ok:
         {"Scroll batch transactions.", "application/json",
          paginated_response(
-           items: Schemas.Transaction.Response,
+           items: Schemas.Transaction,
            next_page_params_example: %{
              "block_number" => 14_127_868,
-             "index" => 0,
-             "items_count" => 50
+             "index" => 0
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -492,18 +509,18 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
           end
 
         query
-        |> Chain.join_associations(transactions_necessity_by_association())
+        |> Chain.join_associations(@transaction_necessity_by_association)
         |> preload([{:token_transfers, [:token, :from_address, :to_address]}])
         |> Repo.replica().all()
       end
 
-    {transactions, next_page} = split_list_by_page(transactions_plus_one)
-    next_page_params = next_page |> next_page_params(transactions, params)
+    {transactions, next_page_params} =
+      paginate_list(transactions_plus_one, params, paging_options(params)[:paging_options])
 
     conn
     |> put_status(200)
     |> render(:transactions, %{
-      transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+      transactions: transactions |> preload_transaction_list_participants(),
       next_page_params: next_page_params
     })
   end
@@ -526,7 +543,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   defp handle_batch_transactions(conn, %{batch_number_param: batch_number} = params, batch_transactions_fun) do
     full_options =
       [
-        necessity_by_association: transactions_necessity_by_association()
+        necessity_by_association: @transaction_necessity_by_association
       ]
       |> Keyword.merge(paging_options(params))
       |> Keyword.merge(@api_true)
@@ -541,13 +558,12 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> Enum.map(fn transaction -> transaction.transaction_hash end)
       |> Chain.hashes_to_transactions(full_options)
 
-    {transactions, next_page} = split_list_by_page(transactions_plus_one)
-    next_page_params = next_page |> next_page_params(transactions, params)
+    {transactions, next_page_params} = paginate_list(transactions_plus_one, params, full_options[:paging_options])
 
     conn
     |> put_status(200)
     |> render(:transactions, %{
-      transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+      transactions: transactions |> preload_transaction_list_participants(),
       next_page_params: next_page_params
     })
   end
@@ -555,17 +571,15 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   operation :execution_node,
     summary: "List transactions executed on a specific execution node",
     description: "Retrieves transactions that were executed on the specified execution node.",
-    parameters:
-      [execution_node_hash_param() | base_params()] ++ define_paging_params(["block_number", "index", "items_count"]),
+    parameters: [execution_node_hash_param() | base_params()] ++ define_paging_params(["block_number", "index"]),
     responses: [
       ok:
         {"List of transactions.", "application/json",
          paginated_response(
-           items: Schemas.Transaction.Response,
+           items: Schemas.Transaction,
            next_page_params_example: %{
              "block_number" => 14_127_868,
-             "index" => 0,
-             "items_count" => 50
+             "index" => 0
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -579,22 +593,18 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   def execution_node(conn, %{execution_node_hash_param: execution_node_hash_string} = params) do
     with {:format, {:ok, execution_node_hash}} <- {:format, Chain.string_to_address_hash(execution_node_hash_string)} do
       full_options =
-        [necessity_by_association: transactions_necessity_by_association()]
+        [necessity_by_association: @transaction_necessity_by_association]
         |> Keyword.merge(put_key_value_to_paging_options(paging_options(params), :is_index_in_asc_order, true))
         |> Keyword.merge(@api_true)
 
       transactions_plus_one = Chain.execution_node_to_transactions(execution_node_hash, full_options)
 
-      {transactions, next_page} = split_list_by_page(transactions_plus_one)
-
-      next_page_params =
-        next_page
-        |> next_page_params(transactions, params)
+      {transactions, next_page_params} = paginate_list(transactions_plus_one, params, full_options[:paging_options])
 
       conn
       |> put_status(200)
       |> render(:transactions, %{
-        transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+        transactions: transactions |> preload_transaction_list_participants(),
         next_page_params: next_page_params
       })
     end
@@ -692,20 +702,21 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
         |> Chain.flat_1155_batch_token_transfers()
         |> Chain.paginate_1155_batch_token_transfers(paging_options)
 
-      {token_transfers, next_page} = split_list_by_page(results)
-
-      next_page_params =
-        next_page
-        |> token_transfers_next_page_params(token_transfers, params)
+      {token_transfers, next_page_params} =
+        token_transfers_next_page_params(results, params, full_options[:paging_options])
 
       conn
       |> put_status(200)
       |> render(:token_transfers, %{
         token_transfers:
           token_transfers
+          |> Chain.preload_address_participants(
+            @token_transfer_address_fields,
+            @token_transfer_participant_necessity_by_association,
+            @api_true
+          )
           |> Instance.preload_nft(@api_true)
-          |> maybe_preload_ens_for_token_transfers()
-          |> maybe_preload_metadata(),
+          |> maybe_preload_ens_and_metadata(:token_transfers),
         next_page_params: next_page_params
       })
     end
@@ -717,17 +728,18 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       "Retrieves internal transactions generated during the execution of a specific transaction. Useful for analyzing contract interactions and debugging failed transactions.",
     parameters:
       [transaction_hash_param() | base_params()] ++
-        define_paging_params(["index", "block_number", "transaction_index", "items_count"]),
+        [include_zero_value_param()] ++
+        define_paging_params(["index", "block_number", "transaction_index"]),
     responses: [
       ok:
         {"Internal transactions for the specified transaction, with pagination.", "application/json",
          paginated_response(
            items: Schemas.InternalTransaction,
+           include_pending_status?: true,
            next_page_params_example: %{
              "index" => 50,
              "block_number" => 22_133_247,
-             "transaction_index" => 68,
-             "items_count" => 50
+             "transaction_index" => 68
            }
          )},
       not_found: NotFoundResponse.response(),
@@ -744,20 +756,26 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
         @internal_transaction_address_preloads
         |> Keyword.merge(paging_options(params))
         |> Keyword.merge(@api_true)
+        |> Keyword.put(:include_zero_value, Map.get(params, :include_zero_value, true))
 
       internal_transactions_plus_one = transaction_to_internal_transactions(transaction, full_options)
 
-      {internal_transactions, next_page} = split_list_by_page(internal_transactions_plus_one)
+      {internal_transactions, next_page_params} =
+        paginate_list(internal_transactions_plus_one, params, full_options[:paging_options])
 
-      next_page_params =
-        next_page
-        |> next_page_params(internal_transactions, params)
+      pending_status? =
+        InternalTransactionsPendingStatusHelper.transaction_internal_transactions_pending?(
+          internal_transactions,
+          transaction.hash,
+          transaction.block_number
+        )
 
       conn
       |> put_status(200)
       |> render(:internal_transactions, %{
-        internal_transactions: internal_transactions |> maybe_preload_ens() |> maybe_preload_metadata(),
-        next_page_params: next_page_params
+        internal_transactions: internal_transactions |> maybe_preload_ens_and_metadata(),
+        next_page_params: next_page_params,
+        pending_status?: pending_status?
       })
     end
   end
@@ -768,7 +786,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       "Retrieves event logs emitted during the execution of a specific transaction. Logs contain information about contract events and state changes.",
     parameters:
       [transaction_hash_param() | base_params()] ++
-        define_paging_params(["index", "block_number", "items_count"]),
+        define_paging_params(["index", "block_number"]),
     responses: [
       ok:
         {"Event logs for the specified transaction, with pagination.", "application/json",
@@ -776,8 +794,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
            items: Schemas.Log,
            next_page_params_example: %{
              "index" => 124,
-             "block_number" => 21_925_703,
-             "items_count" => 50
+             "block_number" => 21_925_703
            }
          )},
       not_found: NotFoundResponse.response(),
@@ -789,30 +806,28 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   """
   @spec logs(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
   def logs(conn, %{transaction_hash_param: transaction_hash_string} = params) do
-    with {:ok, _transaction, transaction_hash} <- validate_transaction(transaction_hash_string, params) do
+    with {:ok, transaction, transaction_hash} <- validate_transaction(transaction_hash_string, params) do
       full_options =
         [
           necessity_by_association: %{
-            [address: [:names, :smart_contract, proxy_implementations_smart_contracts_association()]] => :optional,
             :block => :optional
-          }
+          },
+          address_preloads: [:names, :smart_contract, proxy_implementations_smart_contracts_association()],
+          transaction_preloads: [to_address: [:smart_contract, proxy_implementations_smart_contracts_association()]]
         ]
         |> Keyword.merge(paging_options(params))
         |> Keyword.merge(@api_true)
 
       logs_plus_one = Chain.transaction_to_logs(transaction_hash, full_options)
 
-      {logs, next_page} = split_list_by_page(logs_plus_one)
-
-      next_page_params =
-        next_page
-        |> next_page_params(logs, params)
+      {logs, next_page_params} = paginate_list(logs_plus_one, params, full_options[:paging_options])
 
       conn
       |> put_status(200)
       |> render(:logs, %{
+        transaction: transaction,
         transaction_hash: transaction_hash,
-        logs: logs |> maybe_preload_ens() |> maybe_preload_metadata(),
+        logs: logs |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end
@@ -821,8 +836,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   operation :state_changes,
     summary: "Get on-chain state changes caused by a specific transaction",
     description: "Retrieves state changes (balance changes, token transfers) caused by a specific transaction.",
-    parameters:
-      [transaction_hash_param() | base_params()] ++ define_state_changes_paging_params(["state_changes", "items_count"]),
+    parameters: [transaction_hash_param() | base_params()] ++ define_paging_params(["state_changes_count"]),
     responses: [
       ok: {
         "State changes caused by the specified transaction, with pagination.",
@@ -830,8 +844,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
         paginated_response(
           items: Schemas.Transaction.StateChange,
           next_page_params_example: %{
-            "state_changes" => nil,
-            "items_count" => 50
+            "state_changes_count" => 50
           }
         )
       },
@@ -891,20 +904,18 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   @spec state_changes(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
   def state_changes(conn, %{transaction_hash_param: transaction_hash_string} = params) do
     with {:ok, transaction, _transaction_hash} <- validate_transaction(transaction_hash_string, params) do
+      paging_opts = paging_options(params)
+
       state_changes_plus_next_page =
         transaction
         |> TransactionStateHelper.state_changes(
-          params
-          |> paging_options()
+          paging_opts
           |> Keyword.merge(@api_true)
           |> Keyword.put(:ip, AccessHelper.conn_to_ip_string(conn))
         )
 
-      {state_changes, next_page} = split_list_by_page(state_changes_plus_next_page)
-
-      next_page_params =
-        next_page
-        |> next_page_params(state_changes, params, true)
+      {state_changes, next_page_params} =
+        next_page_params_for_state_changes(state_changes_plus_next_page, params, paging_opts[:paging_options])
 
       conn
       |> put_status(200)
@@ -915,16 +926,15 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   operation :watchlist_transactions,
     summary: "List transactions in a user's watchlist",
     description: "Retrieves transactions in the authenticated user's watchlist.",
-    parameters: base_params() ++ define_paging_params(["block_number", "index", "items_count"]),
+    parameters: base_params() ++ define_paging_params(["block_number", "index"]),
     responses: [
       ok:
         {"Watchlist transactions.", "application/json",
          paginated_response(
-           items: Schemas.Transaction.Response,
+           items: Schemas.Transaction,
            next_page_params_example: %{
              "block_number" => 23_617_990,
-             "index" => 128,
-             "items_count" => 50
+             "index" => 128
            }
          )},
       forbidden: ForbiddenResponse.response(),
@@ -939,7 +949,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     with {:auth, %{watchlist_id: watchlist_id}} <- {:auth, current_user(conn)} do
       full_options =
         [
-          necessity_by_association: transactions_necessity_by_association()
+          necessity_by_association: @transaction_necessity_by_association
         ]
         |> Keyword.merge(paging_options(params, [:validated]))
         |> Keyword.merge(@api_true)
@@ -947,14 +957,12 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       {watchlist_names, transactions_plus_one} =
         WatchlistAddress.fetch_watchlist_transactions(watchlist_id, full_options)
 
-      {transactions, next_page} = split_list_by_page(transactions_plus_one)
-
-      next_page_params = next_page |> next_page_params(transactions, params)
+      {transactions, next_page_params} = paginate_list(transactions_plus_one, params, full_options[:paging_options])
 
       conn
       |> put_status(200)
       |> render(:transactions_watchlist, %{
-        transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+        transactions: transactions |> preload_transaction_list_participants(),
         next_page_params: next_page_params,
         watchlist_names: watchlist_names
       })
@@ -1000,8 +1008,15 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     with {:transaction_interpreter_enabled, true} <-
            {:transaction_interpreter_enabled, TransactionInterpretationService.enabled?()},
          {:ok, transaction, _transaction_hash} <- validate_transaction(transaction_hash_string, params, options) do
-      conn
-      |> json(TransactionInterpretationService.get_request_body(transaction))
+      case TransactionInterpretationService.get_request_body(transaction) do
+        {:ok, body} ->
+          json(conn, body)
+
+        {:error, :lock_timeout} ->
+          conn
+          |> put_status(503)
+          |> json(%{error: "Transaction data is temporarily unavailable"})
+      end
     end
   end
 
@@ -1021,7 +1036,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       {response, code} =
         case TransactionInterpretationService.interpret(transaction) do
           {:ok, response} -> {response, 200}
-          {:error, %Jason.DecodeError{}} -> {%{error: "Error while transaction interpreter response decoding"}, 500}
+          {:error, _decode_error} -> {%{error: "Error while transaction interpreter response decoding"}, 500}
           {{:error, error}, code} -> {%{error: error}, code}
         end
 
@@ -1029,6 +1044,72 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> put_status(code)
       |> json(response)
     end
+  end
+
+  @preview_necessity_by_association %{
+    :block => :optional,
+    [from_address: [:names, :smart_contract]] => :optional,
+    [to_address: [:names, :smart_contract]] => :optional
+  }
+
+  operation :preview,
+    summary: "Get lightweight transaction preview for social media embeds",
+    description: "Returns minimal transaction data (status, timestamp, method, from/to) for rendering OG previews.",
+    parameters:
+      [transaction_hash_param() | base_params()] ++
+        [
+          %OpenApiSpex.Parameter{
+            name: :preload_ens,
+            in: :query,
+            schema: %Schema{type: :boolean},
+            required: false,
+            description: "Preload ENS domain names for addresses (default: false)"
+          },
+          %OpenApiSpex.Parameter{
+            name: :preload_metadata,
+            in: :query,
+            schema: %Schema{type: :boolean},
+            required: false,
+            description: "Preload address metadata/name tags (default: false)"
+          },
+          %OpenApiSpex.Parameter{
+            name: :decode_input,
+            in: :query,
+            schema: %Schema{type: :boolean},
+            required: false,
+            description: "Decode transaction input to resolve method name (default: false)"
+          }
+        ],
+    responses: [
+      ok: {"Lightweight transaction preview.", "application/json", Schemas.Transaction.Preview},
+      not_found: NotFoundResponse.response(),
+      unprocessable_entity: JsonErrorResponse.response()
+    ]
+
+  @doc """
+    Function to handle GET requests to `/api/v2/transactions/:transaction_hash_param/preview` endpoint.
+  """
+  @spec preview(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
+  def preview(conn, %{transaction_hash_param: transaction_hash_string} = params) do
+    options =
+      [necessity_by_association: @preview_necessity_by_association]
+      |> Keyword.merge(@api_true)
+
+    with {:ok, transaction, _transaction_hash} <- validate_transaction(transaction_hash_string, params, options) do
+      preloaded = maybe_preload_selected_meta(transaction, requested_preview_meta_fields(params))
+
+      conn
+      |> put_status(200)
+      |> render(:preview, %{transaction: preloaded, decode_input: params[:decode_input] == true})
+    end
+  end
+
+  # Both preloads are opt-in per request, so only what the caller asked for is
+  # fetched. When both are requested they are fetched concurrently.
+  defp requested_preview_meta_fields(params) do
+    for {param, field} <- [preload_ens: :ens_domain_name, preload_metadata: :metadata],
+        params[param] == true,
+        do: field
   end
 
   operation :blobs,
@@ -1118,15 +1199,14 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   operation :beacon_deposits,
     summary: "List beacon deposits in a transaction",
     description: "Retrieves beacon deposits included in a specific transaction with pagination support.",
-    parameters: [transaction_hash_param() | base_params()] ++ define_paging_params(["index", "items_count"]),
+    parameters: [transaction_hash_param() | base_params()] ++ define_paging_params(["index"]),
     responses: [
       ok:
         {"Beacon deposits for transaction.", "application/json",
          paginated_response(
            items: Schemas.Beacon.Deposit.Response,
            next_page_params_example: %{
-             "index" => 2_287_943,
-             "items_count" => 50
+             "index" => 2_287_943
            }
          )},
       not_found: NotFoundResponse.response(),
@@ -1175,22 +1255,17 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
         |> Keyword.merge(DepositController.paging_options(params))
 
       deposit_plus_one = BeaconDeposit.from_transaction_hash(transaction_hash, full_options)
-      {deposits, next_page} = split_list_by_page(deposit_plus_one)
 
-      next_page_params =
-        next_page
-        |> next_page_params(
-          deposits,
-          params,
-          false,
-          DepositController.paging_function()
+      {deposits, next_page_params} =
+        paginate_list(deposit_plus_one, params, full_options[:paging_options],
+          paging_function: DepositController.paging_function()
         )
 
       conn
       |> put_status(200)
       |> put_view(DepositView)
       |> render(:deposits, %{
-        deposits: deposits |> maybe_preload_ens() |> maybe_preload_metadata(),
+        deposits: deposits |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end

@@ -7,6 +7,7 @@ defmodule Explorer.Account.Notifier.Notify do
   alias Explorer.Account.Notifier.{Email, ForbiddenAddress, Summary}
   alias Explorer.Account.{WatchlistAddress, WatchlistNotification}
   alias Explorer.Chain.Transaction
+  alias Explorer.Helper
   alias Explorer.{Mailer, Repo}
 
   require Logger
@@ -148,14 +149,17 @@ defmodule Explorer.Account.Notifier.Notify do
       {"COIN", :outgoing} -> address.watch_coin_output
       {"ERC-20", :incoming} -> address.watch_erc_20_input
       {"ERC-20", :outgoing} -> address.watch_erc_20_output
+      # ERC-8056 tokens are ERC-20 tokens, so they follow the same watch flags
+      {"ERC-8056", :incoming} -> address.watch_erc_20_input
+      {"ERC-8056", :outgoing} -> address.watch_erc_20_output
       {"ERC-721", :incoming} -> address.watch_erc_721_input
       {"ERC-721", :outgoing} -> address.watch_erc_721_output
       {"ERC-1155", :incoming} -> address.watch_erc_1155_input
       {"ERC-1155", :outgoing} -> address.watch_erc_1155_output
       {"ERC-404", :incoming} -> address.watch_erc_404_input
       {"ERC-404", :outgoing} -> address.watch_erc_404_output
-      {"ZRC-2", :incoming} -> Map.get(address, :watch_zrc_2_input)
-      {"ZRC-2", :outgoing} -> Map.get(address, :watch_zrc_2_output)
+      {"ZRC-2", :incoming} -> Helper.chain_type_field(address, :watch_zrc_2_input)
+      {"ZRC-2", :outgoing} -> Helper.chain_type_field(address, :watch_zrc_2_output)
     end
   end
 

@@ -10,8 +10,10 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   alias Explorer.Chain
   alias Explorer.Chain.{Block, Hash, Log, Transaction}
   alias Explorer.Chain.Cache.OptimismFinalizationPeriod
-  alias Explorer.Chain.Optimism.{DisputeGame, OutputRoot, WithdrawalEvent}
+  alias Explorer.Chain.Optimism.{DisputeGame, OutputRoot, SuperchainConfig, WithdrawalEvent}
   alias Explorer.{Helper, PagingOptions, Repo}
+  alias Explorer.Repo.LockTimeout
+  alias Explorer.Utility.{LogFirstTopic, LogHelper}
 
   @game_status_defender_wins 2
 
@@ -69,34 +71,26 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
         []
 
       _ ->
-        base_query =
-          from(w in __MODULE__,
-            order_by: [desc: w.msg_nonce],
-            left_join: l2_transaction in Transaction,
-            on: w.l2_transaction_hash == l2_transaction.hash,
-            left_join: l2_block in Block,
-            on: w.l2_block_number == l2_block.number,
-            left_join: we in WithdrawalEvent,
-            on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
-            left_join: log in Log,
-            on:
-              log.transaction_hash == w.l2_transaction_hash and log.first_topic == ^@message_passed_event and
-                log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
-            select: %{
-              msg_nonce: w.msg_nonce,
-              hash: w.hash,
-              l2_block_number: w.l2_block_number,
-              l2_timestamp: l2_block.timestamp,
-              l2_transaction_hash: w.l2_transaction_hash,
-              l1_transaction_hash: we.l1_transaction_hash,
-              from: l2_transaction.from_address_hash,
-              msg_log_sender_address_hash: log.third_topic,
-              msg_log_target_address_hash: log.fourth_topic,
-              msg_log_data: log.data
-            }
-          )
-
-        base_query
+        __MODULE__
+        |> order_by([w], desc: w.msg_nonce)
+        |> join(:left, [w], l2_transaction in Transaction, on: w.l2_transaction_hash == l2_transaction.hash)
+        |> join(:left, [w], l2_block in Block, on: w.l2_block_number == l2_block.number and l2_block.consensus == true)
+        |> join(:left, [w], we in WithdrawalEvent,
+          on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized
+        )
+        |> join_message_passed_log()
+        |> select([w, l2_transaction, l2_block, we, log], %{
+          msg_nonce: w.msg_nonce,
+          hash: w.hash,
+          l2_block_number: w.l2_block_number,
+          l2_timestamp: l2_block.timestamp,
+          l2_transaction_hash: w.l2_transaction_hash,
+          l1_transaction_hash: we.l1_transaction_hash,
+          from: l2_transaction.from_address_hash,
+          msg_log_sender_address_hash: log.third_topic,
+          msg_log_target_address_hash: log.fourth_topic,
+          msg_log_data: log.data
+        })
         |> page_optimism_withdrawals(paging_options)
         |> limit(^paging_options.page_size)
         |> select_repo(options).all(timeout: :infinity)
@@ -156,39 +150,91 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   @spec transaction_statuses(Hash.t()) :: [{non_neg_integer(), String.t(), map()}]
   def transaction_statuses(l2_transaction_hash) do
     query =
-      from(w in __MODULE__,
-        where: w.l2_transaction_hash == ^l2_transaction_hash,
-        left_join: l2_block in Block,
-        on: w.l2_block_number == l2_block.number and l2_block.consensus == true,
-        left_join: we in WithdrawalEvent,
-        on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
-        left_join: log in Log,
-        on:
-          log.transaction_hash == w.l2_transaction_hash and log.first_topic == ^@message_passed_event and
-            log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
-        select: %{
-          hash: w.hash,
-          l2_block_number: w.l2_block_number,
-          l1_transaction_hash: we.l1_transaction_hash,
-          msg_nonce: w.msg_nonce,
-          msg_log_sender_address_hash: log.third_topic,
-          msg_log_target_address_hash: log.fourth_topic,
-          msg_log_data: log.data
-        }
+      __MODULE__
+      |> where([w], w.l2_transaction_hash == ^l2_transaction_hash)
+      |> join(:left, [w], l2_transaction in Transaction, on: w.l2_transaction_hash == l2_transaction.hash)
+      |> join(:left, [w], l2_block in Block, on: w.l2_block_number == l2_block.number and l2_block.consensus == true)
+      |> join(:left, [w], we in WithdrawalEvent,
+        on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized
       )
+      |> join_message_passed_log()
+      |> select([w, _l2_transaction, l2_block, we, log], %{
+        hash: w.hash,
+        l2_block_number: w.l2_block_number,
+        l2_timestamp: l2_block.timestamp,
+        l1_transaction_hash: we.l1_transaction_hash,
+        msg_nonce: w.msg_nonce,
+        msg_log_sender_address_hash: log.third_topic,
+        msg_log_target_address_hash: log.fourth_topic,
+        msg_log_data: log.data
+      })
 
-    query
-    |> Repo.replica().all(timeout: :infinity)
-    |> Enum.map(fn w ->
-      msg_nonce =
-        Bitwise.band(
-          Decimal.to_integer(w.msg_nonce),
-          0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+    # The withdrawals are optional data of the transaction page, which must not
+    # hang while the joined `logs` table is locked exclusively (e.g. by
+    # `VACUUM FULL`): the query fails fast and no withdrawals are shown instead.
+    case LockTimeout.run(Repo.replica(), fn repo -> repo.all(query) end, timeout: :infinity) do
+      {:ok, withdrawals} ->
+        Enum.map(withdrawals, fn w ->
+          msg_nonce =
+            Bitwise.band(
+              Decimal.to_integer(w.msg_nonce),
+              0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+            )
+
+          {status, _} = status(w, nil, @api_true)
+          {msg_nonce, status, w}
+        end)
+
+      {:error, :lock_timeout} ->
+        []
+    end
+  end
+
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
+  defp join_message_passed_log(query) do
+    first_topic_id = LogFirstTopic.value_to_id(@message_passed_event)
+    migration_finished? = LogHelper.fill_optimized_fields_migration_finished?()
+    migration_started? = LogHelper.fill_optimized_fields_migration_started?()
+
+    cond do
+      migration_finished? and is_nil(first_topic_id) ->
+        join(query, :left, [w, l2_transaction], log in Log, on: false)
+
+      migration_finished? ->
+        join(query, :left, [w, l2_transaction], log in Log,
+          on:
+            log.block_number == w.l2_block_number and log.transaction_index == l2_transaction.index and
+              log.first_topic_id == ^first_topic_id and
+              log.second_topic == fragment("bytea_ltrim_zeroes(numeric_to_bytea32(msg_nonce))")
         )
 
-      {status, _} = status(w, nil, @api_true)
-      {msg_nonce, status, w}
-    end)
+      migration_started? and is_nil(first_topic_id) ->
+        join(query, :left, [w, l2_transaction], log in Log,
+          on:
+            (log.transaction_hash == w.l2_transaction_hash or
+               (log.block_number == w.l2_block_number and log.transaction_index == l2_transaction.index)) and
+              log.first_topic == ^@message_passed_event and
+              (log.second_topic == fragment("numeric_to_bytea32(msg_nonce)") or
+                 log.second_topic == fragment("bytea_ltrim_zeroes(numeric_to_bytea32(msg_nonce))"))
+        )
+
+      migration_started? ->
+        join(query, :left, [w, l2_transaction], log in Log,
+          on:
+            (log.transaction_hash == w.l2_transaction_hash or
+               (log.block_number == w.l2_block_number and log.transaction_index == l2_transaction.index)) and
+              (log.first_topic_id == ^first_topic_id or log.first_topic == ^@message_passed_event) and
+              (log.second_topic == fragment("numeric_to_bytea32(msg_nonce)") or
+                 log.second_topic == fragment("bytea_ltrim_zeroes(numeric_to_bytea32(msg_nonce))"))
+        )
+
+      true ->
+        join(query, :left, [w, l2_transaction], log in Log,
+          on:
+            log.transaction_hash == w.l2_transaction_hash and log.first_topic == ^@message_passed_event and
+              log.second_topic == fragment("numeric_to_bytea32(msg_nonce)")
+        )
+    end
   end
 
   @doc """
@@ -226,7 +272,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
 
     if proven_events == [] do
       cond do
-        appropriate_games_found(w.l2_block_number, respected_games) ->
+        appropriate_games_found(w, respected_games) ->
           {@withdrawal_status_ready_to_prove, nil}
 
         appropriate_root_found(w.l2_block_number) ->
@@ -282,13 +328,40 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     @proof_maturity_delay_seconds
   end
 
-  defp appropriate_games_found(withdrawal_l2_block_number, respected_games) do
-    respected_games
-    |> Enum.any?(fn game ->
-      l2_block_number = DisputeGame.l2_block_number_from_extra_data(game.extra_data)
-      withdrawal_l2_block_number <= l2_block_number
+  # Checks whether there is a respected dispute game the given withdrawal can be proven against.
+  #
+  # For the games with Output Root claim the withdrawal's L2 block number is compared with the L2 block number
+  # of the game. For the games with Super Root claim (OP Stack Upgrade 20) the game's `extraData` contains
+  # the L2 timestamp of the Super Root instead of L2 block number, so the timestamp of the withdrawal's L2 block
+  # is compared with it.
+  #
+  # ## Parameters
+  # - `w`: A map with the withdrawal info. Must contain `l2_block_number` and (for Super Root games) `l2_timestamp`.
+  # - `respected_games`: A list of games returned by the `respected_games(options)` function.
+  #
+  # ## Returns
+  # - `true` if an appropriate game is found, `false` otherwise.
+  @spec appropriate_games_found(map(), list()) :: boolean()
+  defp appropriate_games_found(w, respected_games) do
+    Enum.any?(respected_games, fn game ->
+      case DisputeGame.l2_sequence_number(game) do
+        {:block_number, game_l2_block_number} ->
+          w.l2_block_number <= game_l2_block_number
+
+        {:timestamp, game_l2_timestamp} ->
+          withdrawal_covered_by_timestamp?(Map.get(w, :l2_timestamp), game_l2_timestamp)
+      end
     end)
   end
+
+  # Checks whether the withdrawal's L2 block timestamp is covered by the Super Root game bound to the given L2 timestamp.
+  # Returns `false` if the withdrawal's L2 block timestamp is unknown (e.g. the L2 block is not indexed yet).
+  @spec withdrawal_covered_by_timestamp?(DateTime.t() | nil, non_neg_integer()) :: boolean()
+  defp withdrawal_covered_by_timestamp?(%DateTime{} = withdrawal_l2_timestamp, game_l2_timestamp) do
+    DateTime.to_unix(withdrawal_l2_timestamp) <= game_l2_timestamp
+  end
+
+  defp withdrawal_covered_by_timestamp?(_withdrawal_l2_timestamp, _game_l2_timestamp), do: false
 
   defp appropriate_root_found(withdrawal_l2_block_number) do
     last_root_l2_block_number =
@@ -483,18 +556,6 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   """
   @spec portal_contract_address() :: String.t() | nil
   def portal_contract_address do
-    portal_address = Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:portal]
-
-    if Indexer.Helper.address_correct?(portal_address) do
-      portal_address
-    else
-      Constants.get_constant_value(portal_contract_address_constant(), @api_true)
-    end
+    SuperchainConfig.optimism_l1_portal_contract()
   end
-
-  @doc """
-  Returns the name of the optimism_portal_contract_address constant.
-  """
-  @spec portal_contract_address_constant() :: binary()
-  def portal_contract_address_constant, do: "optimism_portal_contract_address"
 end

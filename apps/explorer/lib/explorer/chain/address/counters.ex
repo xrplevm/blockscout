@@ -6,19 +6,14 @@ defmodule Explorer.Chain.Address.Counters do
   use Utils.RuntimeEnvHelper,
     chain_identity: [:explorer, :chain_identity]
 
-  import Ecto.Query, only: [from: 2, limit: 2, select: 3, union_all: 2, where: 3]
+  import Ecto.Query
 
   import Explorer.Chain,
     only: [select_repo: 1, wrapped_union_subquery: 1]
 
-  alias Explorer.{Chain, PagingOptions, Repo}
+  alias Explorer.{Chain, PagingOptions}
 
-  alias Explorer.Chain.Cache.Counters.{
-    AddressTabsElementsCount,
-    AddressTokenTransfersCount,
-    AddressTransactionsCount,
-    AddressTransactionsGasUsageSum
-  }
+  alias Explorer.Chain.Cache.Counters.AddressTabsElementsCount
 
   alias Explorer.Chain.{
     Address,
@@ -34,6 +29,9 @@ defmodule Explorer.Chain.Address.Counters do
 
   alias Explorer.Chain.Beacon.Deposit, as: BeaconDeposit
   alias Explorer.Chain.Celo.ElectionReward, as: CeloElectionReward
+
+  alias Explorer.Helper, as: ExplorerHelper
+  alias Explorer.Repo.LockTimeout
 
   require Logger
 
@@ -53,7 +51,7 @@ defmodule Explorer.Chain.Address.Counters do
   @transactions_types [:transactions_from, :transactions_to, :transactions_contract]
 
   defp address_hash_to_logs_query(address_hash) do
-    from(l in Log, where: l.address_hash == ^address_hash)
+    Log.address_match_union_query(address_hash, fn address_match_dynamic -> where(Log, ^address_match_dynamic) end)
   end
 
   defp address_hash_to_validated_blocks_query(address_hash) do
@@ -65,7 +63,11 @@ defmodule Explorer.Chain.Address.Counters do
   end
 
   def check_if_logs_at_address(address_hash, options \\ []) do
-    select_repo(options).exists?(address_hash_to_logs_query(address_hash))
+    address_hash
+    |> Log.address_match_dynamics()
+    |> Enum.any?(fn address_match_dynamic ->
+      select_repo(options).exists?(where(Log, ^address_match_dynamic))
+    end)
   end
 
   def check_if_token_transfers_at_address(address_hash, options \\ []) do
@@ -74,33 +76,106 @@ defmodule Explorer.Chain.Address.Counters do
   end
 
   def check_if_tokens_at_address(address_hash, options \\ []) do
-    select_repo(options).exists?(address_hash_to_token_balances_query(address_hash))
+    select_repo(options).exists?(address_hash_to_token_balances_query(address_hash, options))
   end
 
   @spec check_if_withdrawals_at_address(Hash.Address.t()) :: boolean()
   def check_if_withdrawals_at_address(address_hash, options \\ []) do
     address_hash
-    |> Withdrawal.address_hash_to_withdrawals_unordered_query()
+    |> Withdrawal.address_hash_to_withdrawals_existence_query()
     |> select_repo(options).exists?()
   end
 
-  def address_hash_to_transaction_count_query(address_hash) do
+  @existence_checks_unavailable %{
+    has_validated_blocks: false,
+    has_logs: false,
+    has_tokens: false,
+    has_token_transfers: false,
+    has_beacon_chain_withdrawals: false
+  }
+
+  @doc """
+    Performs all existence checks needed by the address view in a single
+    database round trip: `SELECT exists(...), exists(...), ...`.
+
+    The checks are optional data of the address page, so they must not make
+    the page hang while one of the checked tables is locked exclusively (e.g.
+    by `VACUUM FULL` or a heavy migration). The query fails fast in that case
+    (see `Explorer.Repo.LockTimeout`) and degrades: the `logs` table is by far
+    the biggest and the most likely one to be under maintenance, so the checks
+    are retried without it with `has_logs: false`; if that fails too, every
+    check is reported as `false`.
+  """
+  @spec address_existence_checks(Hash.Address.t(), Keyword.t()) :: %{
+          has_validated_blocks: boolean(),
+          has_logs: boolean(),
+          has_tokens: boolean(),
+          has_token_transfers: boolean(),
+          has_beacon_chain_withdrawals: boolean()
+        }
+  def address_existence_checks(address_hash, options \\ []) do
+    repo = select_repo(options)
+
+    with {:error, :lock_timeout} <- run_address_existence_checks(repo, address_hash, true),
+         {:error, :lock_timeout} <- run_address_existence_checks(repo, address_hash, false) do
+      Logger.warning(fn -> "Existence checks for address #{address_hash} are unavailable: a table is locked" end)
+
+      @existence_checks_unavailable
+    else
+      {:ok, %{has_logs: _} = checks} -> checks
+      {:ok, checks} -> Map.put(checks, :has_logs, false)
+    end
+  end
+
+  defp run_address_existence_checks(repo, address_hash, check_logs?) do
+    validated_blocks_query = address_hash |> address_hash_to_validated_blocks_query() |> select([_], 1)
+    token_balances_query = address_hash |> address_hash_to_token_balances_query() |> select([_], 1)
+    token_transfers_from_query = from(tt in TokenTransfer, where: tt.from_address_hash == ^address_hash, select: 1)
+    token_transfers_to_query = from(tt in TokenTransfer, where: tt.to_address_hash == ^address_hash, select: 1)
+    withdrawals_query = Withdrawal.address_hash_to_withdrawals_existence_query(address_hash)
+
+    query =
+      from(f in fragment("SELECT 1"),
+        select: %{
+          has_validated_blocks: exists(validated_blocks_query),
+          has_tokens: exists(token_balances_query),
+          has_token_transfers: exists(token_transfers_from_query) or exists(token_transfers_to_query),
+          has_beacon_chain_withdrawals: exists(withdrawals_query)
+        }
+      )
+
+    query =
+      if check_logs? do
+        # the select has to be applied inside every union branch, see `Log.address_match_union_query/3`
+        logs_query =
+          Log.address_match_union_query(address_hash, fn address_match_dynamic ->
+            Log |> where(^address_match_dynamic) |> select([_], %{one: 1})
+          end)
+
+        select_merge(query, [_], %{has_logs: exists(logs_query)})
+      else
+        query
+      end
+
+    LockTimeout.run(repo, fn repo -> repo.one(query) end)
+  end
+
+  @doc """
+  Builds a query for collated transactions sent from or received by the given
+  address, optionally bounded by a `(from_block_number, to_block_number]`
+  block range (either bound may be `nil` to leave that side open).
+  """
+  @spec address_hash_to_transaction_count_query(
+          Hash.Address.t(),
+          Block.block_number() | nil,
+          Block.block_number() | nil
+        ) :: Ecto.Query.t()
+  def address_hash_to_transaction_count_query(address_hash, from_block_number \\ nil, to_block_number \\ nil) do
     dynamic = Transaction.where_transactions_to_from(address_hash)
 
     Transaction
     |> where([transaction], ^dynamic)
-  end
-
-  @spec address_hash_to_transaction_count(Hash.Address.t()) :: non_neg_integer()
-  def address_hash_to_transaction_count(address_hash) do
-    query = address_hash_to_transaction_count_query(address_hash)
-
-    Repo.aggregate(query, :count, :hash, timeout: :infinity)
-  end
-
-  @spec address_to_transaction_count(Address.t()) :: non_neg_integer()
-  def address_to_transaction_count(address) do
-    address_hash_to_transaction_count(address.hash)
+    |> where_block_number_in_range(from_block_number, to_block_number)
   end
 
   @doc """
@@ -114,122 +189,91 @@ defmodule Explorer.Chain.Address.Counters do
   end
 
   @doc """
-    Calculates the total gas used by incoming transactions to a given address.
+  Builds a query for the transactions contributing to the gas usage sum of the
+  given address, optionally bounded by a `(from_block_number, to_block_number]`
+  block range.
 
-    This function queries the database for all transactions where the
-    `to_address_hash` matches the provided `address_hash`, and sums up the
-    `gas_used` for these transactions.
-
-    ## Parameters
-    - `address_hash`: The address hash to query for incoming transactions.
-
-    ## Returns
-    - The total gas used by incoming transactions, or `nil` if no transactions
-      are found or if the sum is null.
+  `direction_field` selects which side of the transaction is attributed to the
+  address (see `gas_usage_direction_field/1`).
   """
-  @spec address_to_incoming_transaction_gas_usage(Hash.Address.t()) :: Decimal.t() | nil
-  def address_to_incoming_transaction_gas_usage(address_hash) do
-    to_address_query =
-      from(
-        transaction in Transaction,
-        where: transaction.to_address_hash == ^address_hash
-      )
-
-    Repo.aggregate(to_address_query, :sum, :gas_used, timeout: :infinity)
+  @spec address_to_gas_usage_sum_query(
+          Hash.Address.t(),
+          :to_address_hash | :from_address_hash,
+          Block.block_number() | nil,
+          Block.block_number() | nil
+        ) :: Ecto.Query.t()
+  def address_to_gas_usage_sum_query(address_hash, direction_field, from_block_number \\ nil, to_block_number \\ nil) do
+    Transaction
+    |> where([transaction], field(transaction, ^direction_field) == ^address_hash)
+    |> where_block_number_in_range(from_block_number, to_block_number)
   end
 
   @doc """
-    Calculates the total gas used by outgoing transactions from a given address.
+  Returns the transaction side whose `gas_used` is accumulated into the
+  address gas usage counter: incoming transactions for smart contracts,
+  outgoing transactions for EOAs (including EOAs with delegated code).
 
-    This function queries the database for all transactions where the
-    `from_address_hash` matches the provided `address_hash`, and sums up the
-    `gas_used` for these transactions.
-
-    ## Parameters
-    - `address_hash`: the address to query.
-
-    ## Returns
-    - The total gas used, or `nil` if no transactions are found or if the sum is null.
+  The address must have `contract_code` loaded.
   """
-  @spec address_to_outcoming_transaction_gas_usage(Hash.Address.t()) :: Decimal.t() | nil
-  def address_to_outcoming_transaction_gas_usage(address_hash) do
-    to_address_query =
-      from(
-        transaction in Transaction,
-        where: transaction.from_address_hash == ^address_hash
-      )
-
-    Repo.aggregate(to_address_query, :sum, :gas_used, timeout: :infinity)
+  @spec gas_usage_direction_field(Address.t()) :: :to_address_hash | :from_address_hash
+  def gas_usage_direction_field(address) do
+    if Address.smart_contract?(address) && !Address.eoa_with_code?(address) do
+      :to_address_hash
+    else
+      :from_address_hash
+    end
   end
 
-  def address_to_token_transfer_count_query(address_hash) do
-    from(
-      token_transfer in TokenTransfer,
-      where: token_transfer.to_address_hash == ^address_hash,
-      or_where: token_transfer.from_address_hash == ^address_hash
+  @doc """
+  Builds a query for token transfers sent from or received by the given
+  address, optionally bounded by a `(from_block_number, to_block_number]`
+  block range.
+  """
+  @spec address_to_token_transfer_count_query(
+          Hash.Address.t(),
+          Block.block_number() | nil,
+          Block.block_number() | nil,
+          Keyword.t()
+        ) :: Ecto.Query.t()
+  def address_to_token_transfer_count_query(
+        address_hash,
+        from_block_number \\ nil,
+        to_block_number \\ nil,
+        options \\ []
+      ) do
+    TokenTransfer
+    |> where(
+      [token_transfer],
+      token_transfer.to_address_hash == ^address_hash or token_transfer.from_address_hash == ^address_hash
     )
+    |> where_block_number_in_range(from_block_number, to_block_number)
+    |> ExplorerHelper.maybe_hide_scam_addresses(:token_contract_address_hash, options)
   end
 
-  @spec address_to_token_transfer_count(Address.t()) :: non_neg_integer()
-  def address_to_token_transfer_count(address) do
-    query = address_to_token_transfer_count_query(address.hash)
-
-    Repo.aggregate(query, :count, timeout: :infinity)
+  defp where_block_number_in_range(query, from_block_number, to_block_number) do
+    query
+    |> then(fn q ->
+      if is_nil(from_block_number), do: q, else: where(q, [t], t.block_number > ^from_block_number)
+    end)
+    |> then(fn q ->
+      if is_nil(to_block_number), do: q, else: where(q, [t], t.block_number <= ^to_block_number)
+    end)
   end
 
-  def address_hash_to_token_balances_query(address_hash) do
+  def address_hash_to_token_balances_query(address_hash, options \\ []) do
     from(
       tb in CurrentTokenBalance,
       where: tb.address_hash == ^address_hash,
       where: tb.value > 0 or tb.token_type == "ERC-7984"
     )
+    |> ExplorerHelper.maybe_hide_scam_addresses(:token_contract_address_hash, options)
   end
 
-  @doc """
-    Calculates the total gas usage for a given address.
-
-    This function determines the appropriate gas usage calculation based on the
-    address type:
-
-    - For smart contracts (excluding EOAs with code), it first checks the gas
-      usage of incoming transactions. If there are no incoming transactions or
-      their gas usage is zero, it falls back to the gas usage of outgoing
-      transactions.
-    - For regular addresses and EOAs with code, it calculates the gas usage of
-      outgoing transactions.
-
-    ## Parameters
-    - `address`: The address to calculate gas usage for.
-
-    ## Returns
-    - The total gas usage for the address.
-    - `nil` if no relevant transactions are found or if the sum is null.
-  """
-  @spec address_to_gas_usage_count(Address.t()) :: Decimal.t() | nil
-  def address_to_gas_usage_count(address) do
-    if Address.smart_contract?(address) and not Address.eoa_with_code?(address) do
-      incoming_transaction_gas_usage = address_to_incoming_transaction_gas_usage(address.hash)
-
-      cond do
-        !incoming_transaction_gas_usage ->
-          address_to_outcoming_transaction_gas_usage(address.hash)
-
-        Decimal.compare(incoming_transaction_gas_usage, 0) == :eq ->
-          address_to_outcoming_transaction_gas_usage(address.hash)
-
-        true ->
-          incoming_transaction_gas_usage
-      end
-    else
-      address_to_outcoming_transaction_gas_usage(address.hash)
-    end
-  end
-
-  defp address_hash_to_internal_transactions_limited_count_query(address_hash) do
+  defp address_hash_to_internal_transactions_limited_count_query(address_hash, options) do
     query_to_address_hash_wrapped =
       InternalTransaction
       |> InternalTransaction.where_nonpending_operation()
-      |> InternalTransaction.where_address_fields_match(address_hash, :to)
+      |> InternalTransaction.where_address_fields_match(address_hash, :to, options)
       |> InternalTransaction.where_is_different_from_parent_transaction()
       |> limit(@counters_limit)
       |> wrapped_union_subquery()
@@ -237,7 +281,7 @@ defmodule Explorer.Chain.Address.Counters do
     query_from_address_hash_wrapped =
       InternalTransaction
       |> InternalTransaction.where_nonpending_operation()
-      |> InternalTransaction.where_address_fields_match(address_hash, :from_address_hash)
+      |> InternalTransaction.where_address_fields_match(address_hash, :from_address_hash, options)
       |> InternalTransaction.where_is_different_from_parent_transaction()
       |> limit(@counters_limit)
       |> wrapped_union_subquery()
@@ -254,60 +298,16 @@ defmodule Explorer.Chain.Address.Counters do
     )
   end
 
-  def address_counters(address, options \\ []) do
-    validation_count_task =
-      Task.async(fn ->
-        address_to_validation_count(address.hash, options)
-      end)
-
-    Task.start_link(fn ->
-      transactions_count(address)
-    end)
-
-    Task.start_link(fn ->
-      token_transfers_count(address)
-    end)
-
-    Task.start_link(fn ->
-      gas_usage_count(address)
-    end)
-
-    [
-      validation_count_task
-    ]
-    |> Task.yield_many(:infinity)
-    |> Enum.map(fn {_task, res} ->
-      case res do
-        {:ok, result} ->
-          result
-
-        {:exit, reason} ->
-          raise "Query fetching address counters terminated: #{inspect(reason)}"
-
-        nil ->
-          raise "Query fetching address counters timed out."
-      end
-    end)
-    |> List.to_tuple()
-  end
-
-  def transactions_count(address) do
-    AddressTransactionsCount.fetch(address)
-  end
-
-  def token_transfers_count(address) do
-    AddressTokenTransfersCount.fetch(address)
-  end
-
-  def gas_usage_count(address) do
-    AddressTransactionsGasUsageSum.fetch(address)
-  end
-
   @spec address_limited_counters(Hash.t(), Keyword.t()) :: %{atom() => counter}
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   def address_limited_counters(address_hash, options) do
+    show_scam_tokens? = options[:show_scam_tokens?] || false
+
     cached_counters =
       Enum.reduce(@types, %{}, fn type, acc ->
-        case AddressTabsElementsCount.get_counter(type, address_hash) do
+        scam_flag = if type in [:token_transfers, :token_balances], do: show_scam_tokens?, else: false
+
+        case AddressTabsElementsCount.get_counter(type, address_hash, scam_flag) do
           {_datetime, counter, status} ->
             Map.put(acc, type, {status, counter})
 
@@ -340,7 +340,7 @@ defmodule Explorer.Chain.Address.Counters do
         stop = System.monotonic_time()
         diff = System.convert_time_unit(stop - start, :native, :millisecond)
 
-        Logger.info("Time consumed for transactions_from_count_task for #{address_hash} is #{diff}ms")
+        Logger.debug("Time consumed for transactions_from_count_task for #{address_hash} is #{diff}ms")
 
         AddressTabsElementsCount.save_transactions_counter_progress(address_hash, %{
           transactions_types: [:transactions_from],
@@ -365,7 +365,7 @@ defmodule Explorer.Chain.Address.Counters do
         stop = System.monotonic_time()
         diff = System.convert_time_unit(stop - start, :native, :millisecond)
 
-        Logger.info("Time consumed for transactions_to_count_task for #{address_hash} is #{diff}ms")
+        Logger.debug("Time consumed for transactions_to_count_task for #{address_hash} is #{diff}ms")
 
         AddressTabsElementsCount.save_transactions_counter_progress(address_hash, %{
           transactions_types: [:transactions_to],
@@ -390,7 +390,7 @@ defmodule Explorer.Chain.Address.Counters do
         stop = System.monotonic_time()
         diff = System.convert_time_unit(stop - start, :native, :millisecond)
 
-        Logger.info("Time consumed for transactions_created_contract_count_task for #{address_hash} is #{diff}ms")
+        Logger.debug("Time consumed for transactions_created_contract_count_task for #{address_hash} is #{diff}ms")
 
         AddressTabsElementsCount.save_transactions_counter_progress(address_hash, %{
           transactions_types: [:transactions_contract],
@@ -406,7 +406,7 @@ defmodule Explorer.Chain.Address.Counters do
       configure_task(
         :token_transfers,
         cached_counters,
-        address_to_token_transfer_count_query(address_hash),
+        address_to_token_transfer_count_query(address_hash, nil, nil, options),
         address_hash,
         options
       )
@@ -415,7 +415,7 @@ defmodule Explorer.Chain.Address.Counters do
       configure_task(
         :token_balances,
         cached_counters,
-        address_hash_to_token_balances_query(address_hash),
+        address_hash_to_token_balances_query(address_hash, options),
         address_hash,
         options
       )
@@ -442,7 +442,7 @@ defmodule Explorer.Chain.Address.Counters do
       configure_task(
         :internal_transactions,
         cached_counters,
-        address_hash_to_internal_transactions_limited_count_query(address_hash),
+        address_hash_to_internal_transactions_limited_count_query(address_hash, options),
         address_hash,
         options
       )
@@ -536,11 +536,24 @@ defmodule Explorer.Chain.Address.Counters do
     end
   end
 
+  defp run_or_ignore({ok, _counter}, _type, _address_hash, _show_scam_tokens?, _fun)
+       when ok in [:up_to_date, :limit_value],
+       do: nil
+
+  defp run_or_ignore(_, type, address_hash, show_scam_tokens?, fun) do
+    if !AddressTabsElementsCount.get_task(type, address_hash, show_scam_tokens?) do
+      AddressTabsElementsCount.set_task(type, address_hash, show_scam_tokens?)
+
+      Task.async(fun)
+    end
+  end
+
   defp configure_task(counter_type, cache, query, address_hash, options) do
     address_hash = to_string(address_hash)
+    show_scam_tokens? = options[:show_scam_tokens?] || false
     start = System.monotonic_time()
 
-    run_or_ignore(cache[counter_type], counter_type, address_hash, fn ->
+    run_or_ignore(cache[counter_type], counter_type, address_hash, show_scam_tokens?, fn ->
       result =
         query
         |> count(options, counter_type)
@@ -548,10 +561,10 @@ defmodule Explorer.Chain.Address.Counters do
       stop = System.monotonic_time()
       diff = System.convert_time_unit(stop - start, :native, :millisecond)
 
-      Logger.info("Time consumed for #{counter_type} counter task for #{address_hash} is #{diff}ms")
+      Logger.debug("Time consumed for #{counter_type} counter task for #{address_hash} is #{diff}ms")
 
-      AddressTabsElementsCount.set_counter(counter_type, address_hash, result)
-      AddressTabsElementsCount.drop_task(counter_type, address_hash)
+      AddressTabsElementsCount.set_counter(counter_type, address_hash, result, show_scam_tokens?)
+      AddressTabsElementsCount.drop_task(counter_type, address_hash, show_scam_tokens?)
 
       {counter_type, result}
     end)

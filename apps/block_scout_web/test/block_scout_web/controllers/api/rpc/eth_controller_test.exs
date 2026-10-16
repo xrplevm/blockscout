@@ -2,7 +2,7 @@
 defmodule BlockScoutWeb.API.RPC.EthControllerTest do
   use BlockScoutWeb.ConnCase, async: false
 
-  alias Explorer.Chain.Cache.Counters.{AddressesCount, AverageBlockTime}
+  alias Explorer.Chain.Cache.Counters.AverageBlockTime
   alias Explorer.Repo
 
   @first_topic_hex_string_1 "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65"
@@ -23,8 +23,6 @@ defmodule BlockScoutWeb.API.RPC.EthControllerTest do
     Indexer.Fetcher.OnDemand.CoinBalance.Supervisor.Case.start_supervised!(
       json_rpc_named_arguments: mocked_json_rpc_named_arguments
     )
-
-    start_supervised!(AddressesCount)
 
     Application.put_env(:explorer, AverageBlockTime, enabled: true, cache_period: 1_800_000)
 
@@ -72,7 +70,7 @@ defmodule BlockScoutWeb.API.RPC.EthControllerTest do
                |> post("/api/eth-rpc", params(api_params, [%{"address" => "badhash"}]))
                |> json_response(200)
 
-      assert %{"error" => "invalid address"} = response
+      assert %{"error" => %{"message" => "invalid address"}} = response
     end
 
     test "address with no logs", %{conn: conn, api_params: api_params} do
@@ -598,7 +596,7 @@ defmodule BlockScoutWeb.API.RPC.EthControllerTest do
                |> post("/api/eth-rpc", params(api_params, ["badHash"]))
                |> json_response(200)
 
-      assert %{"error" => "Query parameter 'address' is invalid"} = response
+      assert %{"error" => %{"message" => "Query parameter 'address' is invalid"}} = response
     end
 
     test "with a valid address that has no balance", %{conn: conn, api_params: api_params} do
@@ -609,7 +607,7 @@ defmodule BlockScoutWeb.API.RPC.EthControllerTest do
                |> post("/api/eth-rpc", params(api_params, [to_string(address.hash)]))
                |> json_response(200)
 
-      assert %{"error" => "Balance not found"} = response
+      assert %{"error" => %{"message" => "Balance not found"}} = response
     end
 
     test "with a valid address that has a balance", %{conn: conn, api_params: api_params} do
@@ -635,7 +633,7 @@ defmodule BlockScoutWeb.API.RPC.EthControllerTest do
                |> post("/api/eth-rpc", params(api_params, [to_string(address.hash), "earliest"]))
                |> json_response(200)
 
-      assert response["error"] == "Balance not found"
+      assert response["error"]["message"] == "Balance not found"
     end
 
     test "with a valid address that has an earliest balance", %{conn: conn, api_params: api_params} do
@@ -663,7 +661,7 @@ defmodule BlockScoutWeb.API.RPC.EthControllerTest do
                |> post("/api/eth-rpc", params(api_params, [to_string(address.hash), "pending"]))
                |> json_response(200)
 
-      assert response["error"] == "Balance not found"
+      assert response["error"]["message"] == "Balance not found"
     end
 
     test "with a valid address and a pending balance", %{conn: conn, api_params: api_params} do
@@ -710,6 +708,32 @@ defmodule BlockScoutWeb.API.RPC.EthControllerTest do
       assert response["result"] == "0x2"
     end
 
+    test "with a hexadecimal block provided", %{conn: conn, api_params: api_params} do
+      address = insert(:address)
+
+      insert(:fetched_balance, block_number: 1, address_hash: address.hash, value: 1)
+      insert(:fetched_balance, block_number: 2, address_hash: address.hash, value: 2)
+      insert(:fetched_balance, block_number: 3, address_hash: address.hash, value: 3)
+
+      assert response =
+               conn
+               |> post("/api/eth-rpc", params(api_params, [to_string(address.hash), "0x2"]))
+               |> json_response(200)
+
+      assert response["result"] == "0x2"
+    end
+
+    test "with an invalid hexadecimal block provided", %{conn: conn, api_params: api_params} do
+      address = insert(:address)
+
+      assert response =
+               conn
+               |> post("/api/eth-rpc", params(api_params, [to_string(address.hash), "0xnonsense"]))
+               |> json_response(200)
+
+      assert response["error"]["message"] == "Query parameter 'block' is invalid"
+    end
+
     test "with a block provided and no balance", %{conn: conn, api_params: api_params} do
       address = insert(:address)
 
@@ -720,7 +744,7 @@ defmodule BlockScoutWeb.API.RPC.EthControllerTest do
                |> post("/api/eth-rpc", params(api_params, [to_string(address.hash), "2"]))
                |> json_response(200)
 
-      assert response["error"] == "Balance not found"
+      assert response["error"]["message"] == "Balance not found"
     end
 
     test "with a batch of requests", %{conn: conn} do
@@ -739,7 +763,7 @@ defmodule BlockScoutWeb.API.RPC.EthControllerTest do
       assert response =
                conn
                |> put_req_header("content-type", "application/json")
-               |> post("/api/eth-rpc", Jason.encode!(params))
+               |> post("/api/eth-rpc", Utils.JSON.encode!(params))
                |> json_response(200)
 
       assert [

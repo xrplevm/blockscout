@@ -21,8 +21,14 @@ defmodule Explorer.Mixfile do
       lockfile: "../../mix.lock",
       package: package(),
       start_permanent: Mix.env() == :prod,
-      version: "11.2.2",
-      xref: [exclude: [BlockScoutWeb.Routers.WebRouter.Helpers, Indexer.Helper, Indexer.Fetcher.InternalTransaction]]
+      version: "12.0.2",
+      elixirc_options: [
+        no_warn_undefined: [
+          BlockScoutWeb.Routers.WebRouter.Helpers,
+          Indexer.Helper,
+          Indexer.Fetcher.InternalTransaction
+        ]
+      ]
     ]
   end
 
@@ -83,9 +89,7 @@ defmodule Explorer.Mixfile do
       {:ex_machina, "~> 2.3", only: [:test]},
       # ZSTD compression/decompression
       {:ezstd, "~> 1.2"},
-      {:exvcr, "~> 0.10", only: :test},
-      {:httpoison, "~> 2.0"},
-      {:jason, "~> 1.3"},
+      {:httpoison, "~> 3.0"},
       {:junit_formatter, ">= 0.0.0", only: [:test], runtime: false},
       {:libcluster, "~> 3.5"},
       # Log errors and application output to separate files
@@ -93,8 +97,7 @@ defmodule Explorer.Mixfile do
       {:logger_json, "~> 7.0"},
       {:math, "~> 0.7.0"},
       {:mock, "~> 0.3.0", only: [:test], runtime: false},
-      {:mox, "~> 1.1.0"},
-      {:poison, "~> 5.0.0"},
+      {:mox, "~> 1.3.2"},
       {:nimble_csv, "~> 1.1"},
       {:postgrex, ">= 0.0.0"},
       {:prometheus, "~> 6.0", override: true},
@@ -116,12 +119,12 @@ defmodule Explorer.Mixfile do
       # `Timex.Duration` for `Explorer.Chain.Cache.Counters.AverageBlockTime.average_block_time/0`
       {:timex, "~> 3.7.1"},
       {:con_cache, "~> 1.0"},
-      {:tesla, "~> 1.20.0"},
+      {:tesla, "~> 1.21.0"},
       {:cbor, "~> 1.0"},
       {:cloak_ecto, "~> 1.3.0"},
       {:redix, "~> 1.1"},
       {:hammer_backend_redis, "~> 7.0"},
-      {:typed_ecto_schema, "~> 0.4.1"},
+      {:typed_ecto_schema, "~> 0.5.0"},
       {:ueberauth, "~> 0.7"},
       {:recon, "~> 2.5"},
       {:varint, "~> 1.4"},
@@ -130,14 +133,15 @@ defmodule Explorer.Mixfile do
       {:oauth2, "~> 2.0"},
       {:siwe, github: "royal-markets/siwe-ex", ref: "51c9c08240eb7eea3c35693011f8d260cd9bb3be"},
       {:joken, "~> 2.6"},
-      {:joken_jwks, "~> 1.7.0"},
+      {:joken_jwks, "~> 1.8"},
       {:utils, in_umbrella: true},
-      {:dns, "~> 2.4.0"},
-      {:inet_cidr, "~> 1.0.0"},
       {:hammer, "~> 7.0"},
       {:ton, "~> 0.5.0"},
       {:mint, "~> 1.0"},
-      {:oban, "~> 2.19"}
+      # pooled HTTP client on top of mint, used for microservice requests
+      {:finch, "~> 0.18"},
+      {:oban, "~> 2.19"},
+      {:nimble_lz4, "~> 1.1"}
     ]
   end
 

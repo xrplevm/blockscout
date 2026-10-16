@@ -2,8 +2,23 @@
 defmodule Explorer.Market.MarketHistoryTest do
   use Explorer.DataCase
 
-  alias Explorer.Repo
   alias Explorer.Market.MarketHistory
+  alias Explorer.Repo
+
+  describe "prices_at_dates/3" do
+    test "returns primary coin history for the requested dates" do
+      first = insert(:market_history, date: ~D[2026-07-20], secondary_coin: false)
+      second = insert(:market_history, date: ~D[2026-07-21], secondary_coin: false)
+      insert(:market_history, date: ~D[2026-07-20], secondary_coin: true)
+
+      assert MarketHistory.prices_at_dates([first.date, second.date, ~D[2026-07-22]])
+             |> MapSet.new() == MapSet.new([first, second])
+    end
+
+    test "returns no records for an empty date list" do
+      assert MarketHistory.prices_at_dates([]) == []
+    end
+  end
 
   describe "bulk_insert/1" do
     test "replaces existing records" do
@@ -77,6 +92,38 @@ defmodule Explorer.Market.MarketHistoryTest do
     }
 
     MarketHistory.bulk_insert([new_record])
+
+    fetched_record = Repo.get_by(MarketHistory, date: date)
+    assert fetched_record.closing_price == old_record.closing_price
+    assert fetched_record.opening_price == old_record.opening_price
+  end
+
+  test "keeps existing opening price when the new record has no opening price" do
+    date = ~D[2018-04-01]
+
+    {:ok, old_record} =
+      Repo.insert(%MarketHistory{date: date, closing_price: Decimal.new(1), opening_price: Decimal.new(5)})
+
+    new_record = %{
+      date: date,
+      closing_price: Decimal.new(2),
+      opening_price: nil
+    }
+
+    assert {:ok, {1, _}} = MarketHistory.bulk_insert([new_record])
+
+    fetched_record = Repo.get_by(MarketHistory, date: date)
+    assert fetched_record.closing_price == Decimal.new(2)
+    assert fetched_record.opening_price == old_record.opening_price
+  end
+
+  test "doesn't replace existing records with zero closing price and no opening price" do
+    date = ~D[2018-04-01]
+
+    {:ok, old_record} =
+      Repo.insert(%MarketHistory{date: date, closing_price: Decimal.new(1), opening_price: Decimal.new(1)})
+
+    assert {:ok, {0, _}} = MarketHistory.bulk_insert([%{date: date, closing_price: Decimal.new(0), opening_price: nil}])
 
     fetched_record = Repo.get_by(MarketHistory, date: date)
     assert fetched_record.closing_price == old_record.closing_price

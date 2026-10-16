@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Chain types from .github/workflows/generate-swagger.yml (excluding "default" and MUD).
+# Chain types from .github/workflows/generate-swagger.yml (excluding "default").
 CHAIN_TYPES=(
   arbitrum
   arc
   blackfort
+  eden
   ethereum
   filecoin
   neon

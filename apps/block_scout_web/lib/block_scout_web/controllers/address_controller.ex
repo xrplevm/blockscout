@@ -5,7 +5,8 @@ defmodule BlockScoutWeb.AddressController do
 
   import BlockScoutWeb.Account.AuthController, only: [current_user: 1]
 
-  import BlockScoutWeb.Chain, only: [paging_options: 1, next_page_params: 3, split_list_by_page: 1]
+  import BlockScoutWeb.Chain, only: [paging_options: 1]
+  import BlockScoutWeb.LegacyPagingHelper, only: [next_page_params: 3, split_list_by_page: 1]
 
   import BlockScoutWeb.Models.GetAddressTags, only: [get_address_tags: 2]
 
@@ -19,7 +20,7 @@ defmodule BlockScoutWeb.AddressController do
   alias Explorer.{Chain, Market}
   alias Explorer.Chain.{Address, Wei}
   alias Explorer.Chain.Address.Counters
-  alias Explorer.Chain.Cache.Counters.AddressesCount
+  alias Explorer.Chain.Cache.Counters.{AddressCounters, AddressesAggregates}
   alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
   alias Indexer.Fetcher.OnDemand.ContractCode, as: ContractCodeOnDemand
   alias Phoenix.View
@@ -64,16 +65,6 @@ defmodule BlockScoutWeb.AddressController do
     exchange_rate = Market.get_coin_exchange_rate()
     total_supply = Chain.total_supply()
 
-    items_count_str = Map.get(params, "items_count")
-
-    items_count =
-      if items_count_str do
-        {items_count, _} = Integer.parse(items_count_str)
-        items_count
-      else
-        0
-      end
-
     items =
       addresses_page
       |> Enum.with_index(1)
@@ -82,7 +73,7 @@ defmodule BlockScoutWeb.AddressController do
           AddressView,
           "_tile.html",
           address: address,
-          index: items_count + index,
+          index: index,
           exchange_rate: exchange_rate,
           total_supply: total_supply,
           transaction_count: address.transactions_count
@@ -103,7 +94,7 @@ defmodule BlockScoutWeb.AddressController do
 
     render(conn, "index.html",
       current_path: Controller.current_full_path(conn),
-      address_count: AddressesCount.fetch(),
+      address_count: AddressesAggregates.get_addresses_count(),
       total_supply: total_supply
     )
   end
@@ -126,7 +117,7 @@ defmodule BlockScoutWeb.AddressController do
       render(
         conn,
         "_show_address_transactions.html",
-        address: address,
+        address: fully_preloaded_address,
         coin_balance_status: CoinBalanceOnDemand.trigger_fetch(ip, address),
         exchange_rate: Market.get_coin_exchange_rate(),
         filter: params["filter"],
@@ -176,16 +167,18 @@ defmodule BlockScoutWeb.AddressController do
   def address_counters(conn, %{"id" => address_hash_string}) do
     with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
          {:ok, address} <- Chain.hash_to_address(address_hash) do
-      {validation_count} = Counters.address_counters(address)
+      validation_count = Counters.address_to_validation_count(address.hash, [])
 
-      transactions_from_db = address.transactions_count || 0
-      token_transfers_from_db = address.token_transfers_count || 0
-      address_gas_usage_from_db = address.gas_used || 0
+      %{
+        transactions_count: transactions_count,
+        token_transfers_count: token_transfers_count,
+        gas_used: gas_used
+      } = AddressCounters.fetch(address)
 
       json(conn, %{
-        transaction_count: transactions_from_db,
-        token_transfer_count: token_transfers_from_db,
-        gas_usage_count: address_gas_usage_from_db,
+        transaction_count: transactions_count,
+        token_transfer_count: token_transfers_count,
+        gas_usage_count: gas_used,
         validation_count: validation_count
       })
     else

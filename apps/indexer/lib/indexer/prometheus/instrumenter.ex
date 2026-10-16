@@ -39,7 +39,13 @@ defmodule Indexer.Prometheus.Instrumenter do
 
   @counter [name: :import_errors_count, help: "Number of database import errors"]
 
-  @gauge [name: :memory_consumed, labels: [:fetcher], help: "Amount of memory consumed by fetchers (MB)"]
+  @gauge [name: :memory_consumed, labels: [:fetcher], help: "Amount of memory consumed by all processes (MB)"]
+
+  @gauge [
+    name: :memory_consumed_indexer_fetchers,
+    labels: [:fetcher],
+    help: "Amount of memory consumed by indexer fetchers and on-demand fetchers (MB)"
+  ]
 
   @gauge [name: :latest_block_number, help: "Latest block number"]
 
@@ -47,12 +53,14 @@ defmodule Indexer.Prometheus.Instrumenter do
 
   # metrics of indexing monitor
   @gauge [name: :missing_blocks_count, help: "Number of blocks missing in the chain"]
+  @gauge [name: :refetch_needed_blocks_count, help: "Number of consensus blocks that require refetch"]
   @gauge [
     name: :missing_internal_transactions_count,
     help: "Number of blocks with not yet fetched internal transactions"
   ]
   @gauge [name: :missing_current_token_balances_count, help: "Number of missing current token balances"]
   @gauge [name: :missing_archival_token_balances_count, help: "Number of missing token balances in history"]
+  @gauge [name: :missing_address_native_coin_balances_count, help: "Number of missing address native coin balances"]
   @gauge [name: :unfetched_token_instances_count, help: "Number of unfetched token instances"]
   @gauge [name: :failed_token_instances_metadata_count, help: "Number of failed token instances metadata"]
   @gauge [name: :token_instances_not_uploaded_to_cdn_count, help: "Token instances not uploaded to CDN"]
@@ -148,6 +156,16 @@ defmodule Indexer.Prometheus.Instrumenter do
     Gauge.set([name: :memory_consumed, labels: [fetcher]], memory)
   end
 
+  @doc """
+  Defines the metric for memory consumed by a specific indexer or on-demand fetcher (in MB).
+  """
+  @spec set_memory_consumed_indexer_fetchers(fetcher :: nil | atom() | String.t(), memory :: float()) :: :ok
+  def set_memory_consumed_indexer_fetchers(nil, _memory), do: :ok
+
+  def set_memory_consumed_indexer_fetchers(fetcher, memory) do
+    Gauge.set([name: :memory_consumed_indexer_fetchers, labels: [fetcher]], memory)
+  end
+
   @spec set_latest_block_number(number :: integer()) :: :ok
   defp set_latest_block_number(number) do
     Gauge.set([name: :latest_block_number], number)
@@ -209,6 +227,12 @@ defmodule Indexer.Prometheus.Instrumenter do
   def missing_blocks_count(value), do: Gauge.set([name: :missing_blocks_count], value)
 
   @doc """
+  Defines the metric for the number of consensus blocks that require refetch.
+  """
+  @spec refetch_needed_blocks_count(integer()) :: :ok
+  def refetch_needed_blocks_count(value), do: Gauge.set([name: :refetch_needed_blocks_count], value)
+
+  @doc """
   Defines the metric for the number of blocks with not yet fetched internal transactions.
   """
   @spec missing_internal_transactions_count(integer()) :: :ok
@@ -220,6 +244,13 @@ defmodule Indexer.Prometheus.Instrumenter do
   @spec missing_current_token_balances_count(integer()) :: :ok
   def missing_current_token_balances_count(value),
     do: Gauge.set([name: :missing_current_token_balances_count], value)
+
+  @doc """
+  Defines the metric for the number of missing address native coin balances.
+  """
+  @spec missing_address_native_coin_balances_count(integer()) :: :ok
+  def missing_address_native_coin_balances_count(value),
+    do: Gauge.set([name: :missing_address_native_coin_balances_count], value)
 
   @doc """
   Defines the metric for the number of missing token balances in history.

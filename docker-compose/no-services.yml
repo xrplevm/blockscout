@@ -34,7 +34,7 @@ services:
         DISABLE_WEBAPP: "false"
         API_V1_WRITE_METHODS_DISABLED: "false"
         ADMIN_PANEL_ENABLED: ""
-        RELEASE_VERSION: 11.2.2
+        RELEASE_VERSION: 12.0.2
         CHAIN_TYPE: ethereum
     links:
       - db:database
@@ -57,3 +57,6 @@ services:
       service: proxy
     volumes:
       - "./proxy/explorer.conf.template:/etc/nginx/templates/default.conf.template"
+
+volumes:
+  backend-dets:

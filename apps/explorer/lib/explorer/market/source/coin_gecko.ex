@@ -5,10 +5,13 @@ defmodule Explorer.Market.Source.CoinGecko do
   """
 
   alias Explorer.Chain.Hash
-  alias Explorer.Helper
   alias Explorer.Market.{Source, Token}
 
   @behaviour Source
+
+  # CoinGecko rejects `/coins/markets` requests with `per_page` above 250, so a
+  # larger configured batch size is capped here and processed across several requests.
+  @coins_markets_max_per_page 250
 
   @impl Source
   def native_coin_fetching_enabled?, do: not is_nil(config(:coin_id))
@@ -41,23 +44,29 @@ defmodule Explorer.Market.Source.CoinGecko do
 
   @impl Source
   def fetch_tokens(state, batch_size) do
-    {to_fetch, remaining} = Enum.split(state, batch_size)
+    per_page = min(batch_size, @coins_markets_max_per_page)
+    {to_fetch, remaining} = Enum.split(state, per_page)
 
     joined_token_ids = Enum.map_join(to_fetch, ",", & &1.id)
 
     case Source.http_request(
            base_url()
-           |> URI.append_path("/simple/price")
-           |> URI.append_query("vs_currencies=#{config(:currency)}")
-           |> URI.append_query("include_market_cap=true")
-           |> URI.append_query("include_24hr_vol=true")
+           |> URI.append_path("/coins/markets")
+           |> URI.append_query("vs_currency=#{config(:currency)}")
            |> URI.append_query("ids=#{joined_token_ids}")
+           |> URI.append_query("per_page=#{per_page}")
+           |> URI.append_query("page=1")
            |> URI.to_string(),
-           headers()
+           headers(),
+           __MODULE__,
+           :coins_markets
          ) do
-      {:ok, data} ->
+      {:ok, data} when is_list(data) ->
         to_import = put_market_data_to_tokens(to_fetch, data)
         {:ok, remaining, Enum.empty?(remaining), to_import}
+
+      {:ok, unexpected_response} ->
+        {:error, Source.unexpected_response_error("CoinGecko", unexpected_response)}
 
       {:error, _reason} = error ->
         error
@@ -82,27 +91,20 @@ defmodule Explorer.Market.Source.CoinGecko do
   @impl Source
   def fetch_market_cap_history(previous_days) do
     with coin_id when not is_nil(coin_id) <- config(:coin_id),
-         {:ok, %{"market_caps" => market_caps_dates}} <-
+         {:ok, %{"market_caps" => market_caps}} <-
            Source.http_request(
              base_url()
              |> URI.append_path("/coins/#{coin_id}/market_chart")
              |> URI.append_query("vs_currency=#{config(:currency)}")
              |> URI.append_query("days=#{previous_days}")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :coins_market_chart_market_cap
            ) do
-      market_caps =
-        case market_caps_dates do
-          [_ | market_caps] -> market_caps
-          _ -> []
-        end
-
       result =
-        for {[_, market_cap], [date, _]} <- Stream.zip(market_caps, market_caps_dates) do
-          %{
-            market_cap: Source.to_decimal(market_cap),
-            date: Helper.unix_timestamp_to_date(date, :millisecond)
-          }
+        for %{date: date, closing: market_cap} <- fold_into_daily_records(market_caps) do
+          %{market_cap: market_cap, date: date}
         end
 
       {:ok, result}
@@ -133,7 +135,9 @@ defmodule Explorer.Market.Source.CoinGecko do
              |> URI.append_query("developer_data=false")
              |> URI.append_query("sparkline=false")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :coins_details
            ) do
       {:ok,
        %Token{
@@ -166,7 +170,9 @@ defmodule Explorer.Market.Source.CoinGecko do
              |> URI.append_path("/coins/list")
              |> URI.append_query("include_platform=true")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :coins_list
            ) do
       tokens
       |> Enum.reduce([], &reduce_coingecko_token(&1, &2, platform))
@@ -214,19 +220,22 @@ defmodule Explorer.Market.Source.CoinGecko do
   end
 
   defp put_market_data_to_tokens(tokens, market_data) do
-    currency = config(:currency)
-    market_cap = currency <> "_market_cap"
-    volume_24h = currency <> "_24h_vol"
+    # /coins/markets returns an array of coin objects, each carrying its "id".
+    # Note: `total_supply` from the response is intentionally not imported: `Token.total_supply`
+    # holds the raw on-chain `totalSupply()` value maintained by the token total supply fetchers,
+    # while CoinGecko reports a unit-scaled amount.
+    market_data_map = Map.new(market_data, &{&1["id"], &1})
 
     tokens
     |> Enum.reduce([], fn token, to_import ->
-      case Map.fetch(market_data, token.id) do
-        {:ok, %{^currency => fiat_value, ^market_cap => market_cap, ^volume_24h => volume_24h}} ->
+      case Map.fetch(market_data_map, token.id) do
+        {:ok, coin_data} ->
           token_with_market_data =
             Map.merge(token, %{
-              fiat_value: Source.to_decimal(fiat_value),
-              circulating_market_cap: Source.to_decimal(market_cap),
-              volume_24h: Source.to_decimal(volume_24h)
+              fiat_value: Source.to_decimal(coin_data["current_price"]),
+              circulating_market_cap: Source.to_decimal(coin_data["market_cap"]),
+              volume_24h: Source.to_decimal(coin_data["total_volume"]),
+              circulating_supply: Source.to_decimal(coin_data["circulating_supply"])
             })
 
           [token_with_market_data | to_import]
@@ -247,20 +256,16 @@ defmodule Explorer.Market.Source.CoinGecko do
              |> URI.append_query("vs_currency=#{config(:currency)}")
              |> URI.append_query("days=#{previous_days}")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :coins_market_chart_price
            ) do
-      closings =
-        case prices do
-          [_ | closings] -> closings
-          _ -> []
-        end
-
       result =
-        for {[date, opening_price], [_, closing_price]} <- Stream.zip(prices, closings) do
+        for %{date: date, opening: opening_price, closing: closing_price} <- fold_into_daily_records(prices) do
           %{
-            closing_price: Source.to_decimal(closing_price),
-            date: Helper.unix_timestamp_to_date(date, :millisecond),
-            opening_price: Source.to_decimal(opening_price) || Source.to_decimal(closing_price),
+            closing_price: closing_price,
+            date: date,
+            opening_price: opening_price,
             secondary_coin: secondary_coin?
           }
         end
@@ -271,6 +276,68 @@ defmodule Explorer.Market.Source.CoinGecko do
       {:ok, nil} -> {:ok, []}
       {:error, _reason} = error -> error
     end
+  end
+
+  # `/coins/{id}/market_chart` returns one point per day (at 00:00 UTC) only for
+  # ranges longer than 90 days. Shorter ranges, including the periodic `days=1`
+  # refetch of the history fetcher, come with hourly or 5-minute granularity, so the
+  # points are folded into a single record per UTC date here:
+  #
+  #   * `opening` is the first value of the date;
+  #   * `closing` is the first value of the next date, or the last value of the
+  #     range for its latest date (CoinGecko appends the current value as the last
+  #     point, so this is the live price for today).
+  #
+  # The opening value of the earliest date is only known when the range starts at
+  # the beginning of that date. A range starting mid-day (e.g. the `days=1` refetch
+  # covers the last 24 hours) yields `nil` instead, so that the value already stored
+  # in `market_history` is kept by the upsert.
+  @day_start_tolerance ~T[01:00:00]
+
+  @spec fold_into_daily_records([[number() | nil]]) :: [
+          %{date: Date.t(), opening: Decimal.t() | nil, closing: Decimal.t()}
+        ]
+  defp fold_into_daily_records(points) when is_list(points) do
+    points
+    |> Enum.flat_map(fn
+      [timestamp, value] when is_integer(timestamp) and not is_nil(value) ->
+        [{DateTime.from_unix!(timestamp, :millisecond), Source.to_decimal(value)}]
+
+      _ ->
+        []
+    end)
+    |> Enum.sort_by(fn {datetime, _value} -> datetime end, DateTime)
+    |> Enum.chunk_by(fn {datetime, _value} -> DateTime.to_date(datetime) end)
+    |> fold_daily_chunks(true, [])
+  end
+
+  defp fold_into_daily_records(_points), do: []
+
+  defp fold_daily_chunks([], _earliest?, acc), do: Enum.reverse(acc)
+
+  defp fold_daily_chunks([[{first_datetime, first_value} | _] = chunk | rest], earliest?, acc) do
+    closing =
+      case rest do
+        [[{_next_datetime, next_first_value} | _] | _] -> next_first_value
+        [] -> chunk |> List.last() |> elem(1)
+      end
+
+    opening =
+      if earliest? and not day_start?(first_datetime) do
+        nil
+      else
+        first_value
+      end
+
+    record = %{date: DateTime.to_date(first_datetime), opening: opening, closing: closing}
+
+    fold_daily_chunks(rest, false, [record | acc])
+  end
+
+  defp day_start?(datetime) do
+    datetime
+    |> DateTime.to_time()
+    |> Time.compare(@day_start_tolerance) == :lt
   end
 
   defp base_url do

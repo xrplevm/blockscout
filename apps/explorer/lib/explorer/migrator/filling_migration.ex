@@ -93,11 +93,11 @@ defmodule Explorer.Migrator.FillingMigration do
 
   @doc """
     This callback performs the migration for a batch of entities. After collecting
-    identifiers, the callback processes a batch of size `batch_size()`. A total of
-    `concurrency()` callbacks run in parallel as separate tasks, and the system
-    waits for all callbacks to complete. Since no timeout is specified for tasks
-    invoking this callback, implementations should complete within a reasonable
-    time period.
+    identifiers, the callback processes a batch produced by `split_into_batches/1`
+    (by default, `batch_size()` identifiers). A total of `concurrency()` callbacks
+    run in parallel as separate tasks, and the system waits for all callbacks to
+    complete. Since no timeout is specified for tasks invoking this callback,
+    implementations should complete within a reasonable time period.
 
     After all callback tasks finish, the system schedules gathering of the next
     batch of identifiers according to the timeout configuration parameter in the
@@ -109,9 +109,25 @@ defmodule Explorer.Migrator.FillingMigration do
       usage during migration.
 
     ## Returns
-    N/A
+    Number of processed elements.
   """
-  @callback update_batch([any()]) :: any()
+  @callback update_batch([any()]) :: non_neg_integer()
+
+  @doc """
+    This callback splits the identifiers returned by `last_unprocessed_identifiers/1`
+    into batches. Each batch is processed by `update_batch/1` in a separate task.
+
+    The default implementation splits the identifiers into chunks of `batch_size()`
+    elements. Implementations can override it, e.g. to keep related identifiers in
+    the same batch or to balance the amount of work between the tasks.
+
+    ## Parameters
+    - `identifiers`: The list of identifiers returned by `last_unprocessed_identifiers/1`.
+
+    ## Returns
+    A list of batches, each of which is a list of identifiers.
+  """
+  @callback split_into_batches([any()]) :: [[any()]]
 
   @doc """
     This callback updates the migration completion status in the cache.
@@ -253,8 +269,8 @@ defmodule Explorer.Migrator.FillingMigration do
       # If no identifiers remain, executes cleanup tasks and completes the migration.
       # Otherwise, processes the batch and continues migration.
       #
-      # When identifiers are found, the function splits them into chunks and processes each
-      # chunk by spawning a task that calls update_batch. It waits for all tasks to complete
+      # When identifiers are found, the function splits them into batches via split_into_batches
+      # and processes each batch by spawning a task that calls update_batch. It waits for all tasks to complete
       # with no timeout limit. After processing, it checkpoints the state to allow using it
       # after restart, then schedules the next batch processing using the configured timeout
       # from the application config (defaults to 0ms if not set).
@@ -279,10 +295,12 @@ defmodule Explorer.Migrator.FillingMigration do
             {:stop, :normal, new_state}
 
           {identifiers, new_state} ->
-            identifiers
-            |> Enum.chunk_every(batch_size())
-            |> Enum.map(&run_task/1)
-            |> Task.await_many(:infinity)
+            migrated_count =
+              identifiers
+              |> split_into_batches()
+              |> Enum.map(&run_task/1)
+              |> Task.await_many(:infinity)
+              |> Enum.sum()
 
             unquote do
               if !opts[:skip_meta_update?] do
@@ -292,7 +310,10 @@ defmodule Explorer.Migrator.FillingMigration do
               end
             end
 
-            schedule_batch_migration()
+            case migrated_count do
+              0 -> schedule_batch_migration(0)
+              _ -> schedule_batch_migration()
+            end
 
             {:noreply, new_state}
         end
@@ -354,7 +375,11 @@ defmodule Explorer.Migrator.FillingMigration do
         []
       end
 
-      defoverridable on_finish: 0, before_start: 0, dependent_from_migrations: 0
+      def split_into_batches(identifiers) do
+        Enum.chunk_every(identifiers, batch_size())
+      end
+
+      defoverridable on_finish: 0, before_start: 0, dependent_from_migrations: 0, split_into_batches: 1
     end
   end
 end

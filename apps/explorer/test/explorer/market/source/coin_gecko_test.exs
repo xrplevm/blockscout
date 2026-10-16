@@ -147,9 +147,9 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
         Conn.resp(conn, 200, json_coins_list())
       end)
 
-      Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
-        assert conn.query_string == "vs_currencies=aed&include_market_cap=true&include_24hr_vol=true&ids=4,3,1"
-        Conn.resp(conn, 200, json_simple_price())
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        assert conn.query_string == "vs_currency=aed&ids=4,3,1&per_page=5&page=1"
+        Conn.resp(conn, 200, json_coins_markets())
       end)
 
       assert {:ok, [], true,
@@ -165,7 +165,8 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("100"),
                   fiat_value: Decimal.new("1"),
-                  volume_24h: Decimal.new("10")
+                  volume_24h: Decimal.new("10"),
+                  circulating_supply: Decimal.new("1000000")
                 },
                 %{
                   id: "3",
@@ -178,7 +179,8 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("300.03"),
                   fiat_value: Decimal.new("3.3"),
-                  volume_24h: Decimal.new("33.333")
+                  volume_24h: Decimal.new("33.333"),
+                  circulating_supply: Decimal.new("3000000")
                 },
                 %{
                   id: "4",
@@ -191,7 +193,8 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("4"),
                   fiat_value: Decimal.new("4"),
-                  volume_24h: Decimal.new("4")
+                  volume_24h: Decimal.new("4"),
+                  circulating_supply: Decimal.new("4000000")
                 }
               ]} == CoinGecko.fetch_tokens(nil, 5)
     end
@@ -202,9 +205,9 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
         Conn.resp(conn, 200, json_coins_list())
       end)
 
-      Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
-        assert conn.query_string == "vs_currencies=aed&include_market_cap=true&include_24hr_vol=true&ids=4,3"
-        Conn.resp(conn, 200, json_simple_price())
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        assert conn.query_string == "vs_currency=aed&ids=4,3&per_page=2&page=1"
+        Conn.resp(conn, 200, json_coins_markets())
       end)
 
       assert {:ok,
@@ -232,7 +235,8 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("300.03"),
                   fiat_value: Decimal.new("3.3"),
-                  volume_24h: Decimal.new("33.333")
+                  volume_24h: Decimal.new("33.333"),
+                  circulating_supply: Decimal.new("3000000")
                 },
                 %{
                   id: "4",
@@ -245,9 +249,36 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("4"),
                   fiat_value: Decimal.new("4"),
-                  volume_24h: Decimal.new("4")
+                  volume_24h: Decimal.new("4"),
+                  circulating_supply: Decimal.new("4000000")
                 }
               ]} == CoinGecko.fetch_tokens(nil, 2)
+    end
+
+    test "caps per_page at the CoinGecko limit of 250", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/coins/list", fn conn ->
+        Conn.resp(conn, 200, json_coins_list())
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        assert conn.query_string == "vs_currency=aed&ids=4,3,1&per_page=250&page=1"
+        Conn.resp(conn, 200, json_coins_markets())
+      end)
+
+      assert {:ok, [], true, [_, _, _]} = CoinGecko.fetch_tokens(nil, 500)
+    end
+
+    test "returns an error for a non-list /coins/markets body", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/coins/list", fn conn ->
+        Conn.resp(conn, 200, json_coins_list())
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        Conn.resp(conn, 200, ~s({"status": {"error_code": 10005, "error_message": "plan limit"}}))
+      end)
+
+      assert {:error, error} = CoinGecko.fetch_tokens(nil, 5)
+      assert error =~ "CoinGecko"
     end
   end
 
@@ -292,6 +323,55 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   date: ~D[2025-02-14],
                   opening_price: Decimal.new("3.3"),
                   closing_price: Decimal.new("4.4"),
+                  secondary_coin: false
+                }
+              ]} == CoinGecko.fetch_native_coin_price_history(3)
+    end
+
+    test "folds intraday points into one record per date", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/coins/native_coin_id/market_chart", fn conn ->
+        assert conn.query_string == "vs_currency=aed&days=1"
+
+        Conn.resp(conn, 200, json_coin_market_chart_intraday())
+      end)
+
+      # The range starts mid-day, so the opening price of its first date is unknown;
+      # the closing price of a date is the first price of the next one, and the
+      # closing price of the latest date is the last (live) price.
+      assert {:ok,
+              [
+                %{
+                  date: ~D[2025-02-13],
+                  opening_price: nil,
+                  closing_price: Decimal.new("12.5"),
+                  secondary_coin: false
+                },
+                %{
+                  date: ~D[2025-02-14],
+                  opening_price: Decimal.new("12.5"),
+                  closing_price: Decimal.new("13.5"),
+                  secondary_coin: false
+                }
+              ]} == CoinGecko.fetch_native_coin_price_history(1)
+    end
+
+    test "skips points with null values", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/coins/native_coin_id/market_chart", fn conn ->
+        Conn.resp(conn, 200, ~s({"prices": [[1739318400000, null], [1739404800000, 2.2], [1739491200000, 3.3]]}))
+      end)
+
+      assert {:ok,
+              [
+                %{
+                  date: ~D[2025-02-13],
+                  opening_price: Decimal.new("2.2"),
+                  closing_price: Decimal.new("3.3"),
+                  secondary_coin: false
+                },
+                %{
+                  date: ~D[2025-02-14],
+                  opening_price: Decimal.new("3.3"),
+                  closing_price: Decimal.new("3.3"),
                   secondary_coin: false
                 }
               ]} == CoinGecko.fetch_native_coin_price_history(3)
@@ -395,6 +475,20 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   market_cap: Decimal.new("4.4")
                 }
               ]} == CoinGecko.fetch_market_cap_history(3)
+    end
+
+    test "folds intraday points into one record per date", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/coins/native_coin_id/market_chart", fn conn ->
+        assert conn.query_string == "vs_currency=aed&days=1"
+
+        Conn.resp(conn, 200, json_coin_market_chart_intraday())
+      end)
+
+      assert {:ok,
+              [
+                %{date: ~D[2025-02-13], market_cap: Decimal.new("120.5")},
+                %{date: ~D[2025-02-14], market_cap: Decimal.new("130.5")}
+              ]} == CoinGecko.fetch_market_cap_history(1)
     end
   end
 
@@ -704,24 +798,55 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
     """
   end
 
-  defp json_simple_price do
+  defp json_coins_markets do
+    """
+    [
+      {
+        "id": "1",
+        "current_price": 1,
+        "market_cap": 100,
+        "total_volume": 10,
+        "circulating_supply": 1000000,
+        "total_supply": 2000000
+      },
+      {
+        "id": "3",
+        "current_price": 3.3,
+        "market_cap": 300.03,
+        "total_volume": 33.333,
+        "circulating_supply": 3000000,
+        "total_supply": 6000000
+      },
+      {
+        "id": "4",
+        "current_price": 4,
+        "market_cap": 4,
+        "total_volume": 4,
+        "circulating_supply": 4000000,
+        "total_supply": 8000000
+      }
+    ]
+    """
+  end
+
+  # 5-minute granularity response of `days=1`: starts at 2025-02-13 15:00:00 UTC,
+  # crosses midnight and ends with the live point at 2025-02-14 07:28:26 UTC.
+  defp json_coin_market_chart_intraday do
     """
     {
-      "1": {
-        "aed": 1,
-        "aed_market_cap": 100,
-        "aed_24h_vol": 10
-      },
-      "3": {
-        "aed": 3.3,
-        "aed_market_cap": 300.03,
-        "aed_24h_vol": 33.333
-      },
-      "4": {
-        "aed": 4,
-        "aed_market_cap": 4,
-        "aed_24h_vol": 4
-      }
+      "prices": [
+        [1739458800000, 10.5],
+        [1739490900000, 11.5],
+        [1739491380000, 12.5],
+        [1739518106000, 13.5]
+      ],
+      "market_caps": [
+        [1739458800000, 100.5],
+        [1739490900000, 110.5],
+        [1739491380000, 120.5],
+        [1739518106000, 130.5]
+      ],
+      "total_volumes": []
     }
     """
   end

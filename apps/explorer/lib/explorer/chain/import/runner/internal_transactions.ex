@@ -9,7 +9,6 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
 
   alias Ecto.Adapters.SQL
   alias Ecto.{Changeset, Multi, Repo}
-  alias EthereumJSONRPC.Utility.RangesHelper
 
   alias Explorer.Chain.{
     Address,
@@ -24,6 +23,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
 
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Import.Runner
+  alias Explorer.Helper
   alias Explorer.Migrator.DeleteZeroValueInternalTransactions
   alias Explorer.Prometheus.Instrumenter
   alias Explorer.Repo, as: ExplorerRepo
@@ -35,6 +35,12 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
 
   # milliseconds
   @timeout 60_000
+
+  # Maximum number of characters kept from a trace error message. Error messages are stored in
+  # `transaction_errors.message` and copied to `transactions.error`; both columns are `varchar(255)`,
+  # and some clients (custom precompiles, L2 system contracts) return much longer errors that would
+  # otherwise fail the whole import batch with `value too long for type character varying(255)`.
+  @max_error_length 255
 
   @type imported :: [InternalTransaction.t()]
 
@@ -209,9 +215,14 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
 
   @impl Runner
   def prepare_data(changes_list) do
-    changes_list
-    |> maybe_reject_zero_value()
-    |> adjust_insert_params()
+    # Note: zero-value internal transactions are NOT rejected here. `prepare_data/1`
+    # is applied to the params before the block-completeness validation
+    # (`invalid_block_numbers/2`) runs. Dropping the only internal transaction of a
+    # transaction at this point would make that transaction look permanently
+    # un-traced, marking the whole block invalid and leaving it stuck in
+    # `pending_block_operations` forever. The zero-value rejection is instead applied
+    # right before insert (see `insert/3`), so it never affects validation.
+    adjust_insert_params(changes_list)
   end
 
   def run_insert_only(changes_list, %{timestamps: timestamps} = options) when is_map(options) do
@@ -255,6 +266,9 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
 
     ordered_changes_list =
       valid_internal_transactions
+      # Reject zero-value internal transactions only here, right before the DB write,
+      # so it never affects block-completeness validation (see `prepare_data/1`).
+      |> maybe_reject_zero_value()
       |> Enum.map(fn internal_transaction ->
         Map.put(internal_transaction, :trace_address, nil)
       end)
@@ -445,8 +459,11 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     else
       blocks_map = Map.new(transactions, &{&1.block_number, &1.block_hash})
 
+      existing_transactions_indexes = MapSet.new(transactions, &{&1.block_number, &1.index})
+
       valid_internal_transactions =
         internal_transactions_params
+        |> Enum.filter(&MapSet.member?(existing_transactions_indexes, {&1.block_number, &1.transaction_index}))
         |> Enum.group_by(& &1.block_number)
         |> Map.drop(invalid_block_numbers)
         |> Enum.flat_map(fn item ->
@@ -577,19 +594,41 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     end
   end
 
+  # Makes a trace error message storable: non-printable binaries are escaped via `inspect/2`, then the
+  # result is capped at `@max_error_length` code points. PostgreSQL `varchar(n)` counts code points, not
+  # bytes and not graphemes, so `String.slice/3` (grapheme-based) is not enough: a grapheme made of a base
+  # character plus combining marks is several code points. The cap is applied after escaping, since
+  # escaping can only make the message longer.
   defp sanitize_error(entry) do
     error = Map.get(entry, :error)
 
     sanitized_error =
-      if is_binary(error) and not String.printable?(error) do
+      if is_binary(error) do
         error
-        |> inspect(binaries: :as_strings)
-        |> String.trim("\"")
+        |> escape_non_printable_error()
+        |> truncate_code_points(@max_error_length)
       else
         error
       end
 
     Map.put(entry, :error, sanitized_error)
+  end
+
+  defp truncate_code_points(string, max_code_points) do
+    string
+    |> String.codepoints()
+    |> Enum.take(max_code_points)
+    |> Enum.join()
+  end
+
+  defp escape_non_printable_error(error) do
+    if String.printable?(error) do
+      error
+    else
+      error
+      |> inspect(binaries: :as_strings)
+      |> String.trim("\"")
+    end
   end
 
   # Shifts the `created_contract_address_id` value to `to_address_id` when applicable.
@@ -724,7 +763,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
           transaction_receipt_from_node
         )
 
-      transaction_from_db && Map.get(transaction_from_db, :cumulative_gas_used) ->
+      Map.get(transaction_from_db, :cumulative_gas_used) ->
         update_transactions_inner(
           repo,
           valid_internal_transactions,
@@ -1015,20 +1054,6 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
   end
 
   defp traceable_blocks_dynamic_query do
-    if RangesHelper.trace_ranges_present?() do
-      block_ranges = RangesHelper.get_trace_block_ranges()
-
-      Enum.reduce(block_ranges, dynamic([_], false), fn
-        _from.._to//_ = range, acc ->
-          lower = min(range.first, range.last)
-          upper = max(range.first, range.last)
-          dynamic([block], ^acc or (block.number >= ^lower and block.number <= ^upper))
-
-        num_to_latest, acc ->
-          dynamic([block], ^acc or block.number >= ^num_to_latest)
-      end)
-    else
-      dynamic([_], true)
-    end
+    Helper.traceable_block_numbers_dynamic(:number)
   end
 end

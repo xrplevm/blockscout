@@ -3,11 +3,10 @@ defmodule BlockScoutWeb.API.V2.StatsControllerTest do
   use BlockScoutWeb.ConnCase
 
   alias Explorer.Chain.Address
-  alias Explorer.Chain.Cache.Counters.{AddressesCount, AverageBlockTime}
+  alias Explorer.Chain.Cache.Counters.AverageBlockTime
 
   describe "/stats" do
     setup do
-      start_supervised!(AddressesCount)
       start_supervised!(AverageBlockTime)
 
       Application.put_env(:explorer, AverageBlockTime, enabled: true, cache_period: 1_800_000)
@@ -28,7 +27,6 @@ defmodule BlockScoutWeb.API.V2.StatsControllerTest do
       assert Map.has_key?(response, "total_transactions")
       assert Map.has_key?(response, "average_block_time")
       assert Map.has_key?(response, "coin_price")
-      assert Map.has_key?(response, "total_gas_used")
       assert Map.has_key?(response, "transactions_today")
       assert Map.has_key?(response, "gas_used_today")
       assert Map.has_key?(response, "gas_prices")

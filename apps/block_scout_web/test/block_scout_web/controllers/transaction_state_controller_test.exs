@@ -9,7 +9,7 @@ defmodule BlockScoutWeb.TransactionStateControllerTest do
   import EthereumJSONRPC, only: [integer_to_quantity: 1]
   alias Explorer.Chain.Wei
   alias Indexer.Fetcher.CoinBalance.Catchup, as: CoinBalanceCatchup
-  alias Explorer.Chain.Cache.Counters.{AddressesCount, AverageBlockTime}
+  alias Explorer.Chain.Cache.Counters.AverageBlockTime
 
   setup :set_mox_global
 
@@ -23,7 +23,6 @@ defmodule BlockScoutWeb.TransactionStateControllerTest do
 
     start_supervised!({Task.Supervisor, name: Indexer.TaskSupervisor})
     start_supervised!(AverageBlockTime)
-    start_supervised!(AddressesCount)
 
     configuration = Application.get_env(:indexer, Indexer.Fetcher.OnDemand.CoinBalance.Supervisor)
     Application.put_env(:indexer, Indexer.Fetcher.OnDemand.CoinBalance.Supervisor, disabled?: false)
@@ -83,7 +82,7 @@ defmodule BlockScoutWeb.TransactionStateControllerTest do
         insert(:transaction, from_address: address, to_address: to_address) |> with_block(block, status: :ok)
 
       conn = get(conn, transaction_state_path(conn, :index, transaction), %{type: "JSON"})
-      {:ok, %{"items" => items}} = conn.resp_body |> Poison.decode()
+      {:ok, %{"items" => items}} = conn.resp_body |> Utils.JSON.decode()
 
       assert(items |> Enum.filter(fn item -> item != nil end) |> length() == 2)
     end
@@ -112,7 +111,7 @@ defmodule BlockScoutWeb.TransactionStateControllerTest do
       )
 
       conn = get(conn, transaction_state_path(conn, :index, transaction), %{type: "JSON"})
-      {:ok, %{"items" => items}} = conn.resp_body |> Poison.decode()
+      {:ok, %{"items" => items}} = conn.resp_body |> Utils.JSON.decode()
 
       assert(items |> Enum.filter(fn item -> item != nil end) |> length() == 2)
     end
@@ -177,7 +176,7 @@ defmodule BlockScoutWeb.TransactionStateControllerTest do
       get(conn, transaction_state_path(conn, :index, transaction))
       conn = get(conn, transaction_state_path(conn, :index, transaction), %{type: "JSON"})
 
-      {:ok, %{"items" => items}} = conn.resp_body |> Poison.decode()
+      {:ok, %{"items" => items}} = conn.resp_body |> Utils.JSON.decode()
       full_text = Enum.join(items)
 
       assert(String.contains?(full_text, format_wei_value(%Wei{value: Decimal.new(1, 1, 18)}, :ether)))
@@ -247,7 +246,7 @@ defmodule BlockScoutWeb.TransactionStateControllerTest do
 
       conn = get(conn, transaction_state_path(conn, :index, transaction), %{type: "JSON"})
 
-      {:ok, %{"items" => items}} = conn.resp_body |> Poison.decode()
+      {:ok, %{"items" => items}} = conn.resp_body |> Utils.JSON.decode()
       full_text = Enum.join(items)
 
       assert(length(items) == 3)
@@ -255,7 +254,7 @@ defmodule BlockScoutWeb.TransactionStateControllerTest do
 
       1 |> :timer.seconds() |> :timer.sleep()
       conn = get(conn, transaction_state_path(conn, :index, transaction), %{type: "JSON"})
-      {:ok, %{"items" => items}} = conn.resp_body |> Poison.decode()
+      {:ok, %{"items" => items}} = conn.resp_body |> Utils.JSON.decode()
       full_text = Enum.join(items)
       assert(String.contains?(full_text, format_wei_value(%Wei{value: Decimal.new(123)}, :ether)))
       assert(length(items) == 3)

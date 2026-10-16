@@ -15,8 +15,6 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
   alias Explorer.Chain.SmartContract.Proxy
   alias Explorer.Visualize.Sol2uml
 
-  require Logger
-
   @api_true [api?: true]
 
   def render("smart_contracts.json", %{addresses: addresses, next_page_params: next_page_params}) do
@@ -383,6 +381,12 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
 
   def render_json(value, type) when type in [:address, "address", "address payable"] do
     SmartContractView.cast_address(value)
+  end
+
+  # A Solidity `function` type is a 24-byte value (address + selector). Since
+  # ex_abi 0.8.4 it is decoded into a raw binary, so render it as hex.
+  def render_json(value, type) when type in [:function, "function"] and is_binary(value) do
+    "0x" <> Base.encode16(value, case: :lower)
   end
 
   def render_json(value, type) when type in [:string, "string"] do

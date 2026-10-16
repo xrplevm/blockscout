@@ -15,9 +15,14 @@ config :explorer, Explorer.Chain.Cache.Counters.AverageBlockTime, enabled: false
 # This causes a ConnectionOwnership error
 config :explorer, Explorer.Chain.Transaction.History.Historian, enabled: false
 
+config :explorer, Explorer.Chain.Cache.Counters.AddressCounters, enabled: false
+config :explorer, Explorer.Chain.Cache.Counters.AddressCountersConsolidator, enabled: false
+config :explorer, Explorer.Chain.Cache.Counters.TokenCounters, enabled: false
+config :explorer, Explorer.Chain.Cache.Counters.TokenCountersConsolidator, enabled: false
+
 for counter <- [
-      Explorer.Chain.Cache.Counters.AddressesCount,
       Explorer.Chain.Cache.Counters.Optimism.LastOutputRootSizeCount,
+      Explorer.Chain.Cache.Counters.Optimism.DepositsCount,
       Explorer.Chain.Cache.Counters.Transactions24hCount,
       Explorer.Chain.Cache.Counters.NewPendingTransactionsCount,
       Explorer.Chain.Cache.Counters.ContractsCount,
@@ -77,9 +82,17 @@ for migrator <- [
       Explorer.Migrator.UnescapeQuotesInTokens,
       Explorer.Migrator.UnescapeAmpersandsInTokens,
       Explorer.Migrator.SanitizeDuplicateSmartContractAdditionalSources,
+      Explorer.Migrator.ReindexBlocksWithUncatalogedTokenTransfers,
+      Explorer.Migrator.ReindexBlocksWithStaleInternalTransactions,
       Explorer.Migrator.DeleteZeroValueInternalTransactions,
       Explorer.Migrator.EmptyInternalTransactionsData,
       Explorer.Migrator.FillInternalTransactionsAddressIds,
+      Explorer.Migrator.TransactionHasTokenTransfers,
+      Explorer.Migrator.DeleteNonConsensusLogs,
+      Explorer.Migrator.FillLogsOptimizedFields,
+      Explorer.Migrator.FillLogsCompressedData,
+      Explorer.Migrator.BackfillAddressCounters,
+      Explorer.Migrator.BackfillTokenCounters,
 
       # Heavy DB index operations
       Explorer.Migrator.HeavyDbIndexOperation.CreateLogsBlockHashIndex,
@@ -123,11 +136,28 @@ for migrator <- [
       Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsCreatedContractAddressIdIndex,
       Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsBlockNumberCreatedContractAddressIdPartialIndex,
       Explorer.Migrator.HeavyDbIndexOperation.RemoveInternalTransactionsBlockHashTransactionHashBlockIndexError,
+      Explorer.Migrator.HeavyDbIndexOperation.RemoveInternalTransactionsAddressHashes,
       Explorer.Migrator.HeavyDbIndexOperation.CreateAddressesHashContractCodeNotNullIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsBlockNumberCreatedContractAddressHashIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsCreatedContractAddressHashIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsFromAddressHashPartialIndex,
-      Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsToAddressHashPartialIndex
+      Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsToAddressHashPartialIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressHashFirstTopicSecondTopicBlockNumberIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateAddressCurrentTokenBalancesAddressHashBlockNumberIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateTransactionsTokenTransferMethodIdOrderedIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateLogsBlockNumberTransactionIndexIndexUniqueIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.ValidateLogsBlockNumberTransactionIndexNotNull,
+      Explorer.Migrator.HeavyDbIndexOperation.UpdateLogsPrimaryKey,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressIdBlockNumberDescIndexDescIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressIdFirstTopicBlockNumberIndexIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateLogsDepositsWithdrawalsIndexWithUpdatedPk,
+      Explorer.Migrator.HeavyDbIndexOperation.DropLogsAddressHashBlockNumberDescIndexDescIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.DropLogsAddressHashFirstTopicBlockNumberIndexIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.DropLogsAddressHashFirstTopicSecondTopicBlockNumberIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.DropLogsDepositsWithdrawalsIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.ValidateLogsFirstTopicIdFkey,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateLogsFirstTopicIdIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressIdFirstTopicIdSecondTopicBlockNumberIndex
     ] do
   config :explorer, migrator, enabled: false
 end

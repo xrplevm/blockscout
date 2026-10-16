@@ -96,11 +96,10 @@ defmodule Explorer.ThirdPartyIntegrations.UniversalProxy do
          protocol: protocol
        })
        when protocol in [:http, :https] and not is_nil(url) and not is_nil(method) do
-    with {:invalid_config, false} <- {:invalid_config, is_nil(method)},
-         {:ok, %{status_code: status, body: body}} <-
-           HttpClient.request(method, url, headers, body, recv_timeout: @recv_timeout) do
-      {Helper.decode_json(body), status}
-    else
+    case HttpClient.request(method, url, headers, body, recv_timeout: @recv_timeout) do
+      {:ok, %{status_code: status, body: body}} ->
+        {Helper.decode_json(body), status}
+
       err ->
         Logger.error(fn -> ["#{@unexpected_error}: ", inspect(err)] end)
         {@unexpected_error, 500}
@@ -374,7 +373,7 @@ defmodule Explorer.ThirdPartyIntegrations.UniversalProxy do
   end
 
   defp safe_parse_config_string(config_string, update_cache? \\ false) do
-    case Jason.decode(config_string) do
+    case Utils.JSON.decode(config_string) do
       {:ok, config} ->
         if update_cache?, do: :persistent_term.put(@cache_name, config_string)
         config

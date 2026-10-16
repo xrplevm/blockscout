@@ -242,13 +242,15 @@ defmodule Indexer.Block.Catchup.Fetcher do
         acc
     end)
     |> numbers_to_ranges()
-    |> MissingBlockRange.clear_batch()
+    |> MissingBlockRange.clear_batch_if_indexed()
   end
 
+  # Lotus reports a null round either with the bare message (older versions) or with
+  # the epoch appended, e.g. "requested epoch was a null round (6394248)" (newer versions).
   defp handle_null_rounds(errors) do
     {null_rounds, other_errors} =
       Enum.split_with(errors, fn
-        %{message: "requested epoch was a null round"} -> true
+        %{message: "requested epoch was a null round" <> _} -> true
         _ -> false
       end)
 
@@ -275,7 +277,8 @@ defmodule Indexer.Block.Catchup.Fetcher do
   defp timeout_exception?(_exception), do: false
 
   defp match_timeout_exception?(error_message) do
-    String.match?(error_message, ~r/due to a timeout/) or String.match?(error_message, ~r/due to user request/)
+    String.match?(error_message, ~r/due to a timeout/) or String.match?(error_message, ~r/due to user request/) or
+      String.match?(error_message, ~r/ssl recv: closed/)
   end
 
   @doc """

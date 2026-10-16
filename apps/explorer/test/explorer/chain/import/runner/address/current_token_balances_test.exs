@@ -145,10 +145,12 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
                     token_id: ^token_id_6
                   }
                 ],
+                # one address holding multiple token_ids of the same token is
+                # a single holder
                 address_current_token_balances_update_token_holder_counts: [
                   %{
                     contract_address_hash: ^token_contract_address_hash,
-                    holder_count: 2
+                    holder_count: 1
                   },
                   %{
                     contract_address_hash: ^token_erc_20_contract_address_hash,
@@ -160,7 +162,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
                   },
                   %{
                     contract_address_hash: ^token_erc_404_contract_address_hash,
-                    holder_count: 2
+                    holder_count: 1
                   }
                 ]
               }} =
@@ -572,6 +574,127 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalancesTest do
                  ],
                  options
                )
+    end
+
+    test "burn address balances never affect the holder_count", %{
+      token: %Token{contract_address_hash: token_contract_address_hash},
+      options: options
+    } do
+      %Address{hash: burn_address_hash} = insert(:address, hash: "0x0000000000000000000000000000000000000000")
+
+      assert {:ok, %{address_current_token_balances_update_token_holder_counts: []}} =
+               run_changes(
+                 %{
+                   address_hash: burn_address_hash,
+                   token_contract_address_hash: token_contract_address_hash,
+                   block_number: 1,
+                   value: Decimal.new(100),
+                   value_fetched_at: DateTime.utc_now()
+                 },
+                 options
+               )
+    end
+
+    test "an inserted ERC-7984 balance counts as a holder regardless of value, updates do not double count", %{
+      address: %Address{hash: address_hash},
+      options: options
+    } do
+      %Token{contract_address_hash: token_contract_address_hash} = insert(:token, type: "ERC-7984", holder_count: 0)
+
+      changes = %{
+        address_hash: address_hash,
+        token_contract_address_hash: token_contract_address_hash,
+        block_number: 1,
+        value: Decimal.new(0),
+        value_fetched_at: DateTime.utc_now(),
+        token_type: "ERC-7984"
+      }
+
+      assert {:ok,
+              %{
+                address_current_token_balances_update_token_holder_counts: [
+                  %{contract_address_hash: ^token_contract_address_hash, holder_count: 1}
+                ]
+              }} = run_changes(changes, options)
+
+      # updating an existing confidential balance is a 1 -> 1 transition
+      assert {:ok, %{address_current_token_balances_update_token_holder_counts: []}} =
+               run_changes(%{changes | block_number: 2, value_fetched_at: DateTime.utc_now()}, options)
+    end
+
+    test "zeroing one token_id of a multi-token_id holder does not change the holder_count", %{
+      address: %Address{hash: address_hash} = address,
+      options: options
+    } do
+      %Token{contract_address_hash: token_contract_address_hash} = insert(:token, type: "ERC-1155", holder_count: 1)
+
+      insert(:address_current_token_balance,
+        address: address,
+        token_contract_address_hash: token_contract_address_hash,
+        token_id: 1,
+        token_type: "ERC-1155",
+        value: 5,
+        block_number: 1
+      )
+
+      insert(:address_current_token_balance,
+        address: address,
+        token_contract_address_hash: token_contract_address_hash,
+        token_id: 2,
+        token_type: "ERC-1155",
+        value: 7,
+        block_number: 1
+      )
+
+      # the address still holds token_id 2, so its holder-ness did not change
+      assert {:ok, %{address_current_token_balances_update_token_holder_counts: []}} =
+               run_changes(
+                 %{
+                   address_hash: address_hash,
+                   token_contract_address_hash: token_contract_address_hash,
+                   block_number: 2,
+                   value: Decimal.new(0),
+                   value_fetched_at: DateTime.utc_now(),
+                   token_id: Decimal.new(1),
+                   token_type: "ERC-1155"
+                 },
+                 options
+               )
+    end
+
+    test "a holder of a token_id outside the batch stays a holder when the batch token_ids become positive", %{
+      address: %Address{hash: address_hash} = address,
+      options: options
+    } do
+      %Token{contract_address_hash: token_contract_address_hash} = insert(:token, type: "ERC-1155", holder_count: 1)
+
+      Enum.each([{1, 0, 1}, {2, 0, 1}, {3, 9, 3}], fn {token_id, value, block_number} ->
+        insert(:address_current_token_balance,
+          address: address,
+          token_contract_address_hash: token_contract_address_hash,
+          token_id: token_id,
+          token_type: "ERC-1155",
+          value: value,
+          block_number: block_number
+        )
+      end)
+
+      changes_list =
+        Enum.map([1, 2], fn token_id ->
+          %{
+            address_hash: address_hash,
+            token_contract_address_hash: token_contract_address_hash,
+            block_number: 2,
+            value: Decimal.new(5),
+            value_fetched_at: DateTime.utc_now(),
+            token_id: Decimal.new(token_id),
+            token_type: "ERC-1155"
+          }
+        end)
+
+      # token_ids 1 and 2 are the batch rows of the pair, token_id 3 already made the address a holder
+      assert {:ok, %{address_current_token_balances_update_token_holder_counts: []}} =
+               run_changes_list(changes_list, options)
     end
   end
 

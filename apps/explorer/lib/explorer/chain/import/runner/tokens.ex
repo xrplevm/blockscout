@@ -36,15 +36,6 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
       end)
       |> Enum.unzip()
 
-    token_query =
-      from(
-        token in Token,
-        where: token.contract_address_hash in ^hashes,
-        select: token.contract_address_hash,
-        order_by: token.contract_address_hash,
-        lock: "FOR NO KEY UPDATE"
-      )
-
     query =
       from(
         token in Token,
@@ -55,11 +46,11 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
             ^deltas
           ),
         on: token.contract_address_hash == deltas.contract_address_hash,
-        where: token.contract_address_hash in subquery(token_query),
+        where: token.contract_address_hash in subquery(Token.lock_query(hashes)),
         where: not is_nil(token.holder_count),
         update: [
           set: [
-            holder_count: token.holder_count + deltas.delta,
+            holder_count: fragment("LEAST(GREATEST(? + ?, 0), 2147483647)", token.holder_count, deltas.delta),
             updated_at: ^updated_at
           ]
         ],
@@ -199,8 +190,8 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
             cataloged: fragment("COALESCE(EXCLUDED.cataloged, ?)", token.cataloged),
             bridged: fragment("COALESCE(EXCLUDED.bridged, ?)", token.bridged),
             skip_metadata: fragment("COALESCE(EXCLUDED.skip_metadata, ?)", token.skip_metadata),
-            # `holder_count` and `transfer_count` are not updated as a pre-existing token means these counts are already initialized OR
-            #   need to be migrated with `priv/repo/migrations/scripts/update_new_tokens_holder_count_in_batches.sql.exs`
+            # `holder_count`, `transfer_count` and `counters_updated_at` are not updated: pre-existing tokens are maintained by
+            #   the incremental counters machinery (import-time holder deltas and the token counters consolidator)
             # Don't update `contract_address_hash` as it is the primary key and used for the conflict target
             inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token.inserted_at),
             updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token.updated_at)
@@ -233,8 +224,8 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
             type: fragment("COALESCE(EXCLUDED.type, ?)", token.type),
             cataloged: fragment("COALESCE(EXCLUDED.cataloged, ?)", token.cataloged),
             skip_metadata: fragment("COALESCE(EXCLUDED.skip_metadata, ?)", token.skip_metadata),
-            # `holder_count` is not updated as a pre-existing token means the `holder_count` is already initialized OR
-            #   need to be migrated with `priv/repo/migrations/scripts/update_new_tokens_holder_count_in_batches.sql.exs`
+            # `holder_count`, `transfer_count` and `counters_updated_at` are not updated: pre-existing tokens are maintained by
+            #   the incremental counters machinery (import-time holder deltas and the token counters consolidator)
             # Don't update `contract_address_hash` as it is the primary key and used for the conflict target
             inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token.inserted_at),
             updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token.updated_at)
@@ -296,10 +287,14 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
   This function provides the standard set of fields that require updates when
   processing market data operations.
 
+  `:total_supply` is deliberately excluded: it holds the raw on-chain
+  `totalSupply()` value maintained by the token total supply fetchers, not
+  market data.
+
   ## Returns
   - List of atoms representing the market data fields to update: `:name`,
-    `:symbol`, `:type`, `:fiat_value`, `:circulating_market_cap`, and
-    `:volume_24h`
+    `:symbol`, `:type`, `:fiat_value`, `:circulating_market_cap`,
+    `:volume_24h`, `:circulating_supply` and `:decimals`
   """
   @spec market_data_fields_to_update() :: [
           :name
@@ -312,7 +307,16 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
           | :decimals
         ]
   def market_data_fields_to_update do
-    [:name, :symbol, :type, :fiat_value, :circulating_market_cap, :volume_24h, :circulating_supply, :decimals]
+    [
+      :name,
+      :symbol,
+      :type,
+      :fiat_value,
+      :circulating_market_cap,
+      :volume_24h,
+      :circulating_supply,
+      :decimals
+    ]
   end
 
   @doc """

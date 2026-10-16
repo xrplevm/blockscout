@@ -175,6 +175,8 @@ defmodule Explorer.Chain.Block.Schema do
         field(:transactions_fees, :decimal, virtual: true)
         field(:burnt_fees, :decimal, virtual: true)
         field(:priority_fees, :decimal, virtual: true)
+        # `{base_fee_max_change_denominator, elasticity_multiplier}` resolved by `preload_eip1559_config/1`
+        field(:eip1559_config, :any, virtual: true)
 
         timestamps()
 
@@ -224,19 +226,26 @@ defmodule Explorer.Chain.Block do
   alias EthereumJSONRPC.Utility.RangesHelper
 
   alias Explorer.Chain.{
+    Address,
     Block,
     DenormalizationHelper,
     Hash,
+    InternalTransaction,
     PendingBlockOperation,
     PendingOperationsHelper,
     PendingTransactionOperation,
+    TokenTransfer,
     Transaction,
     Wei
   }
 
   alias Explorer.{Chain, Helper, PagingOptions, Repo}
+  alias Explorer.Chain.Address.CoinBalance
   alias Explorer.Chain.Block.{EmissionReward, Reward, SecondDegreeRelation}
   alias Explorer.Chain.InternalTransaction.DeleteQueue, as: InternalTransactionDeleteQueue
+  alias Explorer.Chain.Optimism.SuperchainConfig
+  alias Explorer.MicroserviceInterfaces.MultichainSearch
+  alias Explorer.Utility.AddressIdToAddressHash
   alias Explorer.Utility.MissingBlockRange
 
   @optional_attrs ~w(size refetch_needed total_difficulty difficulty base_fee_per_gas)a
@@ -344,6 +353,22 @@ defmodule Explorer.Chain.Block do
       on: [block_hash: b.hash],
       where: is_nil(r.block_hash)
     )
+  end
+
+  @doc """
+  Adds a filter by block numbers to the given query.
+  """
+  @spec by_numbers_query(Ecto.Queryable.t(), [block_number()]) :: Ecto.Query.t()
+  def by_numbers_query(query \\ __MODULE__, block_numbers) do
+    where(query, [b], b.number in ^block_numbers)
+  end
+
+  @doc """
+  Adds a consensus filter to the given block query.
+  """
+  @spec consensus_query(Ecto.Queryable.t(), boolean()) :: Ecto.Query.t()
+  def consensus_query(query \\ __MODULE__, consensus) do
+    where(query, [b], b.consensus == ^consensus)
   end
 
   @doc """
@@ -492,26 +517,83 @@ defmodule Explorer.Chain.Block do
 
   def uncle_reward_coef, do: @uncle_reward_coef
 
-  # Gets EIP-1559 config actual for the given block number.
-  # If not found, returns EIP_1559_BASE_FEE_MAX_CHANGE_DENOMINATOR and EIP_1559_ELASTICITY_MULTIPLIER env values.
+  @doc """
+  Resolves the EIP-1559 config actual for each of the given blocks with a single query.
+
+  The config is put into the `eip1559_config` virtual field, so that `gas_target/1` and
+  `next_block_base_fee_per_gas/1` don't query the config per block. Does nothing (and makes no queries)
+  unless the chain type is `optimism`, where the config is dynamic and read from the
+  `op_eip1559_config_updates` table, with the superchain config as the default for the blocks
+  preceding the first update. The default is resolved once for the whole batch.
+
+  ## Parameters
+  - `blocks`: The blocks to resolve the config for.
+
+  ## Returns
+  - The same blocks with the `eip1559_config` field set.
+  """
+  @spec preload_eip1559_config([t()]) :: [t()]
+  def preload_eip1559_config(blocks) do
+    if Application.get_env(:explorer, :chain_type) == :optimism do
+      configs =
+        blocks
+        |> Enum.map(& &1.number)
+        # credo:disable-for-next-line Credo.Check.Design.AliasUsage
+        |> Explorer.Chain.Optimism.EIP1559ConfigUpdate.actual_configs_for_blocks()
+
+      # The default is read from the database as well, so it is resolved at most once per batch
+      default_config = if Enum.any?(Map.values(configs), &is_nil/1), do: default_eip1559_config()
+
+      Enum.map(blocks, fn block ->
+        %{block | eip1559_config: eip1559_config_or_default(Map.fetch!(configs, block.number), default_config)}
+      end)
+    else
+      blocks
+    end
+  end
+
+  # Gets EIP-1559 config actual for the given block, preferring the one resolved by `preload_eip1559_config/1`.
+  # If not found, returns the default config (see `default_eip1559_config/0`).
   #
   # ## Parameters
-  # - `block_number`: The given block number.
+  # - `block`: The given block.
   #
   # ## Returns
   # - `{denominator, multiplier}` tuple.
-  @spec get_eip1559_config(non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
-  defp get_eip1559_config(block_number) do
-    with true <- Application.get_env(:explorer, :chain_type) == :optimism,
-         # credo:disable-for-next-line Credo.Check.Design.AliasUsage
-         config = Explorer.Chain.Optimism.EIP1559ConfigUpdate.actual_config_for_block(block_number),
-         false <- is_nil(config) do
-      {denominator, multiplier, _min_base_fee} = config
-      {denominator, multiplier}
+  @spec get_eip1559_config(t()) :: {non_neg_integer(), non_neg_integer()}
+  defp get_eip1559_config(%{eip1559_config: {_denominator, _multiplier} = config}), do: config
+
+  defp get_eip1559_config(block) do
+    if Application.get_env(:explorer, :chain_type) == :optimism do
+      block.number
+      # credo:disable-for-next-line Credo.Check.Design.AliasUsage
+      |> Explorer.Chain.Optimism.EIP1559ConfigUpdate.actual_config_for_block()
+      |> eip1559_config_or_default(nil)
     else
-      _ ->
-        {Application.get_env(:explorer, :base_fee_max_change_denominator),
-         Application.get_env(:explorer, :elasticity_multiplier)}
+      default_eip1559_config()
+    end
+  end
+
+  # Converts an `op_eip1559_config_updates` record into the `{denominator, multiplier}` config, or returns
+  # `default_config` when there is no record. A `nil` `default_config` is resolved on demand.
+  defp eip1559_config_or_default({denominator, multiplier, _min_base_fee}, _default_config),
+    do: {denominator, multiplier}
+
+  defp eip1559_config_or_default(nil, nil), do: default_eip1559_config()
+  defp eip1559_config_or_default(nil, default_config), do: default_config
+
+  # The EIP-1559 config to use when no `op_eip1559_config_updates` record applies to a block.
+  #
+  # On Optimism, it comes from the superchain config stored in the `constants` table (two queries), falling back
+  # to the EIP_1559_BASE_FEE_MAX_CHANGE_DENOMINATOR and EIP_1559_ELASTICITY_MULTIPLIER env values. Other chain
+  # types never write those constants, so they read the env values directly without querying.
+  @spec default_eip1559_config() :: {non_neg_integer(), non_neg_integer()}
+  defp default_eip1559_config do
+    if Application.get_env(:explorer, :chain_type) == :optimism do
+      {SuperchainConfig.eip1559_base_fee_max_change_denominator(), SuperchainConfig.eip1559_elasticity_multiplier()}
+    else
+      {Application.get_env(:explorer, :base_fee_max_change_denominator),
+       Application.get_env(:explorer, :elasticity_multiplier)}
     end
   end
 
@@ -533,7 +615,7 @@ defmodule Explorer.Chain.Block do
   @spec gas_target(t()) :: float()
   def gas_target(block) do
     if Decimal.compare(block.gas_limit, 0) == :gt do
-      {_, elasticity_multiplier} = get_eip1559_config(block.number)
+      {_, elasticity_multiplier} = get_eip1559_config(block)
 
       ratio = Decimal.div(block.gas_used, Decimal.div(block.gas_limit, elasticity_multiplier))
       ratio |> Decimal.sub(1) |> Decimal.mult(100) |> Decimal.to_float()
@@ -587,7 +669,7 @@ defmodule Explorer.Chain.Block do
 
   @spec next_block_base_fee_per_gas(t()) :: Decimal.t() | nil
   def next_block_base_fee_per_gas(block) do
-    {base_fee_max_change_denominator, elasticity_multiplier} = get_eip1559_config(block.number)
+    {base_fee_max_change_denominator, elasticity_multiplier} = get_eip1559_config(block)
 
     gas_target = Decimal.div_int(block.gas_limit, elasticity_multiplier)
 
@@ -623,14 +705,28 @@ defmodule Explorer.Chain.Block do
     |> Decimal.div_int(base_fee_max_change_denominator)
   end
 
+  # A single `full_refetch/1` call may cover millions of blocks, so the block numbers are
+  # processed in fixed-size batches. Each batch runs in its own database transaction with
+  # bounded queries, keeping transaction size, lock duration and memory usage predictable
+  # regardless of the total range size. Overridable via the `:full_refetch_batch_size`
+  # application env (e.g. in tests).
+  @default_full_refetch_batch_size 100
+
+  # Max number of hashes per `IN (...)` query when resolving touched addresses, kept well
+  # under the Postgres bind-parameter limit (65535).
+  @address_query_chunk_size 10_000
+
   @doc """
   Queues blocks for a full refetch and marks them as needing refetch.
 
   This function accepts either a block ranges string, a list of block numbers,
   or a single block number. When given a ranges string, it parses the string into
   individual block numbers. It then enqueues the blocks for internal transaction
-  cleanup and marks the corresponding blocks with `refetch_needed: true` inside a
-  single database transaction.
+  cleanup and marks the corresponding blocks with `refetch_needed: true`.
+
+  Because a single call may cover millions of blocks, the work is split into
+  fixed-size batches. Each batch runs in its own database transaction, so atomicity
+  is per-batch rather than across the whole range.
 
   ## Parameters
 
@@ -638,22 +734,22 @@ defmodule Explorer.Chain.Block do
 
   ## Returns
 
-    - The result of `Repo.transaction/2` for range strings and lists.
-    - The delegated result for a single block number.
+    - `:ok` if all batches were processed successfully.
+    - `{:error, reason}` if a batch's transaction failed, in which case the remaining batches are not processed.
 
   ## Examples
 
       iex> full_refetch("1..3,5..6")
-      {:ok, _}
+      :ok
 
       iex> full_refetch([10, 11, 12])
-      {:ok, _}
+      :ok
 
       iex> full_refetch(15)
-      {:ok, _}
+      :ok
 
   """
-  @spec full_refetch(binary() | [integer()] | integer()) :: {:ok, any()} | {:error, any()}
+  @spec full_refetch(binary() | [integer()] | integer()) :: :ok | {:error, any()}
   def full_refetch(block_ranges_string) when is_binary(block_ranges_string) do
     block_ranges_string
     |> RangesHelper.parse_block_ranges_to_numbers()
@@ -661,23 +757,69 @@ defmodule Explorer.Chain.Block do
   end
 
   def full_refetch(block_numbers) when is_list(block_numbers) do
+    block_numbers
+    |> Enum.chunk_every(full_refetch_batch_size())
+    |> Enum.reduce_while(:ok, fn batch, _acc ->
+      case full_refetch_batch(batch) do
+        {:ok, _result} -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  def full_refetch(block_number), do: full_refetch([block_number])
+
+  defp full_refetch_batch_size do
+    Application.get_env(:explorer, :full_refetch_batch_size, @default_full_refetch_batch_size)
+  end
+
+  # Processes a single batch of block numbers in one database transaction: enqueues them for
+  # internal transaction cleanup, marks them as needing refetch, and enqueues the blocks,
+  # their transactions and touched addresses for export to the Multichain Service.
+  @spec full_refetch_batch([integer()]) :: {:ok, any()} | {:error, any()}
+  defp full_refetch_batch(block_numbers) do
     Repo.transaction(
       fn ->
         # TODO: delete other crucial entities as well
         InternalTransactionDeleteQueue.batch_insert(block_numbers)
         set_refetch_needed(block_numbers)
+        send_refetched_data_to_multichain_queue(block_numbers)
       end,
       timeout: :infinity
     )
   end
 
-  def full_refetch(block_number), do: full_refetch([block_number])
-
   @spec set_refetch_needed(integer | [integer]) :: :ok
   def set_refetch_needed(block_numbers) when is_list(block_numbers) do
-    query =
-      from(block in Block,
-        where: block.number in ^block_numbers,
+    Block
+    |> where([block], block.number in ^block_numbers)
+    |> set_refetch_needed_by_query()
+
+    :ok
+  end
+
+  def set_refetch_needed(block_number), do: set_refetch_needed([block_number])
+
+  @doc """
+  Marks the consensus blocks with the given numbers, except for the blocks with the
+  given hashes, with `refetch_needed` and adds their numbers to the missing block ranges.
+
+  Used when an import of the blocks with these numbers and hashes has failed before
+  storing them: the consensus blocks stored at these numbers may belong to a stale fork.
+
+  ## Returns
+  - The numbers of the marked blocks
+  """
+  @spec set_refetch_needed_for_other_consensus_blocks([integer], [Hash.Full.t() | String.t()]) :: [integer]
+  def set_refetch_needed_for_other_consensus_blocks(block_numbers, hashes) do
+    Block
+    |> where([block], block.number in ^block_numbers and block.consensus and block.hash not in ^hashes)
+    |> set_refetch_needed_by_query()
+  end
+
+  defp set_refetch_needed_by_query(query) do
+    locked_query =
+      from(block in query,
         # Enforce Block ShareLocks order (see docs: sharelocks.md)
         order_by: [asc: block.hash],
         lock: "FOR NO KEY UPDATE"
@@ -685,16 +827,119 @@ defmodule Explorer.Chain.Block do
 
     {_count, updated_numbers} =
       Repo.update_all(
-        from(b in Block, join: s in subquery(query), on: b.hash == s.hash, select: b.number),
+        from(b in Block, join: s in subquery(locked_query), on: b.hash == s.hash, select: b.number),
         set: [refetch_needed: true, updated_at: Timex.now()]
       )
 
     MissingBlockRange.add_ranges_by_block_numbers(updated_numbers)
 
-    :ok
+    updated_numbers
   end
 
-  def set_refetch_needed(block_number), do: set_refetch_needed([block_number])
+  # Re-enqueues the blocks, their transactions, and the addresses they touched for export to
+  # the Multichain Service database.
+  #
+  # On re-import, a block is re-queued for export because `full_refetch/1` flips its
+  # `refetch_needed` flag, so the imported block row differs from the stored one and is
+  # returned by the import runner (which is what feeds the export queue). Transactions and
+  # addresses, however, are re-imported with identical data, so the corresponding runners'
+  # `... IS DISTINCT FROM ...` on-conflict guards skip them: they are neither updated nor
+  # returned, and thus never reach the export queue. To keep the Multichain Service in sync
+  # we collect them here and hand them to `MultichainSearch.send_data_to_queue/1`, reusing
+  # the same formatting and queueing logic as the import pipeline.
+  #
+  # Balances are intentionally excluded: `address_coin_balances` is passed as an empty list
+  # so that `send_data_to_queue/1` does not derive coin balances from the addresses, and no
+  # token balances are passed either. Only the main export queue is populated.
+  #
+  # This operates on a single `full_refetch/1` batch, so its queries are already bounded by
+  # the batch size.
+  @spec send_refetched_data_to_multichain_queue([integer()]) :: :ignore | :ok
+  defp send_refetched_data_to_multichain_queue(block_numbers) do
+    if MultichainSearch.enabled?() do
+      transactions = from(transaction in Transaction, where: transaction.block_number in ^block_numbers) |> Repo.all()
+
+      MultichainSearch.send_data_to_queue(%{
+        addresses: touched_addresses_in_refetch(block_numbers, transactions),
+        blocks: from(block in Block, where: block.number in ^block_numbers) |> Repo.all(),
+        transactions: transactions,
+        address_coin_balances: [],
+        address_current_token_balances: []
+      })
+    else
+      :ignore
+    end
+  end
+
+  # Collects the addresses touched by the given blocks, matching the set the import pipeline
+  # exports: block miners, coin-balance owners recorded at those blocks, and the participant
+  # addresses of the blocks' transactions, token transfers and internal transactions
+  # (from/to/created-contract/token-contract). `nil` hashes are dropped and the result is
+  # deduplicated.
+  #
+  # The `Address` lookup is chunked because the collected hash set can exceed the Postgres
+  # bind-parameter limit (65535) for a single `IN (...)` query on a large refetch batch.
+  @spec touched_addresses_in_refetch([integer()], [Transaction.t()]) :: [Address.t()]
+  defp touched_addresses_in_refetch(block_numbers, transactions) do
+    coin_balance_address_hashes =
+      from(coin_balance in CoinBalance,
+        where: coin_balance.block_number in ^block_numbers,
+        select: coin_balance.address_hash
+      )
+      |> Repo.all()
+
+    miner_hashes =
+      from(block in Block, where: block.number in ^block_numbers, select: block.miner_hash) |> Repo.all()
+
+    token_transfer_address_hashes =
+      from(token_transfer in TokenTransfer,
+        where: token_transfer.block_number in ^block_numbers,
+        select: [
+          token_transfer.from_address_hash,
+          token_transfer.to_address_hash,
+          token_transfer.token_contract_address_hash
+        ]
+      )
+      |> Repo.all()
+      |> List.flatten()
+
+    # `InternalTransaction` stores participant addresses as `address_id` foreign keys into
+    # `address_ids_to_address_hashes`, and exposes the hashes only as virtual fields, so the ids
+    # are collected here and resolved to hashes in bulk.
+    internal_transaction_address_ids =
+      from(internal_transaction in InternalTransaction,
+        where: internal_transaction.block_number in ^block_numbers,
+        select: [
+          internal_transaction.from_address_id,
+          internal_transaction.to_address_id,
+          internal_transaction.created_contract_address_id
+        ]
+      )
+      |> Repo.all()
+      |> List.flatten()
+      |> Enum.reject(&is_nil/1)
+
+    internal_transaction_address_hashes = AddressIdToAddressHash.ids_to_hashes(internal_transaction_address_ids)
+
+    transaction_address_hashes =
+      Enum.flat_map(transactions, &[&1.from_address_hash, &1.to_address_hash, &1.created_contract_address_hash])
+
+    address_hashes =
+      [
+        coin_balance_address_hashes,
+        miner_hashes,
+        token_transfer_address_hashes,
+        internal_transaction_address_hashes,
+        transaction_address_hashes
+      ]
+      |> Enum.concat()
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    address_hashes
+    |> Enum.chunk_every(@address_query_chunk_size)
+    |> Enum.flat_map(&Repo.all(from(address in Address, where: address.hash in ^&1)))
+  end
 
   @doc """
   Generates a query to fetch blocks by their hashes.

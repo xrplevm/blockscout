@@ -98,8 +98,6 @@ defmodule Indexer.Fetcher.Arbitrum.TrackingBatchesStatuses do
   alias Indexer.Fetcher.Arbitrum.Utils.Rpc
   alias Indexer.Helper, as: IndexerHelper
 
-  require Logger
-
   @behaviour BufferedTask
 
   # 250ms interval between processing buffered entries.
@@ -189,7 +187,7 @@ defmodule Indexer.Fetcher.Arbitrum.TrackingBatchesStatuses do
     # Set up initial configuration structure
     initial_config = %{
       l1_rpc: %{
-        json_rpc_named_arguments: IndexerHelper.json_rpc_named_arguments(l1_rpc),
+        json_rpc_named_arguments: IndexerHelper.l1_json_rpc_named_arguments(l1_rpc),
         logs_block_range: l1_rpc_block_range,
         chunk_size: l1_rpc_chunk_size,
         track_finalization: track_l1_transaction_finalization,
@@ -634,7 +632,7 @@ defmodule Indexer.Fetcher.Arbitrum.TrackingBatchesStatuses do
         nil
 
       _ ->
-        raise("Worker #{worker_function} returned unexpected status #{worker_status}")
+        raise("Worker #{inspect(worker_function)} returned unexpected status #{inspect(worker_status)}")
     end
 
     updated_state = update_completed_tasks(state_after_worker_run, task_tag, completion_check_function)

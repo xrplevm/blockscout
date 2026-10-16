@@ -10,12 +10,11 @@ defmodule BlockScoutWeb.API.V2.BlockController do
 
   import BlockScoutWeb.Chain,
     only: [
-      next_page_params: 3,
-      next_page_params: 5,
+      paginate_list: 3,
+      paginate_list: 4,
       paging_options: 1,
-      param_to_block_number: 1,
+      param_to_block_number: 2,
       put_key_value_to_paging_options: 3,
-      split_list_by_page: 1,
       parse_block_hash_or_number_param: 1,
       block_to_internal_transactions: 2
     ]
@@ -28,20 +27,21 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       internal_transaction_call_type_options: 1
     ]
 
-  import Explorer.MicroserviceInterfaces.BENS,
-    only: [maybe_preload_ens: 1, maybe_preload_ens_for_blocks: 1, maybe_preload_ens_for_transactions: 1]
+  import Explorer.Chain.Address.MetadataPreloader,
+    only: [maybe_preload_ens_and_metadata: 1, maybe_preload_ens_and_metadata: 2]
 
-  import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata: 1]
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
 
   alias BlockScoutWeb.API.V2.{
     Ethereum.DepositController,
     Ethereum.DepositView,
+    InternalTransactionsPendingStatusHelper,
     TransactionView,
     WithdrawalView
   }
 
   alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotFoundResponse
+  alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotImplementedResponse
   alias Explorer.Chain
   alias Explorer.Chain.Arbitrum.Reader.API.Settlement, as: ArbitrumSettlementReader
   alias Explorer.Chain.Beacon.Deposit
@@ -186,21 +186,20 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     that lost consensus during a chain reorganization.
 
     Pagination is cursor-based: the response contains `next_page_params` with
-    `block_number` and `items_count` — pass these back as query parameters on
+    `block_number` — pass these back as query parameters on
     the next request to fetch the following page.
     """,
     parameters:
       base_params() ++
         [block_type_param()] ++
-        define_paging_params(["block_number", "items_count"]),
+        define_paging_params(["block_number"]),
     responses: [
       ok:
         {"List of blocks with pagination information.", "application/json",
          paginated_response(
            items: Schemas.Block,
            next_page_params_example: %{
-             "block_number" => 22_566_361,
-             "items_count" => 50
+             "block_number" => 22_566_361
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -213,20 +212,19 @@ defmodule BlockScoutWeb.API.V2.BlockController do
   def blocks(conn, params) do
     full_options = select_block_type(params)
 
-    blocks_plus_one =
+    options =
       full_options
       |> Keyword.merge(paging_options(params))
       |> Keyword.merge(@api_true)
-      |> Chain.list_blocks()
 
-    {blocks, next_page} = split_list_by_page(blocks_plus_one)
+    blocks_plus_one = Chain.list_blocks(options)
 
-    next_page_params = next_page |> next_page_params(blocks, params)
+    {blocks, next_page_params} = paginate_list(blocks_plus_one, params, options[:paging_options])
 
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -237,15 +235,14 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     parameters:
       base_params() ++
         [batch_number_param()] ++
-        define_paging_params(["block_number", "items_count"]),
+        define_paging_params(["block_number"]),
     responses: [
       ok:
         {"L2 blocks in the specified Arbitrum batch.", "application/json",
          paginated_response(
            items: Schemas.Block,
            next_page_params_example: %{
-             "block_number" => 22_566_361,
-             "items_count" => 50
+             "block_number" => 22_566_361
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -263,17 +260,15 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> select_block_type()
       |> Keyword.merge(paging_options(params))
 
-    {blocks, next_page} =
+    {blocks, next_page_params} =
       batch_number
       |> ArbitrumSettlementReader.batch_blocks(full_options)
-      |> split_list_by_page()
-
-    next_page_params = next_page |> next_page_params(blocks, params)
+      |> paginate_list(params, full_options[:paging_options])
 
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -284,15 +279,14 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     parameters:
       base_params() ++
         [batch_number_param()] ++
-        define_paging_params(["block_number", "items_count"]),
+        define_paging_params(["block_number"]),
     responses: [
       ok:
         {"L2 blocks in the specified Optimism batch.", "application/json",
          paginated_response(
            items: Schemas.Block,
            next_page_params_example: %{
-             "block_number" => 22_566_361,
-             "items_count" => 50
+             "block_number" => 22_566_361
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -311,17 +305,15 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> Keyword.merge(paging_options(params))
       |> Keyword.merge(@api_true)
 
-    {blocks, next_page} =
+    {blocks, next_page_params} =
       batch_number
       |> OptimismTransactionBatch.batch_blocks(full_options)
-      |> split_list_by_page()
-
-    next_page_params = next_page |> next_page_params(blocks, params)
+      |> paginate_list(params, full_options[:paging_options])
 
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -332,15 +324,14 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     parameters:
       base_params() ++
         [batch_number_param()] ++
-        define_paging_params(["block_number", "items_count"]),
+        define_paging_params(["block_number"]),
     responses: [
       ok:
         {"L2 blocks in the specified Scroll batch.", "application/json",
          paginated_response(
            items: Schemas.Block,
            next_page_params_example: %{
-             "block_number" => 22_566_361,
-             "items_count" => 50
+             "block_number" => 22_566_361
            }
          )},
       unprocessable_entity: JsonErrorResponse.response()
@@ -359,17 +350,15 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> Keyword.merge(paging_options(params))
       |> Keyword.merge(@api_true)
 
-    {blocks, next_page} =
+    {blocks, next_page_params} =
       batch_number
       |> ScrollReader.batch_blocks(full_options)
-      |> split_list_by_page()
-
-    next_page_params = next_page |> next_page_params(blocks, params)
+      |> paginate_list(params, full_options[:paging_options])
 
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -380,7 +369,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     parameters:
       base_params() ++
         [block_hash_or_number_param(), block_transaction_type_param()] ++
-        define_paging_params(["block_number", "index", "items_count"]),
+        define_paging_params(["block_number", "index"]),
     responses: [
       ok:
         {"Transactions in the specified block, with pagination.", "application/json",
@@ -388,8 +377,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
            items: Schemas.Transaction,
            next_page_params_example: %{
              "block_number" => 12_345_678,
-             "index" => 103,
-             "items_count" => 50
+             "index" => 103
            }
          )},
       unprocessable_entity: JsonErrorResponse.response(),
@@ -413,17 +401,13 @@ defmodule BlockScoutWeb.API.V2.BlockController do
 
       transactions_plus_one = Chain.block_to_transactions(block.hash, full_options, false)
 
-      {transactions, next_page} = split_list_by_page(transactions_plus_one)
-
-      next_page_params =
-        next_page
-        |> next_page_params(transactions, params)
+      {transactions, next_page_params} = paginate_list(transactions_plus_one, params, full_options[:paging_options])
 
       conn
       |> put_status(200)
       |> put_view(TransactionView)
       |> render(:transactions, %{
-        transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+        transactions: transactions |> maybe_preload_ens_and_metadata(:transactions),
         next_page_params: next_page_params
       })
     end
@@ -435,17 +419,22 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       "Retrieves internal transactions included in a specific block with optional filtering by type and call type.",
     parameters:
       base_params() ++
-        [block_hash_or_number_param(), internal_transaction_type_param(), internal_transaction_call_type_param()] ++
-        define_paging_params(["transaction_index", "index", "items_count"]),
+        [
+          block_hash_or_number_param(),
+          internal_transaction_type_param(),
+          internal_transaction_call_type_param(),
+          include_zero_value_param()
+        ] ++
+        define_paging_params(["transaction_index", "index"]),
     responses: [
       ok:
         {"Internal transactions in the specified block.", "application/json",
          paginated_response(
            items: Schemas.InternalTransaction,
+           include_pending_status?: true,
            next_page_params_example: %{
              "transaction_index" => 3,
-             "index" => 8,
-             "items_count" => 50
+             "index" => 8
            }
          )},
       unprocessable_entity: JsonErrorResponse.response(),
@@ -471,18 +460,19 @@ defmodule BlockScoutWeb.API.V2.BlockController do
         |> Keyword.merge(@api_true)
         |> Keyword.merge(internal_transaction_type_options(params))
         |> Keyword.merge(internal_transaction_call_type_options(params))
+        |> Keyword.put(:include_zero_value, Map.get(params, :include_zero_value, true))
 
       internal_transactions_plus_one = block_to_internal_transactions(block, full_options)
 
-      {internal_transactions, next_page} = split_list_by_page(internal_transactions_plus_one)
+      {internal_transactions, next_page_params} =
+        paginate_list(internal_transactions_plus_one, params, full_options[:paging_options],
+          paging_function: &InternalTransaction.internal_transaction_to_block_paging_options/1
+        )
 
-      next_page_params =
-        next_page
-        |> next_page_params(
+      pending_status? =
+        InternalTransactionsPendingStatusHelper.block_internal_transactions_pending?(
           internal_transactions,
-          params,
-          false,
-          &InternalTransaction.internal_transaction_to_block_paging_options/1
+          block.number
         )
 
       conn
@@ -491,7 +481,8 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> render(:internal_transactions, %{
         internal_transactions: internal_transactions,
         next_page_params: next_page_params,
-        block: block
+        block: block,
+        pending_status?: pending_status?
       })
     end
   end
@@ -502,7 +493,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     parameters:
       base_params() ++
         [block_hash_or_number_param()] ++
-        define_paging_params(["index", "items_count"]),
+        define_paging_params(["index"]),
     responses: [
       ok:
         {"Withdrawals in the specified block, with pagination. Note that block_number and timestamp fields are not included in this endpoint.",
@@ -510,8 +501,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
          paginated_response(
            items: Schemas.Withdrawal,
            next_page_params_example: %{
-             "index" => 88_192_653,
-             "items_count" => 50
+             "index" => 88_192_653
            }
          )},
       unprocessable_entity: JsonErrorResponse.response(),
@@ -537,15 +527,14 @@ defmodule BlockScoutWeb.API.V2.BlockController do
         |> Keyword.merge(paging_options(params))
 
       withdrawals_plus_one = Chain.block_to_withdrawals(block.hash, full_options)
-      {withdrawals, next_page} = split_list_by_page(withdrawals_plus_one)
 
-      next_page_params = next_page |> next_page_params(withdrawals, params)
+      {withdrawals, next_page_params} = paginate_list(withdrawals_plus_one, params, full_options[:paging_options])
 
       conn
       |> put_status(200)
       |> put_view(WithdrawalView)
       |> render(:withdrawals, %{
-        withdrawals: withdrawals |> maybe_preload_ens() |> maybe_preload_metadata(),
+        withdrawals: withdrawals |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end
@@ -559,7 +548,8 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     responses: [
       ok: {"Block countdown information.", "application/json", Schemas.Block.Countdown},
       unprocessable_entity: JsonErrorResponse.response(),
-      not_found: NotFoundResponse.response()
+      not_found: NotFoundResponse.response(),
+      not_implemented: NotImplementedResponse.response()
     ]
 
   @doc """
@@ -582,7 +572,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
           | {:average_block_time, {:error, :disabled}}
           | {:remaining_blocks, 0}
   def block_countdown(conn, %{block_number_param: block_number}) do
-    with {:format, {:ok, target_block_number}} <- {:format, param_to_block_number(block_number)},
+    with {:format, {:ok, target_block_number}} <- {:format, param_to_block_number(block_number, false)},
          {:max_block, current_block_number} when not is_nil(current_block_number) <-
            {:max_block, BlockNumber.get_max()},
          {:average_block_time, average_block_time} when is_struct(average_block_time) <-
@@ -606,15 +596,14 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     parameters:
       base_params() ++
         [block_hash_or_number_param()] ++
-        define_paging_params(["index", "items_count"]),
+        define_paging_params(["index"]),
     responses: [
       ok:
         {"Beacon deposits in the specified block.", "application/json",
          paginated_response(
            items: Schemas.Beacon.Deposit,
            next_page_params_example: %{
-             "index" => 123,
-             "items_count" => 50
+             "index" => 123
            }
          )},
       unprocessable_entity: JsonErrorResponse.response(),
@@ -667,22 +656,17 @@ defmodule BlockScoutWeb.API.V2.BlockController do
         |> Keyword.merge(DepositController.paging_options(params))
 
       deposit_plus_one = Deposit.from_block_hash(block.hash, full_options)
-      {deposits, next_page} = split_list_by_page(deposit_plus_one)
 
-      next_page_params =
-        next_page
-        |> next_page_params(
-          deposits,
-          params,
-          false,
-          DepositController.paging_function()
+      {deposits, next_page_params} =
+        paginate_list(deposit_plus_one, params, full_options[:paging_options],
+          paging_function: DepositController.paging_function()
         )
 
       conn
       |> put_status(200)
       |> put_view(DepositView)
       |> render(:deposits, %{
-        deposits: deposits |> maybe_preload_ens() |> maybe_preload_metadata(),
+        deposits: deposits |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end

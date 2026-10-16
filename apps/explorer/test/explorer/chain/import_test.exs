@@ -21,7 +21,7 @@ defmodule Explorer.Chain.ImportTest do
   }
 
   alias Explorer.Chain.Events.Subscriber
-  alias Explorer.Utility.MissingBlockRange
+  alias Explorer.Utility.{AddressIdToAddressHash, LogFirstTopic, MissingBlockRange}
 
   @moduletag :capturelog
 
@@ -100,6 +100,7 @@ defmodule Explorer.Chain.ImportTest do
         params: [
           %{
             block_hash: "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471bd",
+            block_number: 37,
             address_hash: "0x8bf38d4764929064f2d4d3a56520a76ab3df415b",
             data: "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
             first_topic: first_topic,
@@ -107,7 +108,8 @@ defmodule Explorer.Chain.ImportTest do
             third_topic: third_topic,
             fourth_topic: nil,
             index: 0,
-            transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5"
+            transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5",
+            transaction_index: 0
           }
         ],
         timeout: 5
@@ -177,7 +179,7 @@ defmodule Explorer.Chain.ImportTest do
     }
 
     test "with valid data" do
-      {:ok, first_topic} = Explorer.Chain.Hash.Full.cast(@first_topic_hex_string)
+      %{id: first_topic_id} = LogFirstTopic.find_or_create(@first_topic_hex_string)
       {:ok, second_topic} = Explorer.Chain.Hash.Full.cast(@second_topic_hex_string)
       {:ok, third_topic} = Explorer.Chain.Hash.Full.cast(@third_topic_hex_string)
       difficulty = Decimal.new(340_282_366_920_938_463_463_374_607_431_768_211_454)
@@ -185,6 +187,7 @@ defmodule Explorer.Chain.ImportTest do
       token_transfer_amount = Decimal.new(1_000_000_000_000_000_000)
       gas_limit = Decimal.new(6_946_336)
       gas_used = Decimal.new(50450)
+      %{address_id: address_id} = AddressIdToAddressHash.find_or_create("0x8bf38d4764929064f2d4d3a56520a76ab3df415b")
 
       assert {:ok,
               %{
@@ -278,19 +281,14 @@ defmodule Explorer.Chain.ImportTest do
                 ],
                 logs: [
                   %Log{
-                    address_hash: %Hash{
-                      byte_count: 20,
-                      bytes:
-                        <<139, 243, 141, 71, 100, 146, 144, 100, 242, 212, 211, 165, 101, 32, 167, 106, 179, 223, 65,
-                          91>>
-                    },
-                    data: %Data{
+                    address_id: ^address_id,
+                    compressed_data: %Data{
                       bytes:
                         <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 224, 182, 179,
                           167, 100, 0, 0>>
                     },
                     index: 0,
-                    first_topic: ^first_topic,
+                    first_topic_id: ^first_topic_id,
                     second_topic: ^second_topic,
                     third_topic: ^third_topic,
                     fourth_topic: nil,
@@ -300,6 +298,7 @@ defmodule Explorer.Chain.ImportTest do
                         <<83, 189, 136, 72, 114, 222, 62, 72, 134, 146, 136, 27, 174, 236, 38, 46, 123, 149, 35, 77, 57,
                           101, 36, 140, 57, 254, 153, 47, 255, 212, 51, 229>>
                     },
+                    transaction_index: 0,
                     inserted_at: %{},
                     updated_at: %{}
                   }
@@ -387,6 +386,51 @@ defmodule Explorer.Chain.ImportTest do
       assert_raise(Postgrex.Error, fn -> Import.all(incorrect_data) end)
       assert [] = Repo.all(Log)
       assert %{consensus: true, refetch_needed: true} = Repo.one(Block)
+    end
+
+    test "stored consensus blocks keep consensus and are refetched if the blocks transaction fails" do
+      Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo, :auto)
+
+      on_exit(fn ->
+        Repo.delete_all(MissingBlockRange)
+        Repo.delete_all(Block)
+      end)
+
+      [block_params] = @import_data.blocks.params
+      %{hash: stored_block_hash} = stored_block_params = %{block_params | hash: block_hash()}
+
+      assert {:ok, _} = Import.all(%{blocks: %{params: [stored_block_params]}})
+
+      # two consensus blocks at the same height make the blocks transaction fail
+      # on the `one_consensus_block_at_height` unique index
+      conflicting_blocks_params = [block_params, %{block_params | hash: block_hash(), parent_hash: block_hash()}]
+
+      assert_raise(Postgrex.Error, fn -> Import.all(%{blocks: %{params: conflicting_blocks_params}}) end)
+
+      assert [%Block{hash: ^stored_block_hash, consensus: true, refetch_needed: true}] = Repo.all(Block)
+      assert [%MissingBlockRange{from_number: 37, to_number: 37}] = Repo.all(MissingBlockRange)
+    end
+
+    test "stored blocks from a failed blocks transaction are not refetched" do
+      Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo, :auto)
+
+      on_exit(fn ->
+        Repo.delete_all(MissingBlockRange)
+        Repo.delete_all(Block)
+      end)
+
+      [block_params] = @import_data.blocks.params
+      {:ok, stored_block_hash} = Hash.Full.cast(block_params.hash)
+
+      assert {:ok, _} = Import.all(%{blocks: %{params: [block_params]}})
+
+      # the stored block is imported again together with another consensus block at the same height
+      conflicting_blocks_params = [block_params, %{block_params | hash: block_hash(), parent_hash: block_hash()}]
+
+      assert_raise(Postgrex.Error, fn -> Import.all(%{blocks: %{params: conflicting_blocks_params}}) end)
+
+      assert [%Block{hash: ^stored_block_hash, consensus: true, refetch_needed: false}] = Repo.all(Block)
+      assert [] = Repo.all(MissingBlockRange)
     end
 
     test "inserts a token_balance" do
@@ -1371,6 +1415,48 @@ defmodule Explorer.Chain.ImportTest do
       assert DateTime.compare(timestamp, timestamp_before) == :eq
     end
 
+    test "notifies the beacon deposit fetcher about a reorg near the chain head after the import committed" do
+      Application.put_env(:explorer, Explorer.Chain.Cache.BlockNumber, enabled: true)
+
+      on_exit(fn ->
+        Application.put_env(:explorer, Explorer.Chain.Cache.BlockNumber, enabled: false)
+      end)
+
+      Explorer.Chain.Cache.BlockNumber.set_max(50)
+
+      Process.register(self(), Indexer.Fetcher.Beacon.Deposit)
+
+      %Block{hash: old_block_hash} = insert(:block, consensus: true, number: 10)
+
+      miner_hash = address_hash()
+
+      assert {:ok, %{blocks_consensus: %{beacon_deposit_reorg_block_number: 10}}} =
+               Import.all(%{
+                 addresses: %{params: [%{hash: miner_hash}]},
+                 blocks: %{
+                   params: [
+                     %{
+                       consensus: true,
+                       difficulty: 1,
+                       gas_limit: 1,
+                       gas_used: 1,
+                       hash: block_hash(),
+                       miner_hash: miner_hash,
+                       nonce: 1,
+                       number: 10,
+                       parent_hash: block_hash(),
+                       size: 1,
+                       timestamp: Timex.parse!("2019-01-01T02:00:00Z", "{ISO:Extended:Z}"),
+                       total_difficulty: 1
+                     }
+                   ]
+                 }
+               })
+
+      assert %Block{consensus: false} = Repo.get(Block, old_block_hash)
+      assert_received {:"$gen_cast", {:lost_consensus, 10}}
+    end
+
     test "reorganizations nils transaction receipt fields for transactions that end up in non-consensus blocks" do
       block_number = 0
 
@@ -1672,6 +1758,7 @@ defmodule Explorer.Chain.ImportTest do
                    params: [
                      params_for(:log,
                        transaction_hash: transaction_hash,
+                       transaction_index: 0,
                        address_hash: miner_hash,
                        block_hash: block_hash
                      )

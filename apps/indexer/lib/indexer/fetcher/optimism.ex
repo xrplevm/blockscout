@@ -19,10 +19,9 @@ defmodule Indexer.Fetcher.Optimism do
 
   alias EthereumJSONRPC.Block.{ByHash, ByNumber}
   alias EthereumJSONRPC.{Blocks, Contract}
-  alias Explorer.Application.Constants
   alias Explorer.Chain.Cache.ChainId
   alias Explorer.Chain.Cache.Counters.LastFetchedCounter
-  alias Explorer.Chain.Optimism.Withdrawal
+  alias Explorer.Chain.Optimism.SuperchainConfig
   alias Explorer.Repo
   alias Indexer.Fetcher.RollupL1ReorgMonitor
   alias Indexer.Helper
@@ -110,13 +109,13 @@ defmodule Indexer.Fetcher.Optimism do
       end
 
     optimism_env = Application.get_all_env(:indexer)[__MODULE__]
-    system_config = optimism_env[:optimism_l1_system_config]
+    system_config = SuperchainConfig.optimism_l1_system_config_contract()
     optimism_l1_rpc = l1_rpc_url()
 
     with {:system_config_valid, true} <- {:system_config_valid, Helper.address_correct?(system_config)},
          _ <- RollupL1ReorgMonitor.wait_for_start(caller),
          {:rpc_l1_undefined, false} <- {:rpc_l1_undefined, is_nil(optimism_l1_rpc)},
-         json_rpc_named_arguments = Helper.json_rpc_named_arguments(optimism_l1_rpc),
+         json_rpc_named_arguments = Helper.l1_json_rpc_named_arguments(optimism_l1_rpc),
          {optimism_portal, start_block_l1} <- read_system_config(system_config, json_rpc_named_arguments),
          {:contract_is_valid, true} <-
            {:contract_is_valid, caller != Indexer.Fetcher.Optimism.OutputRoot or Helper.address_correct?(output_oracle)},
@@ -217,8 +216,8 @@ defmodule Indexer.Fetcher.Optimism do
 
     error_message = &"Cannot call public getters of SystemConfig. Error: #{inspect(&1)}"
 
-    env = Application.get_all_env(:indexer)[__MODULE__]
-    fallback_start_block = env[:start_block_l1]
+    fallback_start_block = SuperchainConfig.optimism_l1_batch_start_block()
+    fallback_portal = SuperchainConfig.optimism_l1_portal_contract()
 
     {optimism_portal, start_block} =
       case Helper.repeated_call(
@@ -232,8 +231,8 @@ defmodule Indexer.Fetcher.Optimism do
 
           optimism_portal =
             with {:nil_result, true, _} <- {:nil_result, is_nil(optimism_portal_result), optimism_portal_result},
-                 {:fallback_defined, true} <- {:fallback_defined, Helper.address_correct?(env[:portal])} do
-              env[:portal]
+                 {:fallback_defined, true} <- {:fallback_defined, Helper.address_correct?(fallback_portal)} do
+              fallback_portal
             else
               {:nil_result, false, portal} ->
                 "0x000000000000000000000000" <> optimism_portal = portal
@@ -249,15 +248,10 @@ defmodule Indexer.Fetcher.Optimism do
             |> Map.get(:result, fallback_start_block)
             |> quantity_to_integer()
 
-          if not is_nil(optimism_portal) do
-            # we save the OptimismPortal contract address to use it in other modules (e.g. by `BlockScoutWeb.API.V2.OptimismView`)
-            Constants.set_constant_value(Withdrawal.portal_contract_address_constant(), optimism_portal)
-          end
-
           {optimism_portal, start_block}
 
         _ ->
-          {env[:portal], fallback_start_block}
+          {fallback_portal, fallback_start_block}
       end
 
     if Helper.address_correct?(optimism_portal) and !is_nil(start_block) do
@@ -282,8 +276,7 @@ defmodule Indexer.Fetcher.Optimism do
   """
   @spec requires_l1_reorg_monitor?() :: boolean()
   def requires_l1_reorg_monitor? do
-    optimism_config = Application.get_all_env(:indexer)[__MODULE__]
-    not is_nil(optimism_config[:optimism_l1_system_config])
+    not is_nil(SuperchainConfig.optimism_l1_system_config_contract())
   end
 
   @doc """

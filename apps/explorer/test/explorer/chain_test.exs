@@ -23,8 +23,7 @@ defmodule Explorer.ChainTest do
     Wei
   }
 
-  alias Explorer.{Chain, Etherscan}
-  alias Explorer.Chain.Cache.ChainId
+  alias Explorer.Chain.Cache.{ChainId, Uncles}
 
   alias Explorer.Chain.Cache.Counters.{
     BlocksCount,
@@ -36,11 +35,10 @@ defmodule Explorer.ChainTest do
   alias Explorer.Chain.MultichainSearchDb.{BalancesExportQueue, MainExportQueue}
 
   alias Explorer.Chain.Supply.ProofOfAuthority
-  alias Explorer.Chain.Cache.Counters.AddressesCount
 
   alias Explorer.TestHelper
 
-  alias Explorer.Utility.AddressIdToAddressHash
+  alias Explorer.Utility.{AddressIdToAddressHash, LogFirstTopic}
 
   @first_topic_hex_string "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
   @second_topic_hex_string "0x000000000000000000000000e8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"
@@ -51,27 +49,6 @@ defmodule Explorer.ChainTest do
   setup :set_mox_global
 
   setup :verify_on_exit!
-
-  describe "address_estimated_count/0" do
-    test "returns the number of all addresses" do
-      insert(:address, fetched_coin_balance: 0)
-      insert(:address, fetched_coin_balance: 1)
-      insert(:address, fetched_coin_balance: 2)
-
-      start_supervised!(AddressesCount)
-      AddressesCount.consolidate()
-
-      addresses_with_balance = AddressesCount.fetch()
-
-      assert is_integer(addresses_with_balance)
-      assert addresses_with_balance == 3
-    end
-
-    test "returns 0 on empty table" do
-      start_supervised!(AddressesCount)
-      assert 0 == AddressesCount.fetch()
-    end
-  end
 
   describe "address_to_logs/2" do
     test "fetches logs" do
@@ -104,6 +81,104 @@ defmodule Explorer.ChainTest do
       )
 
       assert Enum.count(Chain.address_to_logs(address_hash, false)) == 2
+    end
+
+    test "fetches logs matched by `address_id` and by the legacy `address_hash` while the optimized fields migration is in progress" do
+      set_fill_logs_optimized_fields_migration_started()
+
+      %Address{hash: address_hash} = address = insert(:address)
+
+      transaction =
+        :transaction
+        |> insert(to_address: address)
+        |> with_block()
+
+      # already migrated log, matched by `address_id`
+      insert(:log,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        transaction: transaction,
+        index: 1,
+        address: address,
+        address_hash: nil
+      )
+
+      # not yet migrated log, matched by the legacy `address_hash`
+      insert(:log,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        transaction: transaction,
+        index: 2,
+        address: address,
+        address_mapping: nil
+      )
+
+      # log re-imported before it is migrated: the upsert fills `address_id` while
+      # `address_hash` is kept, so both fields match the address and the log has to
+      # be returned once
+      insert(:log,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        transaction: transaction,
+        index: 3,
+        address: address
+      )
+
+      insert(:log,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        transaction: transaction,
+        index: 4,
+        address: insert(:address),
+        address_mapping: nil
+      )
+
+      assert [3, 2, 1] == address_hash |> Chain.address_to_logs(false) |> Enum.map(& &1.index)
+
+      paging_options = %PagingOptions{page_size: 1}
+
+      assert [3] == address_hash |> Chain.address_to_logs(false, paging_options: paging_options) |> Enum.map(& &1.index)
+
+      paging_options = %PagingOptions{page_size: 50, key: {transaction.block_number, 2}}
+
+      assert [1] == address_hash |> Chain.address_to_logs(false, paging_options: paging_options) |> Enum.map(& &1.index)
+    end
+
+    test "filters logs by topic while the optimized fields migration is in progress" do
+      set_fill_logs_optimized_fields_migration_started()
+
+      %Address{hash: address_hash} = address = insert(:address)
+
+      transaction =
+        :transaction
+        |> insert(to_address: address)
+        |> with_block()
+
+      {:ok, first_topic} = Hash.Full.cast(@first_topic_hex_string)
+
+      insert(:log,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        transaction: transaction,
+        index: 1,
+        address: address,
+        address_hash: nil
+      )
+
+      insert(:log,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        transaction: transaction,
+        index: 2,
+        address: address,
+        address_mapping: nil,
+        first_topic: first_topic
+      )
+
+      assert [2] ==
+               address_hash
+               |> Chain.address_to_logs(false, topic: @first_topic_hex_string)
+               |> Enum.map(& &1.index)
     end
 
     test "paginates logs" do
@@ -161,6 +236,7 @@ defmodule Explorer.ChainTest do
       insert(:log,
         block: transaction2.block,
         transaction: transaction2,
+        transaction_index: transaction2.index,
         index: 2,
         address: address,
         first_topic: first_topic,
@@ -187,6 +263,7 @@ defmodule Explorer.ChainTest do
         block: transaction1.block,
         block_number: transaction1.block_number,
         transaction: transaction1,
+        transaction_index: transaction1.index,
         index: 1,
         address: address,
         fourth_topic: fourth_topic
@@ -201,6 +278,7 @@ defmodule Explorer.ChainTest do
         block: transaction2.block,
         block_number: transaction2.block.number,
         transaction: transaction2,
+        transaction_index: transaction2.index,
         index: 2,
         address: address
       )
@@ -927,20 +1005,6 @@ defmodule Explorer.ChainTest do
     end
   end
 
-  describe "fetch_sum_coin_total_supply/0" do
-    test "fetches coin total supply" do
-      for index <- 0..4 do
-        insert(:address, fetched_coin_balance: index)
-      end
-
-      assert "10" = Decimal.to_string(Etherscan.fetch_sum_coin_total_supply())
-    end
-
-    test "fetches coin total supply when there are no blocks" do
-      assert 0 = Etherscan.fetch_sum_coin_total_supply()
-    end
-  end
-
   describe "address_hash_to_token_transfers/2" do
     test "returns just the token transfers related to the given contract address" do
       contract_address =
@@ -1100,6 +1164,7 @@ defmodule Explorer.ChainTest do
         params: [
           %{
             block_hash: "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471bd",
+            block_number: 37,
             address_hash: "0x8bf38d4764929064f2d4d3a56520a76ab3df415b",
             data: "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
             first_topic: first_topic,
@@ -1107,7 +1172,8 @@ defmodule Explorer.ChainTest do
             third_topic: third_topic,
             fourth_topic: nil,
             index: 0,
-            transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5"
+            transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5",
+            transaction_index: 1
           }
         ]
       },
@@ -1171,7 +1237,6 @@ defmodule Explorer.ChainTest do
     }
 
     test "with valid data", %{json_rpc_named_arguments: _json_rpc_named_arguments} do
-      {:ok, first_topic} = Explorer.Chain.Hash.Full.cast(@first_topic_hex_string)
       {:ok, second_topic} = Explorer.Chain.Hash.Full.cast(@second_topic_hex_string)
       {:ok, third_topic} = Explorer.Chain.Hash.Full.cast(@third_topic_hex_string)
       difficulty = Decimal.new(340_282_366_920_938_463_463_374_607_431_768_211_454)
@@ -1187,6 +1252,8 @@ defmodule Explorer.ChainTest do
         AddressIdToAddressHash.find_or_create("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca")
 
       %{address_id: to_address_id} = AddressIdToAddressHash.find_or_create("0x8bf38d4764929064f2d4d3a56520a76ab3df415b")
+
+      %{id: first_topic_id} = LogFirstTopic.find_or_create(@first_topic_hex_string)
 
       assert {:ok,
               %{
@@ -1295,19 +1362,14 @@ defmodule Explorer.ChainTest do
                 ],
                 logs: [
                   %Log{
-                    address_hash: %Hash{
-                      byte_count: 20,
-                      bytes:
-                        <<139, 243, 141, 71, 100, 146, 144, 100, 242, 212, 211, 165, 101, 32, 167, 106, 179, 223, 65,
-                          91>>
-                    },
-                    data: %Data{
+                    address_id: ^to_address_id,
+                    compressed_data: %Data{
                       bytes:
                         <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 224, 182, 179,
                           167, 100, 0, 0>>
                     },
                     index: 0,
-                    first_topic: ^first_topic,
+                    first_topic_id: ^first_topic_id,
                     second_topic: ^second_topic,
                     third_topic: ^third_topic,
                     fourth_topic: nil,
@@ -1317,6 +1379,7 @@ defmodule Explorer.ChainTest do
                         <<83, 189, 136, 72, 114, 222, 62, 72, 134, 146, 136, 27, 174, 236, 38, 46, 123, 149, 35, 77, 57,
                           101, 36, 140, 57, 254, 153, 47, 255, 212, 51, 229>>
                     },
+                    transaction_index: 1,
                     inserted_at: %{},
                     updated_at: %{}
                   }
@@ -1403,6 +1466,42 @@ defmodule Explorer.ChainTest do
 
       # 3 addresses + 1 block + 1 transaction
       assert Repo.aggregate(MainExportQueue, :count, :hash) == 5
+    end
+
+    test "populates main multichain export queue with proxy contract implementations (verified and not verified)" do
+      Supervisor.terminate_child(Explorer.Supervisor, ChainId.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, ChainId.child_id())
+      multichain_configuration = Application.get_env(:explorer, Explorer.MicroserviceInterfaces.MultichainSearch)
+
+      on_exit(fn ->
+        Application.put_env(:explorer, Explorer.MicroserviceInterfaces.MultichainSearch, multichain_configuration)
+      end)
+
+      bypass = Bypass.open()
+
+      Application.put_env(:explorer, Explorer.MicroserviceInterfaces.MultichainSearch,
+        service_url: "http://localhost:#{bypass.port}",
+        addresses_chunk_size: 7_000
+      )
+
+      proxy_hash = "0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"
+      implementation_1 = insert(:address)
+      implementation_2 = insert(:address)
+
+      insert(:proxy_implementation,
+        proxy_address_hash: proxy_hash,
+        proxy_type: "eip1167",
+        address_hashes: [implementation_1.hash, implementation_2.hash],
+        names: ["Test1", "Test2"]
+      )
+
+      insert(:smart_contract, address_hash: implementation_1.hash, name: "TestContract1", contract_code_md5: "123")
+
+      TestHelper.get_chain_id_mock()
+      Chain.import(@import_data)
+
+      # 3 addresses + 2 implementations + 1 block + 1 transaction
+      assert Repo.aggregate(MainExportQueue, :count, :hash) == 7
     end
 
     test "doesn't populate main multichain export queue from on_demand fetcher, if the address is inactive on the chain" do
@@ -1583,6 +1682,58 @@ defmodule Explorer.ChainTest do
       # token balance value has been updated
       assert token_balance_export_item.value == %Explorer.Chain.Wei{value: Decimal.new(500)}
     end
+
+    test "populates balances multichain export queue only with coin balances supplied by the import, if the multichain service is enabled" do
+      Supervisor.terminate_child(Explorer.Supervisor, ChainId.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, ChainId.child_id())
+      multichain_configuration = Application.get_env(:explorer, Explorer.MicroserviceInterfaces.MultichainSearch)
+
+      on_exit(fn ->
+        Application.put_env(:explorer, Explorer.MicroserviceInterfaces.MultichainSearch, multichain_configuration)
+      end)
+
+      bypass = Bypass.open()
+
+      Application.put_env(
+        :explorer,
+        Explorer.MicroserviceInterfaces.MultichainSearch,
+        Keyword.merge(multichain_configuration || [],
+          service_url: "http://localhost:#{bypass.port}",
+          addresses_chunk_size: 7_000
+        )
+      )
+
+      %Address{hash: address_hash} =
+        insert(:address, fetched_coin_balance: Decimal.new(100), fetched_coin_balance_block_number: 10)
+
+      address_hash_string = to_string(address_hash)
+
+      TestHelper.get_chain_id_mock()
+
+      # An import that only touches the address (as internal transactions or token transfers
+      # imports do) leaves its balance unchanged and must not re-enqueue it
+      {:ok, %{addresses: [%Address{hash: ^address_hash}]}} =
+        Chain.import(%{
+          addresses: %{params: [%{hash: address_hash_string, fetched_coin_balance_block_number: 11}]}
+        })
+
+      assert Repo.aggregate(BalancesExportQueue, :count, :id) == 0
+
+      # An import that supplies the current balance is exported with the stored value
+      {:ok, %{addresses: [%Address{hash: ^address_hash}]}} =
+        Chain.import(%{
+          addresses: %{
+            params: [
+              %{hash: address_hash_string, fetched_coin_balance: 250, fetched_coin_balance_block_number: 12}
+            ]
+          }
+        })
+
+      assert [%BalancesExportQueue{address_hash: ^address_hash, value: %Wei{value: value}}] =
+               Repo.all(BalancesExportQueue)
+
+      assert Decimal.equal?(value, 250)
+    end
   end
 
   describe "list_blocks/2" do
@@ -1685,31 +1836,6 @@ defmodule Explorer.ChainTest do
                transaction.hash
                |> Chain.transaction_to_logs(paging_options: %PagingOptions{key: {log.index}, page_size: 50})
                |> Enum.map(& &1.index)
-    end
-
-    test "with logs necessity_by_association loads associations" do
-      transaction =
-        :transaction
-        |> insert()
-        |> with_block()
-
-      insert(:log, transaction: transaction, block: transaction.block, block_number: transaction.block_number)
-
-      assert [%Log{address: %Address{}, transaction: %Transaction{}}] =
-               Chain.transaction_to_logs(
-                 transaction.hash,
-                 necessity_by_association: %{
-                   address: :optional,
-                   transaction: :optional
-                 }
-               )
-
-      assert [
-               %Log{
-                 address: %Ecto.Association.NotLoaded{},
-                 transaction: %Ecto.Association.NotLoaded{}
-               }
-             ] = Chain.transaction_to_logs(transaction.hash)
     end
   end
 
@@ -2206,6 +2332,30 @@ defmodule Explorer.ChainTest do
     end
   end
 
+  describe "balance_in_fiat/1" do
+    test "prices an ERC-8056 balance by its displayed amount, not its raw one" do
+      # `fiat_value` quotes the UI amount, which is twice the raw one here
+      token =
+        build(:token,
+          type: "ERC-8056",
+          decimals: Decimal.new(0),
+          fiat_value: Decimal.new(3),
+          ui_multiplier: Decimal.new("2000000000000000000")
+        )
+
+      token_balance = %{token: token, value: Decimal.new(5), fiat_value: nil}
+
+      assert Decimal.equal?(Chain.balance_in_fiat(token_balance), Decimal.new(30))
+    end
+
+    test "leaves a token without ERC-8056 support priced by its raw balance" do
+      token = build(:token, decimals: Decimal.new(0), fiat_value: Decimal.new(3))
+      token_balance = %{token: token, value: Decimal.new(5), fiat_value: nil}
+
+      assert Decimal.equal?(Chain.balance_in_fiat(token_balance), Decimal.new(15))
+    end
+  end
+
   describe "fetch_token_holders_from_token_hash/3" do
     test "returns the token holders" do
       %Token{contract_address_hash: contract_address_hash} = insert(:token)
@@ -2565,6 +2715,214 @@ defmodule Explorer.ChainTest do
              }
 
       Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, init_config)
+    end
+  end
+
+  # The uncles cache is warmed by the indexer with its own fixed preload list
+  # (`:transactions`, `[miner: :names]`, `:rewards`, `:nephews`), which is
+  # narrower than what a listing asks for. Serving those elements as they are
+  # would answer a request with associations left unloaded.
+  describe "list_blocks/1 served from a warm uncles cache" do
+    setup do
+      Supervisor.terminate_child(Explorer.Supervisor, Uncles.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, Uncles.child_id())
+
+      :ok
+    end
+
+    test "loads the requested associations the cache does not preload itself" do
+      relations =
+        for _ <- 1..3 do
+          miner = insert(:address)
+          insert(:smart_contract, address_hash: miner.hash)
+          uncle = insert(:block, consensus: false, miner: miner)
+          insert(:block_second_degree_relation, uncle_hash: uncle.hash, nephew: insert(:block), index: 0)
+        end
+
+      Uncles.update_from_second_degree_relations(relations)
+
+      blocks =
+        Chain.list_blocks(
+          block_type: "Uncle",
+          necessity_by_association: %{[miner: [:names, :smart_contract]] => :optional},
+          paging_options: %PagingOptions{page_size: 2, key: nil}
+        )
+
+      assert length(blocks) == 2
+
+      assert Enum.all?(blocks, fn block ->
+               not match?(%Ecto.Association.NotLoaded{}, block.miner.smart_contract) and
+                 block.miner.smart_contract.address_hash == block.miner_hash
+             end)
+    end
+  end
+
+  # `join_associations/2` fetches a to-one association through a join and
+  # everything else through a preload. A join against a to-many association
+  # repeats the parent row once per child, which makes a `limit/2` count joined
+  # rows rather than entities, so these cover the shapes where the distinction
+  # decides whether a page comes back whole.
+  describe "join_associations/2" do
+    test "a required to-one association loads its to-many nested preload" do
+      address = insert(:address)
+      insert(:address_name, address: address, primary: true, name: "first")
+      insert(:address_name, address: address, name: "second")
+
+      block = insert(:block)
+      transaction = :transaction |> insert(from_address: address) |> with_block(block)
+
+      assert {:ok, loaded} =
+               Chain.hash_to_transaction(transaction.hash,
+                 necessity_by_association: %{[from_address: :names] => :required}
+               )
+
+      assert loaded.hash == transaction.hash
+      assert loaded.from_address.hash == address.hash
+      assert length(loaded.from_address.names) == 2
+    end
+
+    test "a required to-one association returns each entity once and fills a full page" do
+      block = insert(:block)
+
+      transactions =
+        for _ <- 1..10 do
+          address = insert(:address)
+          insert(:address_name, address: address, primary: true, name: "first")
+          insert(:address_name, address: address, name: "second")
+          :transaction |> insert(from_address: address) |> with_block(block)
+        end
+
+      loaded =
+        Chain.block_to_transactions(block.hash,
+          necessity_by_association: %{[from_address: :names] => :required},
+          paging_options: %PagingOptions{page_size: 10, key: nil}
+        )
+
+      hashes = Enum.map(loaded, & &1.hash)
+
+      assert length(hashes) == 10
+      assert hashes == Enum.uniq(hashes)
+      assert MapSet.new(hashes) == MapSet.new(Enum.map(transactions, & &1.hash))
+      assert Enum.all?(loaded, &(length(&1.from_address.names) == 2))
+    end
+
+    test "a required association drops the entities that do not have it" do
+      block = insert(:block)
+      with_from_address = :transaction |> insert(from_address: insert(:address)) |> with_block(block)
+
+      loaded =
+        Chain.block_to_transactions(block.hash,
+          necessity_by_association: %{[from_address: :names] => :required},
+          paging_options: %PagingOptions{page_size: 10, key: nil}
+        )
+
+      assert Enum.map(loaded, & &1.hash) == [with_from_address.hash]
+    end
+
+    test "a required to-many association keeps one row per entity" do
+      uncle = insert(:block, consensus: false)
+
+      for index <- 0..2 do
+        insert(:block_second_degree_relation, uncle_hash: uncle.hash, nephew: insert(:block), index: index)
+      end
+
+      loaded =
+        Chain.list_blocks(
+          block_type: "Uncle",
+          necessity_by_association: %{:nephews => :required},
+          paging_options: %PagingOptions{page_size: 10, key: nil}
+        )
+
+      assert Enum.map(loaded, & &1.hash) == [uncle.hash]
+      assert length(hd(loaded).nephews) == 3
+    end
+
+    test "an optional to-many association fills a full page" do
+      for _ <- 1..12 do
+        block = insert(:block)
+        for _ <- 1..3, do: :transaction |> insert() |> with_block(block)
+      end
+
+      loaded =
+        Chain.list_blocks(
+          necessity_by_association: %{:transactions => :optional, :rewards => :optional},
+          paging_options: %PagingOptions{page_size: 10, key: nil}
+        )
+
+      hashes = Enum.map(loaded, & &1.hash)
+
+      assert length(hashes) == 10
+      assert hashes == Enum.uniq(hashes)
+      assert Enum.all?(loaded, &(length(&1.transactions) == 3))
+    end
+
+    test "a has_one through and a primary-key-less schema still load" do
+      address = insert(:address)
+      insert(:address_name, address: address, primary: true, name: "named")
+
+      token_transfer = insert(:token_transfer, from_address: address)
+
+      [loaded] =
+        Chain.address_hash_to_token_transfers_new(address.hash,
+          necessity_by_association: %{
+            :token => :optional,
+            [from_address: [:scam_badge, :names]] => :optional
+          }
+        )
+
+      assert loaded.transaction_hash == token_transfer.transaction_hash
+      assert loaded.token.contract_address_hash == token_transfer.token_contract_address_hash
+      assert length(loaded.from_address.names) == 1
+      assert loaded.from_address.scam_badge == nil
+    end
+
+    test "a required spec carrying its own query still filters" do
+      %Transaction{hash: collated_hash} = :transaction |> insert() |> with_block()
+      %Transaction{hash: pending_hash} = insert(:transaction)
+
+      spec = [block: from(block in Block, select: struct(block, [:hash, :number]))]
+
+      assert {:ok, %Transaction{hash: ^collated_hash} = loaded} =
+               Chain.hash_to_transaction(collated_hash, necessity_by_association: %{spec => :required})
+
+      assert loaded.block.number
+
+      assert {:error, :not_found} =
+               Chain.hash_to_transaction(pending_hash, necessity_by_association: %{spec => :required})
+
+      assert {:ok, %Transaction{hash: ^pending_hash}} =
+               Chain.hash_to_transaction(pending_hash, necessity_by_association: %{spec => :optional})
+    end
+
+    test "a required association the query already binds filters without an alias collision" do
+      %Transaction{hash: collated_hash} = :transaction |> insert() |> with_block()
+      %Transaction{hash: pending_hash} = insert(:transaction)
+
+      loaded =
+        from(transaction in Transaction, left_join: block in assoc(transaction, :block), as: :block)
+        |> Chain.join_associations(%{:block => :required})
+        |> Repo.all()
+
+      assert Enum.map(loaded, & &1.hash) == [collated_hash]
+      refute pending_hash in Enum.map(loaded, & &1.hash)
+      assert hd(loaded).block.number
+    end
+
+    test "a required through association the query already binds stays on the preload path" do
+      transaction = :transaction |> insert() |> with_block()
+
+      token_transfer =
+        insert(:token_transfer,
+          transaction: transaction,
+          block: transaction.block,
+          block_number: transaction.block_number
+        )
+
+      [loaded] =
+        Chain.transaction_to_token_transfers(transaction.hash, necessity_by_association: %{:token => :required})
+
+      assert loaded.log_index == token_transfer.log_index
+      assert loaded.token.contract_address_hash == token_transfer.token_contract_address_hash
     end
   end
 end

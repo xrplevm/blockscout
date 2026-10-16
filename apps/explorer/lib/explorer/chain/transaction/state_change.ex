@@ -4,6 +4,8 @@ defmodule Explorer.Chain.Transaction.StateChange do
     Helper functions and struct for storing state changes
   """
 
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
+
   use Utils.RuntimeEnvHelper,
     miner_gets_burnt_fees?: [:explorer, [Explorer.Chain.Transaction, :block_miner_gets_burnt_fees?]]
 
@@ -15,14 +17,25 @@ defmodule Explorer.Chain.Transaction.StateChange do
     DenormalizationHelper,
     Hash,
     InternalTransaction,
+    Token,
     TokenTransfer,
     Transaction,
     Wei
   }
 
+  alias Explorer.Chain.Token.UIMultiplierChange
   alias Explorer.Chain.Transaction.StateChange
 
-  defstruct [:coin_or_token_transfers, :address, :token_id, :balance_before, :balance_after, :balance_diff, :miner?]
+  defstruct [
+    :coin_or_token_transfers,
+    :address,
+    :token_id,
+    :balance_before,
+    :balance_after,
+    :balance_diff,
+    :miner?,
+    :ui_multiplier
+  ]
 
   @type t :: %__MODULE__{
           coin_or_token_transfers: :coin | [TokenTransfer.t()],
@@ -31,7 +44,8 @@ defmodule Explorer.Chain.Transaction.StateChange do
           balance_before: Wei.t() | Decimal.t(),
           balance_after: Wei.t() | Decimal.t(),
           balance_diff: Wei.t() | Decimal.t(),
-          miner?: boolean()
+          miner?: boolean(),
+          ui_multiplier: Decimal.t() | nil
         }
 
   @type coin_balances_map :: %{Hash.Address.t() => {Address.t(), Wei.t()}}
@@ -59,7 +73,8 @@ defmodule Explorer.Chain.Transaction.StateChange do
     coin_balances =
       coin_balances
       |> update_balance(transaction.from_address_hash, &Wei.sub(&1, from_loss(transaction)))
-      |> update_balance(transaction.to_address_hash, &Wei.sum(&1, to_profit(transaction)))
+      |> update_balance(fee_payer_address_hash(transaction), &Wei.sub(&1, fee_payer_loss(transaction)))
+      |> credit_recipients(transaction)
       |> update_balance(block.miner_hash, &Wei.sum(&1, miner_profit(transaction, block)))
 
     if error?(transaction) do
@@ -68,6 +83,30 @@ defmodule Explorer.Chain.Transaction.StateChange do
       transaction.internal_transactions
       |> Enum.reduce(coin_balances, &update_coin_balances_from_internal_transaction(&1, &2))
     end
+  end
+
+  # Credits the addresses which receive the value of the transaction.
+  #
+  # An Eden sponsored transaction carries an ordered list of the batched calls, each one with its
+  # own recipient and value, so every one of them is credited separately. The `to_address_hash` and
+  # the `value` of such a transaction are just the compatibility fields derived from the first call
+  # and from the sum of all the calls, hence they are not used here.
+  if @chain_type == :eden do
+    defp credit_recipients(coin_balances, %Transaction{calls: [_ | _]} = transaction) do
+      if error?(transaction) do
+        coin_balances
+      else
+        transaction
+        |> Transaction.calls_value_by_recipient()
+        |> Enum.reduce(coin_balances, fn {address_hash, value}, acc ->
+          update_balance(acc, address_hash, &Wei.sum(&1, value))
+        end)
+      end
+    end
+  end
+
+  defp credit_recipients(coin_balances, transaction) do
+    update_balance(coin_balances, transaction.to_address_hash, &Wei.sum(&1, to_profit(transaction)))
   end
 
   defp update_coin_balances_from_internal_transaction(
@@ -199,17 +238,53 @@ defmodule Explorer.Chain.Transaction.StateChange do
   """
   @spec from_loss(Transaction.t() | InternalTransaction.t()) :: Wei.t()
   def from_loss(%Transaction{} = transaction) do
-    {_, fee} = Transaction.fee(transaction, :wei)
+    fee = sender_fee(transaction)
 
     if error?(transaction) do
-      %Wei{value: fee}
+      fee
     else
-      Wei.sum(transaction.value, %Wei{value: fee})
+      Wei.sum(transaction.value, fee)
     end
   end
 
   def from_loss(%InternalTransaction{} = transaction) do
     transaction.value || Wei.zero()
+  end
+
+  @doc """
+  Returns the balance change of the fee payer (sponsor) of a transaction.
+
+  Equals to the transaction fee for the transactions which fee is paid by an address other than
+  the transaction sender (the Eden sponsored transactions), zero otherwise.
+  """
+  @spec fee_payer_loss(Transaction.t()) :: Wei.t()
+  if @chain_type == :eden do
+    def fee_payer_loss(%Transaction{fee_payer_address_hash: nil}), do: Wei.zero()
+
+    def fee_payer_loss(%Transaction{} = transaction), do: transaction_fee(transaction)
+  else
+    def fee_payer_loss(%Transaction{}), do: Wei.zero()
+  end
+
+  if @chain_type == :eden do
+    defp sender_fee(%Transaction{fee_payer_address_hash: nil} = transaction), do: transaction_fee(transaction)
+
+    defp sender_fee(%Transaction{}), do: Wei.zero()
+  else
+    defp sender_fee(%Transaction{} = transaction), do: transaction_fee(transaction)
+  end
+
+  if @chain_type == :eden do
+    defp fee_payer_address_hash(%Transaction{fee_payer_address_hash: fee_payer_address_hash}),
+      do: fee_payer_address_hash
+  else
+    defp fee_payer_address_hash(%Transaction{}), do: nil
+  end
+
+  defp transaction_fee(transaction) do
+    {_, fee} = Transaction.fee(transaction, :wei)
+
+    %Wei{value: fee}
   end
 
   @doc """
@@ -361,7 +436,7 @@ defmodule Explorer.Chain.Transaction.StateChange do
       token_type =
         if DenormalizationHelper.tt_denormalization_finished?(), do: transfer.token_type, else: transfer.token.type
 
-      if token_type not in ["ERC-20", "ZRC-2"] or has_diff?(balance_diff) do
+      if token_type not in ["ERC-20", "ERC-8056", "ZRC-2"] or has_diff?(balance_diff) do
         %StateChange{
           coin_or_token_transfers: transfers,
           address: address,
@@ -376,4 +451,68 @@ defmodule Explorer.Chain.Transaction.StateChange do
     |> Enum.reject(&is_nil/1)
     |> Enum.sort_by(fn state_change -> to_string(state_change.address && state_change.address.hash) end)
   end
+
+  @doc """
+  Fills the `ui_multiplier` of the given token state changes with the
+  [ERC-8056](https://eips.ethereum.org/EIPS/eip-8056) multiplier that was in
+  force at the end of the transaction.
+
+  A balance is a state of the transaction as a whole, so unlike the amount of a
+  single transfer it is resolved against the last log of the transaction: a
+  change the transaction announced itself applies to the balances it leaves
+  behind.
+
+  Costs one query for the whole transaction, and none at all — the usual case —
+  when none of the tokens involved implements ERC-8056. Requires `:token` to be
+  preloaded on the transfers of the state changes and on `transaction`, whose
+  block timestamp decides whether a scheduled change had already matured.
+  """
+  @spec put_ui_multipliers([t()], Transaction.t(), keyword()) :: [t()]
+  def put_ui_multipliers(state_changes, %Transaction{} = transaction, options \\ []) do
+    scaled_token_hashes =
+      state_changes
+      |> Enum.map(&scaled_token_hash/1)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    case UIMultiplierChange.for_tokens(scaled_token_hashes, options) do
+      changes_by_token when map_size(changes_by_token) == 0 ->
+        state_changes
+
+      changes_by_token ->
+        log_index = last_log_index(transaction)
+
+        Enum.map(state_changes, &put_ui_multiplier(&1, transaction, log_index, changes_by_token))
+    end
+  end
+
+  defp put_ui_multiplier(%StateChange{} = state_change, transaction, log_index, changes_by_token) do
+    with token_contract_address_hash when not is_nil(token_contract_address_hash) <- scaled_token_hash(state_change),
+         changes when not is_nil(changes) <- changes_by_token[token_contract_address_hash] do
+      %{state_change | ui_multiplier: UIMultiplierChange.at_end_of_transaction(changes, transaction, log_index)}
+    else
+      _ -> state_change
+    end
+  end
+
+  defp scaled_token_hash(%StateChange{coin_or_token_transfers: [{_direction, transfer} | _]}) do
+    case transfer.token do
+      %Token{ui_multiplier: %Decimal{}, contract_address_hash: contract_address_hash} -> contract_address_hash
+      _ -> nil
+    end
+  end
+
+  defp scaled_token_hash(_state_change), do: nil
+
+  # The transfers the balances were derived from are the part of the transaction
+  # known here; `UIMultiplierChange.at_end_of_transaction/3` reaches the rest of
+  # it through the hash the changes carry.
+  defp last_log_index(%Transaction{token_transfers: token_transfers}) when is_list(token_transfers) do
+    token_transfers
+    |> Enum.map(& &1.log_index)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.max(fn -> 0 end)
+  end
+
+  defp last_log_index(_transaction), do: 0
 end

@@ -9,6 +9,7 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
   alias Explorer.{Chain, Repo}
   alias Explorer.Chain.{Block, Data, Hash, Transaction}
   alias Explorer.Chain.Optimism.{DisputeGame, FrameSequence, FrameSequenceBlob, InteropMessage, Withdrawal}
+  alias Explorer.Helper, as: ExplorerHelper
 
   @api_true [api?: true]
 
@@ -122,13 +123,22 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
               2 -> "Defender wins"
             end
 
-          l2_block_number = DisputeGame.l2_block_number_from_extra_data(g.extra_data)
+          # Games with Output Root claim are bound to L2 block number, whereas games with Super Root claim
+          # (OP Stack Upgrade 20) are bound to L2 timestamp
+          {l2_block_number, l2_timestamp} =
+            case DisputeGame.l2_sequence_number(g) do
+              {:block_number, block_number} -> {block_number, nil}
+              # zero timestamp means the extra data is unknown or malformed
+              {:timestamp, 0} -> {nil, nil}
+              {:timestamp, timestamp} -> {nil, DateTime.from_unix!(timestamp)}
+            end
 
           %{
             "index" => g.index,
             "game_type" => g.game_type,
             "contract_address_hash" => g.address_hash,
             "l2_block_number" => l2_block_number,
+            "l2_timestamp" => l2_timestamp,
             "created_at" => g.created_at,
             "status" => status,
             "resolved_at" => g.resolved_at
@@ -400,7 +410,7 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
           optional(any()) => any()
         }) :: map()
   def extend_block_json_response(out_json, %Block{} = block) do
-    frame_sequence = Map.get(block, :op_frame_sequence)
+    frame_sequence = ExplorerHelper.chain_type_field(block, :op_frame_sequence)
 
     if is_nil(frame_sequence) do
       out_json
